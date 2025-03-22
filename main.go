@@ -54,24 +54,25 @@ func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	fmt.Println("Connected!")
+	channel := "programming"
+	nick := "goblood"
+	password := "42"
+	joinPayload := fmt.Sprintf(`{ "cmd": "join", "channel": "%s", "nick": "%s#%s" }`, channel, nick, password)
 
+	werr := c.WriteMessage(websocket.TextMessage, []byte(joinPayload))
+
+	if werr != nil {
+		log.Println("write error:", werr)
+		return
+	}
 	for {
 		select {
 		case <-done:
 			log.Println("Connection closed by server.")
 			return
 		// TODO: should be actually ping! ticker ticks, ping pings ;
-		case t := <-ticker.C:
-			channel := "programming"
-			nick := "goblood"
-			id := "42"
-			joinPayload := fmt.Sprintf(`{ "cmd": "join", "channel": "%s", "nick": "%s#%s" }`, channel, nick, id)
-			err := c.WriteMessage(websocket.TextMessage, []byte(joinPayload))
-			if err != nil {
-				log.Println("write error:", err)
-				return
-			}
+		case <-ticker.C:
+			log.Println("Send ping here...")
 		case <-interrupt:
 			log.Println("Interrupt received, closing connection...")
 
