@@ -13,5 +13,9 @@ vet: fmt
 .PHONY:vet
 
 build: vet
-	go build -o ./target main.go
+	rm ./target/*
+	go build -o ./target
 .PHONY:build% 
+
+run: 
+	./target/bot

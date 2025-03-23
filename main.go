@@ -2,18 +2,12 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"os/signal"
-	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 // wss://hack.chat/chat-ws
-var addr = flag.String("addr", "hack.chat", "http service address")
 
 func main() {
 	flag.Parse()
@@ -22,67 +16,14 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	u := url.URL{Scheme: "wss", Host: *addr, Path: "/chat-ws"}
-	log.Printf("connecting to %s", u.String())
+	e := NewEngine()
+	go e.Start()
 
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-
-	if err != nil {
-		log.Fatal("dial:", err)
+	select {
+	case <-interrupt:
+		log.Println("Interrupt received, shutting down...")
+		e.Stop()
 	}
 
-	defer c.Close()
-
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		for {
-			_, message, err := c.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					log.Println("Connection closed gracefully")
-				} else {
-					log.Println("read error:", err)
-				}
-				return
-			}
-			fmt.Println("Message:", string(message))
-		}
-	}()
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	channel := "programming"
-	nick := "goblood"
-	password := "42"
-	joinPayload := fmt.Sprintf(`{ "cmd": "join", "channel": "%s", "nick": "%s#%s" }`, channel, nick, password)
-
-	werr := c.WriteMessage(websocket.TextMessage, []byte(joinPayload))
-
-	if werr != nil {
-		log.Println("write error:", werr)
-		return
-	}
-	for {
-		select {
-		case <-done:
-			log.Println("Connection closed by server.")
-			return
-		// TODO: should be actually ping! ticker ticks, ping pings ;
-		case <-ticker.C:
-			log.Println("Send ping here...")
-		case <-interrupt:
-			log.Println("Interrupt received, closing connection...")
-
-			// Send close message to server
-			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Bye!"))
-			if err != nil {
-				log.Println("Close error:", err)
-			}
-			return
-		}
-	}
-
+	e.hcConnection.wg.Wait()
 }
