@@ -8,7 +8,7 @@ type ServerMessageListener struct {
 	engine *Engine
 }
 
-func NewUserMessageListener(e *Engine) *ServerMessageListener {
+func NewServerMessageListener(e *Engine) *ServerMessageListener {
 	return &ServerMessageListener{
 		engine: e,
 	}

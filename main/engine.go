@@ -26,7 +26,7 @@ func NewEngine() *Engine {
 		activeUsers:     make(map[User]struct{}),
 	}
 
-	e.msgListener = NewUserMessageListener(e)
+	e.msgListener = NewServerMessageListener(e)
 	e.hcConnection = NewConnection(u.String(), e.msgListener)
 
 	return e
