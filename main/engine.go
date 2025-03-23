@@ -11,6 +11,7 @@ import (
 type Engine struct {
 	outMessageQueue chan string
 	inMessageQueue  chan string
+	activeUsers     map[User]struct{}
 	hcConnection    *Connection
 	msgListener     *ServerMessageListener
 }
@@ -22,6 +23,7 @@ func NewEngine() *Engine {
 	e := &Engine{
 		outMessageQueue: make(chan string, 256),
 		inMessageQueue:  make(chan string, 256),
+		activeUsers:     make(map[User]struct{}),
 	}
 
 	e.msgListener = NewUserMessageListener(e)
@@ -79,9 +81,12 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 	case "join":
 	case "onlineSet":
 		var users *[]User = GetUsers(jsonMessage)
-
 		for _, user := range *users {
-			fmt.Printf("Name: %s, trip: %s, hash: %s, flair: %s \n", user.Name, user.Trip, user.Hash, user.Flair)
+			e.activeUsers[user] = struct{}{}
+		}
+
+		for user, _ := range e.activeUsers {
+			log.Println("Active user: ", user.Name)
 		}
 	case "onlineAdd":
 		// userJoinedListener.notify(jsonText)
@@ -91,6 +96,7 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 		// chatMessageListener.notify(jsonText)
 	case "info":
 		// infoMessageListener.notify(jsonText)
+	case "session":
 	default:
 		log.Println("Non functional payload: ", jsonMessage)
 	}
