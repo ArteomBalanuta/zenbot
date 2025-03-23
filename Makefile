@@ -13,9 +13,10 @@ vet: fmt
 .PHONY:vet
 
 build: vet
-	rm ./target/*
-	go build -o ./target
+	rm -rf ./target/
+	mkdir ./target
+	(cd main && go build -o ../target/)
 .PHONY:build% 
 
 run: 
-	./target/bot
+	./target/main

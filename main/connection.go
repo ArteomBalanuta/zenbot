@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/gorilla/websocket"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type Connection struct {
@@ -13,11 +14,11 @@ type Connection struct {
 	wsCon       *websocket.Conn
 	connectCh   chan error
 	wg          sync.WaitGroup
-	msgListener *UserMessageListener
+	msgListener *ServerMessageListener
 	joinedRoom  bool
 }
 
-func NewConnection(url string, msgListener *UserMessageListener) *Connection {
+func NewConnection(url string, msgListener *ServerMessageListener) *Connection {
 	cInstance := &Connection{
 		url:         url,
 		connectCh:   make(chan error, 1),

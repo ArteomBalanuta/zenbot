@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -11,7 +12,7 @@ type Engine struct {
 	outMessageQueue chan string
 	inMessageQueue  chan string
 	hcConnection    *Connection
-	msgListener     *UserMessageListener
+	msgListener     *ServerMessageListener
 }
 
 func NewEngine() *Engine {
@@ -54,4 +55,44 @@ func (e *Engine) Start() {
 
 func (e *Engine) Stop() {
 	e.hcConnection.Close()
+}
+
+func (e *Engine) DispatchMessage(jsonMessage string) {
+	// Parse into a map
+	var data map[string]interface{}
+	err := json.Unmarshal([]byte(jsonMessage), &data)
+	if err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return
+	}
+
+	// Extract "cmd"
+	cmd, ok := data["cmd"].(string)
+	if !ok {
+		fmt.Println("Key 'cmd' not found or not a string")
+		return
+	}
+
+	fmt.Println("Command: ", cmd)
+
+	switch cmd {
+	case "join":
+	case "onlineSet":
+		var users *[]User = GetUsers(jsonMessage)
+
+		for _, user := range *users {
+			fmt.Printf("Name: %s, trip: %s, hash: %s, flair: %s \n", user.Name, user.Trip, user.Hash, user.Flair)
+		}
+	case "onlineAdd":
+		// userJoinedListener.notify(jsonText)
+	case "onlineRemove":
+		// userLeftListener.notify(jsonText)
+	case "chat":
+		// chatMessageListener.notify(jsonText)
+	case "info":
+		// infoMessageListener.notify(jsonText)
+	default:
+		log.Println("Non functional payload: ", jsonMessage)
+	}
+
 }
