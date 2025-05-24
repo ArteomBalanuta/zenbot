@@ -111,7 +111,7 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 	}
 }
 
-func EnqueueMessageForSending(e *Engine, message string) {
+func (e *Engine) EnqueueMessageForSending(message string) {
 	e.OutMessageQueue <- message
 }
 
