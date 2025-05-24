@@ -1,6 +1,7 @@
 package command
 
 import (
+	"log"
 	"strings"
 	"zenbot/bot/model"
 )
@@ -24,6 +25,7 @@ func NewSay(engine model.EngineInterface, chatMessage *model.ChatMessage) *Say {
 }
 
 func (u *Say) Execute() {
+	log.Println("In say executing")
 	var argArr = u.chatMessage.GetArguments()[1:]
 	str := strings.Join(argArr, " ")
 

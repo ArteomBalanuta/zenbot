@@ -21,9 +21,9 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	var chatMessage = model.FromJson(jsonText)
 
 	/* bot owns this message */
-	if u.engine.Name == chatMessage.Name {
-		return
-	}
+	// if u.engine.Name == chatMessage.Name {
+	// 	return
+	// }
 
 	var user *model.User
 	for x, _ := range u.engine.ActiveUsers {
@@ -39,13 +39,18 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	//TODO: deliver mail for user if present
 	//TODO: if afk notify; if not afk notify
 
-	if strings.HasPrefix(chatMessage.Text, u.engine.prefix) {
+	if !strings.HasPrefix(chatMessage.Text, u.engine.prefix) {
 		return
 	}
 
 	//TODO: check if authorized to run the cmd
 
 	var cmdText string = ExtractCommandText(chatMessage.Text, u.engine.prefix)
+	log.Println("Extracted cmd: ", cmdText)
+
 	var cmd Command = BuildCommand(cmdText, u.engine, chatMessage)
+	if cmd == nil {
+		return
+	}
 	cmd.Execute()
 }

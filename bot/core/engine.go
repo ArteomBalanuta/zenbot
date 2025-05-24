@@ -27,7 +27,7 @@ func NewEngine() *Engine {
 	u := url.URL{Scheme: "wss", Host: *addr, Path: "/chat-ws"}
 
 	e := &Engine{
-		prefix:   "go ",
+		prefix:   "--",
 		Channel:  "programming",
 		Name:     "gobot",
 		Password: "",
@@ -117,5 +117,8 @@ func (e *Engine) EnqueueMessageForSending(message string) {
 
 func (e *Engine) ShareMessages() {
 	msg := <-e.OutMessageQueue
-	e.HcConnection.Write(msg)
+
+	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, msg)
+
+	e.HcConnection.Write(chatPayload)
 }

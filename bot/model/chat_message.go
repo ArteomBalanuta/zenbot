@@ -10,15 +10,15 @@ type ChatMessage struct {
 	IsWhisper bool
 	Cmd       string `json:"cmd"`
 	Size      string
-	Name      string `json:"nick"`
-	Trip      string `json:"trip"`
-	Hash      string `json:"hash"`
-	Time      uint64 `json:"time"`
-	Channel   string `json:"channel"`
-	Text      string `json:"text"`
-	Mod       bool   `json:"mod"`
-	Flair     string `json:"flair"`
-	Color     string `json:"color"`
+	Name      string      `json:"nick"`
+	Trip      string      `json:"trip"`
+	Hash      string      `json:"hash"`
+	Time      uint64      `json:"time"`
+	Channel   string      `json:"channel"`
+	Text      string      `json:"text"`
+	Mod       bool        `json:"mod"`
+	Flair     interface{} `json:"flair"`
+	Color     string      `json:"color"`
 }
 
 func FromJson(jsonText string) *ChatMessage {
