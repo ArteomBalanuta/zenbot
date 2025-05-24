@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"log"
@@ -9,20 +9,19 @@ import (
 )
 
 type Connection struct {
-	// con       *Connection
 	url         string
 	wsCon       *websocket.Conn
 	connectCh   chan error
-	wg          sync.WaitGroup
-	msgListener *ServerMessageListener
+	Wg          sync.WaitGroup
+	msgListener *CoreListener
 	joinedRoom  bool
 }
 
-func NewConnection(url string, msgListener *ServerMessageListener) *Connection {
+func NewConnection(url string, coreListener *CoreListener) *Connection {
 	cInstance := &Connection{
 		url:         url,
 		connectCh:   make(chan error, 1),
-		msgListener: msgListener,
+		msgListener: coreListener,
 		joinedRoom:  false,
 	}
 
@@ -30,7 +29,7 @@ func NewConnection(url string, msgListener *ServerMessageListener) *Connection {
 }
 
 func (c *Connection) Connect() {
-	defer c.wg.Done()
+	defer c.Wg.Done()
 	wc, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	c.wsCon = wc
 	c.connectCh <- err
@@ -39,12 +38,12 @@ func (c *Connection) Connect() {
 	}
 	close(c.connectCh) // Always close the channel after sending the result
 
-	c.wg.Add(1)
+	c.Wg.Add(1)
 	go c.ReadMessages()
 	go c.SendPing() // we dont increment c.wg as it is secondary thread!
 }
 
-func (c *Connection) IsConnected() bool {
+func (c *Connection) IsWsConnected() bool {
 	if err, ok := <-c.connectCh; ok == false || err != nil {
 		log.Fatal("Failed to connect:", err)
 		return false
@@ -55,7 +54,7 @@ func (c *Connection) IsConnected() bool {
 }
 
 func (c *Connection) SendPing() {
-	defer c.wg.Done()
+	defer c.Wg.Done()
 
 	seconds15, _ := time.ParseDuration("15s")
 	ticker := time.NewTicker(seconds15)
@@ -74,7 +73,7 @@ func (c *Connection) SendPing() {
 }
 
 func (c *Connection) ReadMessages() {
-	defer c.wg.Done()
+	defer c.Wg.Done()
 	for {
 		_, message, err := c.wsCon.ReadMessage()
 		if err != nil {
@@ -85,7 +84,7 @@ func (c *Connection) ReadMessages() {
 			}
 			break
 		}
-		c.msgListener.notify(string(message))
+		c.msgListener.Notify(string(message))
 	}
 }
 

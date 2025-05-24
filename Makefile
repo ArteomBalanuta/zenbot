@@ -15,8 +15,8 @@ vet: fmt
 build: vet
 	rm -rf ./target/
 	mkdir ./target
-	(cd main && go build -o ../target/)
+	go build -o ./target/
 .PHONY:build% 
 
 run: 
-	./target/main
+	./target/zenbot

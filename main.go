@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"zenbot/bot/core"
 )
 
 // wss://hack.chat/chat-ws
@@ -16,7 +17,7 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	e := NewEngine()
+	e := core.NewEngine()
 	go e.Start()
 
 	select {
@@ -25,5 +26,5 @@ func main() {
 		e.Stop()
 	}
 
-	e.hcConnection.wg.Wait()
+	e.HcConnection.Wg.Wait()
 }
