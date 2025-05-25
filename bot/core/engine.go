@@ -2,10 +2,10 @@ package core
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"net/url"
+	"zenbot/bot/config"
 	"zenbot/bot/model"
 )
 
@@ -22,15 +22,19 @@ type Engine struct {
 	ChatMessageListener *ChatMessageListener
 }
 
-func NewEngine() *Engine {
-	addr := flag.String("addr", "hack.chat", "http service address")
-	u := url.URL{Scheme: "wss", Host: *addr, Path: "/chat-ws"}
+func NewEngine(c *config.Config) *Engine {
+
+	u, err := url.Parse(c.WebsocketUrl)
+	if err != nil {
+		log.Fatalln("Can't parse websocket URL:", c.WebsocketUrl)
+		panic("Error parsing Websocket URL")
+	}
 
 	e := &Engine{
-		prefix:   "--",
-		Channel:  "programming",
-		Name:     "gobot",
-		Password: "",
+		prefix:   c.CmdPrefix,
+		Channel:  c.Channel,
+		Name:     c.Name,
+		Password: c.Password,
 
 		OutMessageQueue: make(chan string, 256),
 		ActiveUsers:     make(map[model.User]struct{}),

@@ -46,8 +46,6 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	//TODO: check if authorized to run the cmd
 
 	var cmdText string = ExtractCommandText(chatMessage.Text, u.engine.prefix)
-	log.Println("Extracted cmd: ", cmdText)
-
 	var cmd Command = BuildCommand(cmdText, u.engine, chatMessage)
 	if cmd == nil {
 		return

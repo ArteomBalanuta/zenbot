@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"zenbot/bot/config"
 	"zenbot/bot/core"
 )
 
@@ -17,7 +18,8 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	e := core.NewEngine()
+	c := config.SetupConfig()
+	e := core.NewEngine(c)
 	go e.Start()
 
 	select {

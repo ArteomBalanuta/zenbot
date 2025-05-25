@@ -13,6 +13,7 @@ func ExtractCommandText(text, prefix string) string {
 
 	// Find the first word after the prefix (split on whitespace)
 	fields := strings.Fields(afterPrefix)
+	log.Println("Extracted cmd: ", fields[0])
 
 	return fields[0]
 }
