@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"zenbot/bot/config"
 	"zenbot/bot/model"
+	"zenbot/bot/service"
 )
 
 type Engine struct {
@@ -20,6 +21,8 @@ type Engine struct {
 	HcConnection        *Connection
 	CoreListener        *CoreListener
 	ChatMessageListener *ChatMessageListener
+
+	SecurityService *service.SecurityService
 }
 
 func NewEngine(c *config.Config) *Engine {
@@ -42,6 +45,8 @@ func NewEngine(c *config.Config) *Engine {
 
 	e.CoreListener = NewCoreListener(e)
 	e.ChatMessageListener = NewChatMessageListener(e)
+
+	e.SecurityService = service.NewSecurityService()
 
 	e.HcConnection = NewConnection(u.String(), e.CoreListener)
 

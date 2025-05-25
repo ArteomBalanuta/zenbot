@@ -17,6 +17,8 @@ func NewChatMessageListener(e *Engine) *ChatMessageListener {
 }
 
 func (u *ChatMessageListener) Notify(jsonText string) {
+	engine := u.engine
+
 	log.Println("chat json message: ", jsonText)
 	var chatMessage = model.FromJson(jsonText)
 
@@ -25,28 +27,31 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	// 	return
 	// }
 
-	var user *model.User
-	for x, _ := range u.engine.ActiveUsers {
-		if strings.EqualFold(u.engine.Name, chatMessage.Name) {
-			user = &x
+	var author *model.User
+	for x, _ := range engine.ActiveUsers {
+		if strings.EqualFold(x.Name, chatMessage.Name) {
+			author = &x
 			break
 		}
 	}
 
-	//TODO: log somewhere
-	log.Println("log author of chatmsg: ", user)
-
 	//TODO: deliver mail for user if present
 	//TODO: if afk notify; if not afk notify
 
-	if !strings.HasPrefix(chatMessage.Text, u.engine.prefix) {
+	isCommand := strings.HasPrefix(chatMessage.Text, engine.prefix)
+	if !isCommand {
 		return
 	}
 
-	//TODO: check if authorized to run the cmd
+	var cmdText string = ParseCommandText(chatMessage.Text, engine.prefix)
+	if !engine.SecurityService.IsAuthorized(author) {
+		log.Printf("User is [NOT] Authorized to run command: [%s], hash: %s, trip: %s, name: %s", cmdText, author.Hash, author.Trip, author.Name)
+		return
+	}
 
-	var cmdText string = ExtractCommandText(chatMessage.Text, u.engine.prefix)
-	var cmd Command = BuildCommand(cmdText, u.engine, chatMessage)
+	log.Printf("User [IS] whitelisted, hash: %s, trip: %s, name: %s", author.Hash, author.Trip, author.Name)
+
+	var cmd Command = BuildCommand(cmdText, engine, chatMessage)
 	if cmd == nil {
 		return
 	}
