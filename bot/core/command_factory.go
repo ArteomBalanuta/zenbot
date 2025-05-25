@@ -41,9 +41,12 @@ func RegisterCommand[T any](constructor func() Command) {
 
 func BuildCommand(alias string, e *Engine, msg *model.ChatMessage) Command {
 
-	// TODO: Move into EnabledCommands() somewhere at engine or config initialization!
+	// TODO: Move into EnabledCommands() somewhere to engine or config initialization!
 	RegisterCommand[command.Say](func() Command {
 		return command.NewSay(e, msg)
+	})
+	RegisterCommand[command.SayTwice](func() Command {
+		return command.NewSayTwice(e, msg)
 	})
 
 	command := registry[alias]
