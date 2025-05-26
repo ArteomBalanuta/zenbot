@@ -3,6 +3,7 @@ package core
 import (
 	"log"
 	"strings"
+	"zenbot/bot/contracts"
 	"zenbot/bot/model"
 )
 
@@ -44,7 +45,7 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	}
 
 	var cmdText string = ParseCommandText(chatMessage.Text, engine.prefix)
-	var cmd Command = BuildCommand(cmdText, engine, chatMessage)
+	var cmd contracts.Command = BuildCommand(cmdText, engine, chatMessage)
 	if cmd == nil {
 		log.Printf("Command: %s, not found. ", cmdText)
 		return

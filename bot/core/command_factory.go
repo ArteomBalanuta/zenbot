@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"zenbot/bot/command"
+	"zenbot/bot/contracts"
 	"zenbot/bot/model"
 )
 
@@ -19,12 +20,12 @@ func ParseCommandText(text, prefix string) string {
 type StructMetadata struct {
 	Type reflect.Type
 	Info string
-	fc   func() Command
+	fc   func() contracts.Command
 }
 
 var EnabledCommands = map[string]StructMetadata{}
 
-func RegisterCommand[T any](constructor func() Command) {
+func RegisterCommand[T any](constructor func() contracts.Command) {
 	var zero T
 	t := reflect.TypeOf(zero)
 
@@ -39,12 +40,12 @@ func RegisterCommand[T any](constructor func() Command) {
 	}
 }
 
-func BuildCommand(alias string, e *Engine, msg *model.ChatMessage) Command {
+func BuildCommand(alias string, e *Engine, msg *model.ChatMessage) contracts.Command {
 	// TODO: Move into EnabledCommands() somewhere to engine or config initialization!
-	RegisterCommand[command.Say](func() Command {
+	RegisterCommand[command.Say](func() contracts.Command {
 		return command.NewSay(e, msg)
 	})
-	RegisterCommand[command.SayTwice](func() Command {
+	RegisterCommand[command.SayTwice](func() contracts.Command {
 		return command.NewSayTwice(e, msg)
 	})
 

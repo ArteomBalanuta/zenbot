@@ -3,6 +3,7 @@ package command
 import (
 	"log"
 	"strings"
+	"zenbot/bot/contracts"
 	"zenbot/bot/model"
 )
 
@@ -10,11 +11,11 @@ type SayTwice struct {
 	Aliases     [10]string `aliases:"sudosay"`
 	AccessLevel model.Role
 
-	engine      model.EngineInterface
+	engine      contracts.EngineInterface
 	chatMessage *model.ChatMessage
 }
 
-func NewSayTwice(engine model.EngineInterface, chatMessage *model.ChatMessage) *SayTwice {
+func NewSayTwice(engine contracts.EngineInterface, chatMessage *model.ChatMessage) *SayTwice {
 	return &SayTwice{
 		Aliases:     [10]string{},
 		AccessLevel: model.ADMIN,

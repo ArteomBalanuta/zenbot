@@ -3,6 +3,7 @@ package command
 import (
 	"log"
 	"strings"
+	"zenbot/bot/contracts"
 	"zenbot/bot/model"
 )
 
@@ -10,11 +11,11 @@ type Say struct {
 	Aliases     [10]string `aliases:"say"`
 	AccessLevel model.Role
 
-	engine      model.EngineInterface
+	engine      contracts.EngineInterface
 	chatMessage *model.ChatMessage
 }
 
-func NewSay(engine model.EngineInterface, chatMessage *model.ChatMessage) *Say {
+func NewSay(engine contracts.EngineInterface, chatMessage *model.ChatMessage) *Say {
 	return &Say{
 		Aliases:     [10]string{"say", "s"}, //TODO: add check against this
 		AccessLevel: model.USER,             //TODO: add check against this

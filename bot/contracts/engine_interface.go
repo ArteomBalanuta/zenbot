@@ -1,4 +1,4 @@
-package model
+package contracts
 
 type EngineInterface interface {
 	EnqueueMessageForSending(msg string)
