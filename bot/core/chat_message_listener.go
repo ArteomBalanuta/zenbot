@@ -45,6 +45,10 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 
 	var cmdText string = ParseCommandText(chatMessage.Text, engine.prefix)
 	var cmd Command = BuildCommand(cmdText, engine, chatMessage)
+	if cmd == nil {
+		log.Printf("Command: %s, not found. ", cmdText)
+		return
+	}
 
 	if !engine.SecurityService.IsAuthorized(author, cmd.GetRole()) {
 		log.Printf("User is [NOT] Authorized to run command: [%s], hash: %s, trip: %s, name: %s", cmdText, author.Hash, author.Trip, author.Name)
@@ -52,9 +56,5 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	}
 
 	log.Printf("User [IS] whitelisted, hash: %s, trip: %s, name: %s", author.Hash, author.Trip, author.Name)
-
-	if cmd == nil {
-		return
-	}
 	cmd.Execute()
 }
