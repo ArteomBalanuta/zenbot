@@ -46,7 +46,7 @@ func NewEngine(c *config.Config) *Engine {
 	e.CoreListener = NewCoreListener(e)
 	e.ChatMessageListener = NewChatMessageListener(e)
 
-	e.SecurityService = service.NewSecurityService()
+	e.SecurityService = service.NewSecurityService(c)
 
 	e.HcConnection = NewConnection(u.String(), e.CoreListener)
 

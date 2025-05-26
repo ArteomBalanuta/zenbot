@@ -31,3 +31,7 @@ func (u *Say) Execute() {
 
 	u.engine.EnqueueMessageForSending(str)
 }
+
+func (u *Say) GetRole() *model.Role {
+	return &u.AccessLevel
+}

@@ -20,6 +20,6 @@ var roleName = map[Role]string{
 	PEST:      "Pest",
 }
 
-func (role Role) String() string {
-	return roleName[role]
+func (role *Role) String() string {
+	return roleName[*role]
 }

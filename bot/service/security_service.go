@@ -1,33 +1,39 @@
 package service
 
 import (
+	"log"
+	"zenbot/bot/config"
 	"zenbot/bot/model"
 )
 
 type SecurityService struct {
-	WhitelistedTrips []string
+	AdminTrips []string
 }
 
-func NewSecurityService() *SecurityService {
-	var trips []string = []string{"595754"}
+func NewSecurityService(c *config.Config) *SecurityService {
 	return &SecurityService{
-		WhitelistedTrips: trips,
+		AdminTrips: c.AdminTrips,
 	}
 }
 
 func (s *SecurityService) AuthorizeUser(u *model.User) {
-	s.WhitelistedTrips = append(s.WhitelistedTrips, u.Trip)
+	s.AdminTrips = append(s.AdminTrips, u.Trip)
 }
 
 func (s *SecurityService) AuthorizeTrip(trip string) {
-	s.WhitelistedTrips = append(s.WhitelistedTrips, trip)
+	s.AdminTrips = append(s.AdminTrips, trip)
 }
 
-func (s *SecurityService) IsAuthorized(u *model.User) bool {
-	for _, v := range s.WhitelistedTrips {
+func (s *SecurityService) IsAuthorized(u *model.User, r *model.Role) bool {
+	for _, v := range s.AdminTrips {
 		if v == u.Trip {
 			return true
 		}
 	}
-	return false
+
+	log.Printf("Command role: %d, text: %s", int(*r), r.String())
+
+	/* gonna have a place with to store/check against users permission */
+	ur := model.TRUSTED
+	return int(ur) <= int(*r)
 }
