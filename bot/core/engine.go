@@ -16,11 +16,15 @@ type Engine struct {
 	Name     string
 	Password string
 
-	OutMessageQueue     chan string
-	ActiveUsers         map[model.User]struct{}
-	HcConnection        *Connection
-	CoreListener        *CoreListener
-	ChatMessageListener *ChatMessageListener
+	OutMessageQueue chan string
+	ActiveUsers     map[*model.User]struct{}
+	HcConnection    *Connection
+
+	CoreListener       *CoreListener
+	OnlineSetListener  *OnlineSetListener
+	UserJoinedListener *UserJoinedListener
+	UserChatListener   *UserChatListener
+	UserLeftListener   *UserLeftListener
 
 	SecurityService *service.SecurityService
 }
@@ -40,13 +44,15 @@ func NewEngine(c *config.Config) *Engine {
 		Password: c.Password,
 
 		OutMessageQueue: make(chan string, 256),
-		ActiveUsers:     make(map[model.User]struct{}),
+		ActiveUsers:     make(map[*model.User]struct{}),
 	}
+	e.SecurityService = service.NewSecurityService(c)
 
 	e.CoreListener = NewCoreListener(e)
-	e.ChatMessageListener = NewChatMessageListener(e)
-
-	e.SecurityService = service.NewSecurityService(c)
+	e.UserChatListener = NewUserChatListener(e)
+	e.OnlineSetListener = NewOnlineSetListener(e)
+	e.UserJoinedListener = NewUserJoinedListener(e)
+	e.UserLeftListener = NewUserLeftListener(e)
 
 	e.HcConnection = NewConnection(u.String(), e.CoreListener)
 
@@ -93,30 +99,23 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 		return
 	}
 
-	fmt.Println("Command: ", cmd)
+	fmt.Println("Command:", cmd)
 
 	switch cmd {
 	case "join":
 	case "onlineSet":
-		var users *[]model.User = model.GetUsers(jsonMessage)
-		for _, user := range *users {
-			e.ActiveUsers[user] = struct{}{}
-		}
-
-		for user, _ := range e.ActiveUsers {
-			log.Println("Active user: ", user.Name)
-		}
+		e.OnlineSetListener.Notify(jsonMessage)
 	case "onlineAdd":
-		// userJoinedListener.notify(jsonText)
+		e.UserJoinedListener.Notify(jsonMessage)
 	case "onlineRemove":
-		// userLeftListener.notify(jsonText)
+		e.UserLeftListener.Notify(jsonMessage)
 	case "chat":
-		e.ChatMessageListener.Notify(jsonMessage)
+		e.UserChatListener.Notify(jsonMessage)
 	case "info":
-		// infoMessageListener.notify(jsonText)
+		log.Printf("info: %s", jsonMessage)
 	case "session":
 	default:
-		log.Println("Non functional payload: ", jsonMessage)
+		log.Printf("Non functional payload: %s", jsonMessage)
 	}
 }
 
@@ -130,4 +129,17 @@ func (e *Engine) ShareMessages() {
 	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, msg)
 
 	e.HcConnection.Write(chatPayload)
+}
+
+func (e *Engine) AddActiveUser(joined *model.User) {
+	e.ActiveUsers[joined] = struct{}{}
+}
+
+func (e *Engine) RemoveActiveUser(left *model.User) {
+	for u := range e.ActiveUsers {
+		if u.Name == left.Name {
+			delete(e.ActiveUsers, u)
+			break
+		}
+	}
 }

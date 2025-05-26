@@ -7,17 +7,17 @@ import (
 	"zenbot/bot/model"
 )
 
-type ChatMessageListener struct {
+type UserChatListener struct {
 	engine *Engine
 }
 
-func NewChatMessageListener(e *Engine) *ChatMessageListener {
-	return &ChatMessageListener{
+func NewUserChatListener(e *Engine) *UserChatListener {
+	return &UserChatListener{
 		engine: e,
 	}
 }
 
-func (u *ChatMessageListener) Notify(jsonText string) {
+func (u *UserChatListener) Notify(jsonText string) {
 	engine := u.engine
 
 	log.Println("chat json message: ", jsonText)
@@ -29,9 +29,9 @@ func (u *ChatMessageListener) Notify(jsonText string) {
 	// }
 
 	var author *model.User
-	for x, _ := range engine.ActiveUsers {
-		if strings.EqualFold(x.Name, chatMessage.Name) {
-			author = &x
+	for au, _ := range engine.ActiveUsers {
+		if strings.EqualFold(au.Name, chatMessage.Name) {
+			author = au
 			break
 		}
 	}

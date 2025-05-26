@@ -19,10 +19,10 @@ type User struct {
 	IsBot   bool        `json:"isBot"`
 }
 
-func GetUsers(jsonData string) *[]User {
+func GetUsers(jsonData string) []*User {
 	// Define the wrapper structure
 	var result struct {
-		Users []User `json:"Users"`
+		Users []*User `json:"Users"`
 	}
 
 	// Unmarshal the JSON into the struct
@@ -32,5 +32,19 @@ func GetUsers(jsonData string) *[]User {
 		return nil
 	}
 
-	return &result.Users
+	return result.Users
 }
+
+func GetUser(jsonData string) (*User, error) {
+	var user User
+	// Unmarshal the JSON into the struct
+	err := json.Unmarshal([]byte(jsonData), &user)
+	return &user, err
+}
+
+/*
+online add: {"cmd":"onlineAdd","nick":"blahuser","trip":"","uType":"user","hash":"1EaG3s9EQge89i2","level":100,"userid":143778215917,"isBot":false,"color":"e6ed5e","flair":false,"channel":"programming","time":1748291833145}
+Incoming message:  {"cmd":"info","channel":"programming","from":"blahuser","to":8710674673714,"text":"blahuser whispered: this is whisper text","type":"whisper","trip":"null","time":1748291847911}
+info: {"cmd":"info","channel":"programming","from":"blahuser","to":8710674673714,"text":"blahuser whispered: this is whisper text","type":"whisper","trip":"null","time":1748291847911}
+removed: {"cmd":"onlineRemove","nick":"blahuser","userid":143778215917,"time":1748291856499}
+*/

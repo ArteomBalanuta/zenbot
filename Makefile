@@ -20,3 +20,7 @@ build: vet
 
 run: 
 	./target/zenbot
+
+test:
+	go test -v ./...
+.PHONY: test
