@@ -77,6 +77,8 @@ func (e *Engine) Start() {
 			break
 		}
 	}
+
+	go e.StartSharingMessages()
 }
 
 func (e *Engine) Stop() {
@@ -123,12 +125,13 @@ func (e *Engine) EnqueueMessageForSending(message string) {
 	e.OutMessageQueue <- message
 }
 
-func (e *Engine) ShareMessages() {
-	msg := <-e.OutMessageQueue
-
-	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, msg)
-
-	e.HcConnection.Write(chatPayload)
+func (e *Engine) StartSharingMessages() {
+	go func() {
+		for msg := range e.OutMessageQueue {
+			chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, msg)
+			e.HcConnection.Write(chatPayload)
+		}
+	}()
 }
 
 func (e *Engine) AddActiveUser(joined *model.User) {

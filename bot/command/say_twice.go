@@ -30,7 +30,8 @@ func (u *SayTwice) Execute() {
 	var argArr = u.chatMessage.GetArguments()[1:]
 	str := strings.Join(argArr, " ")
 
-	// u.engine.EnqueueMessageForSending(str)
+	u.engine.EnqueueMessageForSending(str)
+	u.engine.EnqueueMessageForSending(str)
 	u.engine.EnqueueMessageForSending(str)
 }
 
