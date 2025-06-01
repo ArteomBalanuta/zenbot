@@ -17,6 +17,7 @@ func (u *SayTwice) GetAliases() []string {
 }
 
 func (u *SayTwice) NewInstance(engine contracts.EngineInterface, chatMessage *model.ChatMessage) contracts.Command {
+	println("New SayTwice instance")
 	return &SayTwice{
 		AccessLevel: model.ADMIN,
 		engine:      engine,

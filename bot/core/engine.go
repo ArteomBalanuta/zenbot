@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"zenbot/bot/command"
 	"zenbot/bot/config"
 	"zenbot/bot/model"
 	"zenbot/bot/service"
@@ -77,6 +78,9 @@ func (e *Engine) Start() {
 			break
 		}
 	}
+
+	RegisterCommand[*command.SayTwice](e)
+	RegisterCommand[*command.Say](e)
 
 	go e.StartSharingMessages()
 }

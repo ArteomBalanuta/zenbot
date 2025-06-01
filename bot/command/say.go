@@ -22,6 +22,7 @@ func (u *Say) GetRole() *model.Role {
 }
 
 func (u *Say) NewInstance(engine contracts.EngineInterface, chatMessage *model.ChatMessage) contracts.Command {
+	println("New instance")
 	return &Say{
 		AccessLevel: model.USER,
 		engine:      engine,
