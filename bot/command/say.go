@@ -8,18 +8,22 @@ import (
 )
 
 type Say struct {
-	Aliases     [10]string `aliases:"say"`
 	AccessLevel model.Role
-
 	engine      contracts.EngineInterface
 	chatMessage *model.ChatMessage
 }
 
-func NewSay(engine contracts.EngineInterface, chatMessage *model.ChatMessage) *Say {
-	return &Say{
-		Aliases:     [10]string{"say", "s"}, //TODO: add check against this
-		AccessLevel: model.USER,             //TODO: add check against this
+func (u *Say) GetAliases() []string {
+	return []string{"say", "echo"}
+}
 
+func (u *Say) GetRole() *model.Role {
+	return &u.AccessLevel
+}
+
+func (u *Say) NewInstance(engine contracts.EngineInterface, chatMessage *model.ChatMessage) contracts.Command {
+	return &Say{
+		AccessLevel: model.USER,
 		engine:      engine,
 		chatMessage: chatMessage,
 	}
@@ -31,8 +35,4 @@ func (u *Say) Execute() {
 	str := strings.Join(argArr, " ")
 
 	u.engine.EnqueueMessageForSending(str)
-}
-
-func (u *Say) GetRole() *model.Role {
-	return &u.AccessLevel
 }

@@ -1,40 +1,38 @@
 package command
 
 import (
-	"log"
 	"strings"
 	"zenbot/bot/contracts"
 	"zenbot/bot/model"
 )
 
 type SayTwice struct {
-	Aliases     [10]string `aliases:"sudosay"`
 	AccessLevel model.Role
-
 	engine      contracts.EngineInterface
 	chatMessage *model.ChatMessage
 }
 
-func NewSayTwice(engine contracts.EngineInterface, chatMessage *model.ChatMessage) *SayTwice {
-	return &SayTwice{
-		Aliases:     [10]string{},
-		AccessLevel: model.ADMIN,
+func (u *SayTwice) GetAliases() []string {
+	return []string{"sudosay"}
+}
 
+func (u *SayTwice) NewInstance(engine contracts.EngineInterface, chatMessage *model.ChatMessage) contracts.Command {
+	return &SayTwice{
+		AccessLevel: model.ADMIN,
 		engine:      engine,
 		chatMessage: chatMessage,
 	}
 }
 
+func (u *SayTwice) GetRole() *model.Role {
+	return &u.AccessLevel
+}
+
 func (u *SayTwice) Execute() {
-	log.Println("In say executing")
 	var argArr = u.chatMessage.GetArguments()[1:]
 	str := strings.Join(argArr, " ")
 
 	u.engine.EnqueueMessageForSending(str)
 	u.engine.EnqueueMessageForSending(str)
 	u.engine.EnqueueMessageForSending(str)
-}
-
-func (u *SayTwice) GetRole() *model.Role {
-	return &u.AccessLevel
 }
