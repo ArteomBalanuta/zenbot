@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"zenbot/bot/config"
 	"zenbot/bot/core"
+	"zenbot/bot/repository"
 )
 
 // wss://hack.chat/chat-ws
@@ -19,7 +20,11 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 
 	c := config.SetupConfig()
-	e := core.NewEngine(c)
+	db, err := repository.NewRepository(c.DbPath)
+	if err != nil {
+		log.Fatal("Can't connect to db: ", c.DbPath)
+	}
+	e := core.NewEngine(c, db)
 	go e.Start()
 
 	select {

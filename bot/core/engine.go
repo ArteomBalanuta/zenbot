@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"strings"
 	"zenbot/bot/command"
 	"zenbot/bot/config"
 	"zenbot/bot/model"
+	"zenbot/bot/repository"
 	"zenbot/bot/service"
 )
 
@@ -20,6 +22,7 @@ type Engine struct {
 	OutMessageQueue chan string
 	ActiveUsers     map[*model.User]struct{}
 	HcConnection    *Connection
+	Repository      *repository.Repository
 
 	CoreListener       *CoreListener
 	OnlineSetListener  *OnlineSetListener
@@ -30,7 +33,7 @@ type Engine struct {
 	SecurityService *service.SecurityService
 }
 
-func NewEngine(c *config.Config) *Engine {
+func NewEngine(c *config.Config, repository *repository.Repository) *Engine {
 
 	u, err := url.Parse(c.WebsocketUrl)
 	if err != nil {
@@ -47,6 +50,8 @@ func NewEngine(c *config.Config) *Engine {
 		OutMessageQueue: make(chan string, 256),
 		ActiveUsers:     make(map[*model.User]struct{}),
 	}
+
+	e.Repository = repository
 	e.SecurityService = service.NewSecurityService(c)
 
 	e.CoreListener = NewCoreListener(e)
@@ -132,10 +137,25 @@ func (e *Engine) EnqueueMessageForSending(message string) {
 func (e *Engine) StartSharingMessages() {
 	go func() {
 		for msg := range e.OutMessageQueue {
-			chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, msg)
+			chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(msg))
+
+			log.Println("sending: ", chatPayload)
 			e.HcConnection.Write(chatPayload)
 		}
 	}()
+}
+
+func escapeJSON(input string) string {
+	escaped, _ := json.Marshal(input)
+	// Remove the surrounding quotes
+	s := string(escaped[1 : len(escaped)-1])
+
+	// Restore specific whitespace characters
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	s = strings.ReplaceAll(s, `\t`, "\t")
+	s = strings.ReplaceAll(s, `\r`, "\r")
+
+	return s
 }
 
 func (e *Engine) AddActiveUser(joined *model.User) {
@@ -149,4 +169,14 @@ func (e *Engine) RemoveActiveUser(left *model.User) {
 			break
 		}
 	}
+}
+
+func (e *Engine) GetUserByName(name string) *model.User {
+	for u := range e.ActiveUsers {
+		if u.Name == name {
+			return u
+		}
+	}
+
+	return nil
 }

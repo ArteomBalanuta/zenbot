@@ -23,10 +23,12 @@ func (u *UserChatListener) Notify(jsonText string) {
 	log.Println("chat json message: ", jsonText)
 	var chatMessage = model.FromJson(jsonText)
 
-	/* bot owns this message */
-	// if u.engine.Name == chatMessage.Name {
-	// 	return
-	// }
+	engine.Repository.LogMessage(chatMessage.Text, chatMessage.Name, chatMessage.Hash, chatMessage.Text, engine.Channel)
+
+	/* bot owns this message so we ignore it */
+	if u.engine.Name == chatMessage.Name {
+		return
+	}
 
 	var author *model.User
 	for au, _ := range engine.ActiveUsers {

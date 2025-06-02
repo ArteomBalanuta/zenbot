@@ -17,6 +17,7 @@ type Config struct {
 	AutoReconnect                     bool     `toml:"autoReconnect"`
 	ConnectionHeartbitIntervalMinutes int      `toml:"healthCheckInterval"`
 	AutorunCommands                   []string `toml:"autorunCommands"`
+	DbPath                            string   `toml:"dbPath"`
 }
 
 func SetupConfig() *Config {

@@ -16,7 +16,11 @@ func (l *UserLeftListener) Notify(jsonMessage string) {
 		fmt.Println("Coudn't Remove active user, Error:", err)
 		return
 	}
-	l.e.RemoveActiveUser(u)
+
+	usr := l.e.GetUserByName(u.Name)
+	l.e.Repository.LogPresence(usr.Trip, usr.Name, usr.Hash, "left", l.e.Channel)
+
+	l.e.RemoveActiveUser(usr)
 	log.Printf("User left: %s", u.Name)
 }
 

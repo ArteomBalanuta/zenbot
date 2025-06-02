@@ -17,6 +17,7 @@ func (l *UserJoinedListener) Notify(jsonMessage string) {
 		return
 	}
 	l.e.AddActiveUser(u)
+	l.e.Repository.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.Channel)
 	log.Printf("User joined: %s", u.Name)
 }
 

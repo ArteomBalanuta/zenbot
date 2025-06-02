@@ -33,7 +33,7 @@ func (u *Say) NewInstance(engine contracts.EngineInterface, chatMessage *model.C
 func (u *Say) Execute() {
 	log.Println("In say executing")
 	var argArr = u.chatMessage.GetArguments()[1:]
-	str := strings.Join(argArr, " ")
+	str := strings.Join(argArr, " ") // TODO: fix - make sure \n \t are preserved!
 
 	u.engine.EnqueueMessageForSending(str)
 }
