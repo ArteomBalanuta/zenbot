@@ -3,7 +3,6 @@ package core
 import (
 	"log"
 	"strings"
-	"zenbot/bot/contracts"
 	"zenbot/bot/model"
 )
 
@@ -47,7 +46,7 @@ func (u *UserChatListener) Notify(jsonText string) {
 	}
 
 	var cmdText string = ParseCommandText(chatMessage.Text, engine.prefix)
-	var cmd contracts.Command = BuildCommand(cmdText, engine, chatMessage)
+	var cmd Command = BuildCommand(cmdText, engine, chatMessage)
 	if cmd == nil {
 		log.Printf("Command: %s, not found. ", cmdText)
 		return
@@ -60,4 +59,16 @@ func (u *UserChatListener) Notify(jsonText string) {
 
 	log.Printf("User [IS] whitelisted, hash: %s, trip: %s, name: %s", author.Hash, author.Trip, author.Name)
 	cmd.Execute()
+}
+
+func BuildCommand(alias string, e *Engine, msg *model.ChatMessage) Command {
+	command, exists := e.EnabledCommands[alias]
+	if !exists {
+		log.Println("Unknown command")
+	} else {
+		log.Println("Returning command: ", alias)
+		return command.Command(msg)
+	}
+
+	return nil
 }

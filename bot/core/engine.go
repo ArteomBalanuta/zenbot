@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/url"
 	"strings"
-	"zenbot/bot/command"
-	"zenbot/bot/config"
+
+	// "zenbot/bot/command"
 	"zenbot/bot/model"
 	"zenbot/bot/repository"
 	"zenbot/bot/service"
 )
 
 type Engine struct {
+	eType    model.EngineType
 	prefix   string
 	Channel  string
 	Name     string
@@ -31,38 +31,8 @@ type Engine struct {
 	UserLeftListener   *UserLeftListener
 
 	SecurityService *service.SecurityService
-}
 
-func NewEngine(c *config.Config, repository *repository.Repository) *Engine {
-
-	u, err := url.Parse(c.WebsocketUrl)
-	if err != nil {
-		log.Fatalln("Can't parse websocket URL:", c.WebsocketUrl)
-		panic("Error parsing Websocket URL")
-	}
-
-	e := &Engine{
-		prefix:   c.CmdPrefix,
-		Channel:  c.Channel,
-		Name:     c.Name,
-		Password: c.Password,
-
-		OutMessageQueue: make(chan string, 256),
-		ActiveUsers:     make(map[*model.User]struct{}),
-	}
-
-	e.Repository = repository
-	e.SecurityService = service.NewSecurityService(c)
-
-	e.CoreListener = NewCoreListener(e)
-	e.UserChatListener = NewUserChatListener(e)
-	e.OnlineSetListener = NewOnlineSetListener(e)
-	e.UserJoinedListener = NewUserJoinedListener(e)
-	e.UserLeftListener = NewUserLeftListener(e)
-
-	e.HcConnection = NewConnection(u.String(), e.CoreListener)
-
-	return e
+	EnabledCommands map[string]CommandMetadata
 }
 
 func (e *Engine) Start() {
@@ -84,8 +54,8 @@ func (e *Engine) Start() {
 		}
 	}
 
-	RegisterCommand[*command.SayTwice](e)
-	RegisterCommand[*command.Say](e)
+	e.RegisterCommand(&List{})
+	e.RegisterCommand(&Say{})
 
 	go e.StartSharingMessages()
 }
@@ -130,8 +100,23 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 	}
 }
 
-func (e *Engine) EnqueueMessageForSending(message string) {
+func (e *Engine) SendRawMessage(message string) {
 	e.OutMessageQueue <- message
+}
+
+func (e *Engine) SendMessage(author, message string, IsWhisper bool) error {
+	if strings.TrimSpace(author) == "" {
+		return fmt.Errorf("author can't be null")
+	}
+
+	if IsWhisper {
+		message = "/whisper @" + author + " " + message
+	} else {
+		message = "@" + author + " " + message
+	}
+
+	e.OutMessageQueue <- message
+	return nil
 }
 
 func (e *Engine) StartSharingMessages() {
@@ -179,4 +164,41 @@ func (e *Engine) GetUserByName(name string) *model.User {
 	}
 
 	return nil
+}
+
+func (e *Engine) GetActiveUsers() map[*model.User]struct{} {
+	return e.ActiveUsers
+}
+
+func (e *Engine) GetChannel() string {
+	return e.Channel
+}
+
+func ParseCommandText(text, prefix string) string {
+	afterPrefix := text[len(prefix):]
+	fields := strings.Fields(afterPrefix)
+	log.Println("Extracted cmd: ", fields[0])
+
+	return fields[0]
+}
+
+type CommandMetadata struct {
+	Alias   string
+	Command func(msg *model.ChatMessage) Command
+}
+
+func (e *Engine) RegisterCommand(c Command) {
+	aliases := c.GetAliases()
+	var constructorFn = func(msg *model.ChatMessage) Command {
+		return c.NewInstance(e, msg)
+	}
+
+	for _, alias := range aliases {
+		e.EnabledCommands[alias] = CommandMetadata{
+			Alias:   alias,
+			Command: constructorFn,
+		}
+	}
+
+	fmt.Printf("Registered command with aliases: %v\n", aliases)
 }

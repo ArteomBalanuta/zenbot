@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"zenbot/bot/config"
 	"zenbot/bot/core"
+	"zenbot/bot/model"
 	"zenbot/bot/repository"
 )
 
@@ -24,7 +25,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Can't connect to db: ", c.DbPath)
 	}
-	e := core.NewEngine(c, db)
+
+	e := core.NewEngine(model.MASTER, c, db)
 	go e.Start()
 
 	select {
