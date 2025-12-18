@@ -136,9 +136,9 @@ func escapeJSON(input string) string {
 	s := string(escaped[1 : len(escaped)-1])
 
 	// Restore specific whitespace characters
-	s = strings.ReplaceAll(s, `\n`, "\n")
-	s = strings.ReplaceAll(s, `\t`, "\t")
-	s = strings.ReplaceAll(s, `\r`, "\r")
+	s = strings.ReplaceAll(s, `\n`, "\\n")
+	s = strings.ReplaceAll(s, `\t`, "\\t")
+	s = strings.ReplaceAll(s, `\r`, "\\r")
 
 	return s
 }
