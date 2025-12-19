@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"strings"
+	"sync"
 	"zenbot/internal/config"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
@@ -19,10 +20,12 @@ type Engine struct {
 	Name     string
 	Password string
 
+	engineWg *sync.WaitGroup
+
 	OutMessageQueue chan string
 	ActiveUsers     map[*model.User]struct{}
 	HcConnection    *Connection
-	Repository      *repository.Repository
+	Repository      repository.Repository
 
 	CoreListener       MessageListener
 	OnlineSetListener  MessageListener
@@ -48,7 +51,7 @@ func NewDummyListener() *DummyListener {
 	return &DummyListener{}
 }
 
-func NewEngine(etype model.EngineType, c *config.Config, repository *repository.Repository) *Engine {
+func NewEngine(etype model.EngineType, c *config.Config, repo repository.Repository) *Engine {
 	u, err := url.Parse(c.WebsocketUrl)
 	if err != nil {
 		log.Fatalln("Can't parse websocket URL:", c.WebsocketUrl)
@@ -62,33 +65,29 @@ func NewEngine(etype model.EngineType, c *config.Config, repository *repository.
 		Name:     c.Name,
 		Password: c.Password,
 
+		engineWg:        new(sync.WaitGroup),
 		EnabledCommands: make(map[string]CommandMetadata),
 
 		OutMessageQueue: make(chan string, 256),
 		ActiveUsers:     make(map[*model.User]struct{}),
 	}
 
-	if etype == model.ZOMBIE {
-		e.Repository = repository
-		e.SecurityService = service.NewSecurityService(c)
+	e.CoreListener = NewCoreListener(e)
+	e.HcConnection = NewConnection(u.String(), e.CoreListener)
 
-		e.CoreListener = NewCoreListener(e)
+	e.Repository = repo
+	e.SecurityService = service.NewSecurityService(c)
+	e.OnlineSetListener = NewOnlineSetListener(e, nil)
+
+	e.UserChatListener = NewUserChatListener(e)
+	e.UserJoinedListener = NewUserJoinedListener(e)
+	e.UserLeftListener = NewUserLeftListener(e)
+
+	if etype == model.ZOMBIE {
+		e.Repository = &repository.DummyImpl{}
 		e.UserChatListener = NewDummyListener()
-		e.OnlineSetListener = NewOnlineSetListener(e, nil)
 		e.UserJoinedListener = NewDummyListener()
 		e.UserLeftListener = NewDummyListener()
-		e.HcConnection = NewConnection(u.String(), e.CoreListener)
-	} else {
-		e.Repository = repository
-		e.SecurityService = service.NewSecurityService(c)
-
-		e.CoreListener = NewCoreListener(e)
-		e.UserChatListener = NewUserChatListener(e)
-		e.OnlineSetListener = NewOnlineSetListener(e, nil)
-		e.UserJoinedListener = NewUserJoinedListener(e)
-		e.UserLeftListener = NewUserLeftListener(e)
-
-		e.HcConnection = NewConnection(u.String(), e.CoreListener)
 	}
 
 	return e
@@ -96,7 +95,6 @@ func NewEngine(etype model.EngineType, c *config.Config, repository *repository.
 
 func (e *Engine) Start() {
 	c := e.HcConnection
-
 	c.Wg.Add(1)
 	go c.Connect()
 
@@ -116,11 +114,25 @@ func (e *Engine) Start() {
 	e.RegisterCommand(&List{})
 	e.RegisterCommand(&Say{})
 
+	e.engineWg.Add(1)
 	go e.StartSharingMessages()
+
+	e.engineWg.Wait()
+	fmt.Println("Engine WGroup stopped")
 }
 
 func (e *Engine) Stop() {
-	e.HcConnection.Close()
+	e.HcConnection.pingCancel()
+
+	err := e.HcConnection.Close()
+	if err != nil {
+		fmt.Println("Error closing connection:", err)
+		return
+	}
+	close(e.OutMessageQueue)
+
+	e.HcConnection.Wg.Wait()
+	fmt.Println("Connection WGroup finished.")
 }
 
 func (e *Engine) DispatchMessage(jsonMessage string) {
@@ -179,14 +191,13 @@ func (e *Engine) SendMessage(author, message string, IsWhisper bool) error {
 }
 
 func (e *Engine) StartSharingMessages() {
-	go func() {
-		for msg := range e.OutMessageQueue {
-			chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(msg))
+	defer e.engineWg.Done()
+	for msg := range e.OutMessageQueue {
+		chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(msg))
 
-			log.Println("sending: ", chatPayload)
-			e.HcConnection.Write(chatPayload)
-		}
-	}()
+		log.Println("sending: ", chatPayload)
+		e.HcConnection.Write(chatPayload)
+	}
 }
 
 func escapeJSON(input string) string {

@@ -44,11 +44,9 @@ func (u *List) Execute() {
 	} else {
 		c := config.SetupConfig()
 		c.Channel = channel
-
-		zombie := NewEngine(model.ZOMBIE, c, nil)
-
 		callbackChan := make(chan string, 1)
 
+		zombie := NewEngine(model.ZOMBIE, c, nil)
 		// setting callback!
 		zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *Engine) {
 			fmt.Println("########qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")
@@ -64,8 +62,10 @@ func (u *List) Execute() {
 
 		// Wait for callback result
 		select {
-		case message := <-callbackChan:
-			fmt.Println("Callback executed..", message)
+		case outMessage := <-callbackChan:
+			fmt.Println("Callback executed..", outMessage)
+			message = outMessage
+
 		case <-time.After(30 * time.Second):
 			fmt.Println("Callback timeout")
 		}
@@ -76,7 +76,6 @@ func (u *List) Execute() {
 		zombie.Stop()
 
 		zombie.HcConnection.Wg.Wait()
-
 	}
 
 	u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)

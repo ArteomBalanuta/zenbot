@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -15,6 +16,9 @@ type Connection struct {
 	Wg          sync.WaitGroup
 	msgListener MessageListener
 	joinedRoom  bool
+
+	pingCancel context.CancelFunc
+	ctxCancel  context.Context
 }
 
 func NewConnection(url string, coreListener MessageListener) *Connection {
@@ -29,7 +33,7 @@ func NewConnection(url string, coreListener MessageListener) *Connection {
 }
 
 func (c *Connection) Connect() {
-	defer c.Wg.Done()
+	defer c.Wg.Done() // decrement by 1 when func returns
 	wc, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	c.wsCon = wc
 	c.connectCh <- err
@@ -38,9 +42,13 @@ func (c *Connection) Connect() {
 	}
 	close(c.connectCh) // Always close the channel after sending the result
 
-	c.Wg.Add(1)
+	c.Wg.Add(1) // inc due to ReadMessages
 	go c.ReadMessages()
-	go c.SendPing() // we dont increment c.wg as it is secondary thread!
+
+	c.Wg.Add(1) // inc due to SendPing
+
+	c.ctxCancel, c.pingCancel = context.WithCancel(context.Background()) // using this we will stop the Pinging..
+	go c.SendPing(c.ctxCancel)
 }
 
 func (c *Connection) IsWsConnected() bool {
@@ -53,8 +61,7 @@ func (c *Connection) IsWsConnected() bool {
 	}
 }
 
-//TODO: Add Connection State Management otherwise zombie engine will crash due to their ping never stopping gracefully.
-func (c *Connection) SendPing() {
+func (c *Connection) SendPing(ctx context.Context) {
 	defer c.Wg.Done()
 
 	seconds15, _ := time.ParseDuration("15s")
@@ -65,27 +72,31 @@ func (c *Connection) SendPing() {
 	case <-ticker.C:
 		err := c.wsCon.WriteMessage(websocket.PingMessage, nil)
 		if err != nil {
-			log.Println("Error sending ping", err)
+			log.Println("Error sending ping:", err)
 			return
 		} else {
-			log.Println("Sent ping.")
+			log.Println("Successfully sent ping.")
 		}
+	case <-ctx.Done():
+		log.Println("Ping routine has been canceled!")
+		return
 	}
 }
 
 func (c *Connection) ReadMessages() {
-	defer c.Wg.Done()
+	defer c.Wg.Done() //dec when finished
 	for {
 		_, message, err := c.wsCon.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				log.Println("Connection closed gracefully")
+				log.Println("Connection closed gracefully.")
 			} else {
-				log.Println("read error:", err)
+				log.Println("reading error: ", err)
 			}
 			break
+		} else {
+			c.msgListener.Notify(string(message))
 		}
-		c.msgListener.Notify(string(message))
 	}
 }
 
