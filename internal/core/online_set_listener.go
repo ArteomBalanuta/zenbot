@@ -2,7 +2,7 @@ package core
 
 import (
 	// "log"
-	"zenbot/bot/model"
+	"zenbot/internal/model"
 )
 
 type OnlineSetListener struct {

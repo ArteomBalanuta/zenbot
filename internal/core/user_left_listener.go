@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 	"log"
-	"zenbot/bot/model"
+	"zenbot/internal/model"
 )
 
 type UserLeftListener struct {

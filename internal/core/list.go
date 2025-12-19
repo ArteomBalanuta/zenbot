@@ -1,14 +1,13 @@
 package core
 
 import (
-	"zenbot/bot/config"
-	"zenbot/bot/contracts"
-	"zenbot/bot/model"
+	"zenbot/internal/config"
+	"zenbot/internal/model"
 )
 
 type List struct {
 	AccessLevel model.Role
-	engine      contracts.EngineInterface
+	engine      *Engine
 	chatMessage *model.ChatMessage
 }
 
@@ -16,7 +15,7 @@ func (u *List) GetAliases() []string {
 	return []string{"list", "l"}
 }
 
-func (u *List) NewInstance(engine contracts.EngineInterface, chatMessage *model.ChatMessage) Command {
+func (u *List) NewInstance(engine *Engine, chatMessage *model.ChatMessage) Command {
 	return &List{
 		AccessLevel: model.ADMIN,
 		engine:      engine,

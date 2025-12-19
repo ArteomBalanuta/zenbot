@@ -3,13 +3,12 @@ package core
 import (
 	"log"
 	"strings"
-	"zenbot/bot/contracts"
-	"zenbot/bot/model"
+	"zenbot/internal/model"
 )
 
 type Say struct {
 	AccessLevel model.Role
-	engine      contracts.EngineInterface
+	engine      *Engine
 	chatMessage *model.ChatMessage
 }
 
@@ -21,7 +20,7 @@ func (u *Say) GetRole() *model.Role {
 	return &u.AccessLevel
 }
 
-func (u *Say) NewInstance(engine contracts.EngineInterface, chatMessage *model.ChatMessage) Command {
+func (u *Say) NewInstance(engine *Engine, chatMessage *model.ChatMessage) Command {
 	println("New instance")
 	return &Say{
 		AccessLevel: model.USER,

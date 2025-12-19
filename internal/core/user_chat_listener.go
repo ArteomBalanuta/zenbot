@@ -3,7 +3,7 @@ package core
 import (
 	"log"
 	"strings"
-	"zenbot/bot/model"
+	"zenbot/internal/model"
 )
 
 type UserChatListener struct {

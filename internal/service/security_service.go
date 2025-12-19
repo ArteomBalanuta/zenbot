@@ -2,8 +2,8 @@ package service
 
 import (
 	"log"
-	"zenbot/bot/config"
-	"zenbot/bot/model"
+	"zenbot/internal/config"
+	"zenbot/internal/model"
 )
 
 type SecurityService struct {

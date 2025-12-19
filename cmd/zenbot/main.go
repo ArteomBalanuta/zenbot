@@ -5,10 +5,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"zenbot/bot/config"
-	"zenbot/bot/core"
-	"zenbot/bot/model"
-	"zenbot/bot/repository"
+	"zenbot/internal/config"
+	"zenbot/internal/core"
+	"zenbot/internal/model"
+	"zenbot/internal/repository"
 )
 
 // wss://hack.chat/chat-ws
