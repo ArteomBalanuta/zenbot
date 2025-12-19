@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+	"time"
 	"zenbot/internal/config"
 	"zenbot/internal/model"
 )
@@ -29,19 +31,52 @@ func (u *List) GetRole() *model.Role {
 
 func (u *List) Execute() {
 	var argArr = u.chatMessage.GetArguments()[1:]
-	var channel = argArr[0]
+	var channel = ""
+	if len(argArr) > 0 && argArr[0] != "" {
+		channel = argArr[0]
+	}
 
 	var message = ""
-	if u.engine.GetChannel() == channel {
+	if u.engine.GetChannel() == channel || channel == "" {
 		for u := range u.engine.GetActiveUsers() {
-			message += u.Hash + u.Trip + u.Name + "\n"
+			message += "\n" + u.Hash + " | " + u.Trip + " | " + u.Name + "\n"
 		}
 	} else {
 		c := config.SetupConfig()
-		e := NewEngine(model.DUMMY, c, nil)
-		go e.Start()
-		e.HcConnection.Wg.Wait()
-		e.Stop()
+		c.Channel = channel
+
+		zombie := NewEngine(model.ZOMBIE, c, nil)
+
+		callbackChan := make(chan string, 1)
+
+		// setting callback!
+		zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *Engine) {
+			fmt.Println("########qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")
+			var message = ""
+			for u := range z.GetActiveUsers() {
+				message += "\n" + u.Hash + " | " + u.Trip + " | " + u.Name + "\n"
+			}
+
+			callbackChan <- message
+		})
+
+		go zombie.Start()
+
+		// Wait for callback result
+		select {
+		case message := <-callbackChan:
+			fmt.Println("Callback executed..", message)
+		case <-time.After(30 * time.Second):
+			fmt.Println("Callback timeout")
+		}
+
+		close(callbackChan)
+
+		// IMPORTANT: Stop engine BEFORE waiting for WaitGroup
+		zombie.Stop()
+
+		zombie.HcConnection.Wg.Wait()
+
 	}
 
 	u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)

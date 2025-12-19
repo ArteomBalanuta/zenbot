@@ -24,15 +24,28 @@ type Engine struct {
 	HcConnection    *Connection
 	Repository      *repository.Repository
 
-	CoreListener       *CoreListener
-	OnlineSetListener  *OnlineSetListener
-	UserJoinedListener *UserJoinedListener
-	UserChatListener   *UserChatListener
-	UserLeftListener   *UserLeftListener
+	CoreListener       MessageListener
+	OnlineSetListener  MessageListener
+	UserJoinedListener MessageListener
+	UserChatListener   MessageListener
+	UserLeftListener   MessageListener
 
 	SecurityService *service.SecurityService
 
 	EnabledCommands map[string]CommandMetadata
+}
+
+/* common interface */
+type MessageListener interface {
+	Notify(jsonMessage string)
+}
+
+/* dummy listener for our zombie engine */
+type DummyListener struct{}
+
+func (l *DummyListener) Notify(jsonMessage string) {}
+func NewDummyListener() *DummyListener {
+	return &DummyListener{}
 }
 
 func NewEngine(etype model.EngineType, c *config.Config, repository *repository.Repository) *Engine {
@@ -55,16 +68,28 @@ func NewEngine(etype model.EngineType, c *config.Config, repository *repository.
 		ActiveUsers:     make(map[*model.User]struct{}),
 	}
 
-	e.Repository = repository
-	e.SecurityService = service.NewSecurityService(c)
+	if etype == model.ZOMBIE {
+		e.Repository = repository
+		e.SecurityService = service.NewSecurityService(c)
 
-	e.CoreListener = NewCoreListener(e)
-	e.UserChatListener = NewUserChatListener(e)
-	e.OnlineSetListener = NewOnlineSetListener(e)
-	e.UserJoinedListener = NewUserJoinedListener(e)
-	e.UserLeftListener = NewUserLeftListener(e)
+		e.CoreListener = NewCoreListener(e)
+		e.UserChatListener = NewDummyListener()
+		e.OnlineSetListener = NewOnlineSetListener(e, nil)
+		e.UserJoinedListener = NewDummyListener()
+		e.UserLeftListener = NewDummyListener()
+		e.HcConnection = NewConnection(u.String(), e.CoreListener)
+	} else {
+		e.Repository = repository
+		e.SecurityService = service.NewSecurityService(c)
 
-	e.HcConnection = NewConnection(u.String(), e.CoreListener)
+		e.CoreListener = NewCoreListener(e)
+		e.UserChatListener = NewUserChatListener(e)
+		e.OnlineSetListener = NewOnlineSetListener(e, nil)
+		e.UserJoinedListener = NewUserJoinedListener(e)
+		e.UserLeftListener = NewUserLeftListener(e)
+
+		e.HcConnection = NewConnection(u.String(), e.CoreListener)
+	}
 
 	return e
 }

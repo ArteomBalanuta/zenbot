@@ -13,11 +13,11 @@ type Connection struct {
 	wsCon       *websocket.Conn
 	connectCh   chan error
 	Wg          sync.WaitGroup
-	msgListener *CoreListener
+	msgListener MessageListener
 	joinedRoom  bool
 }
 
-func NewConnection(url string, coreListener *CoreListener) *Connection {
+func NewConnection(url string, coreListener MessageListener) *Connection {
 	cInstance := &Connection{
 		url:         url,
 		connectCh:   make(chan error, 1),
@@ -53,6 +53,7 @@ func (c *Connection) IsWsConnected() bool {
 	}
 }
 
+//TODO: Add Connection State Management otherwise zombie engine will crash due to their ping never stopping gracefully.
 func (c *Connection) SendPing() {
 	defer c.Wg.Done()
 
