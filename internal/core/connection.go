@@ -6,7 +6,7 @@ import (
 	"log"
 	"sync"
 	"time"
-	"zenbot/internal/listener"
+	"zenbot/internal/common"
 )
 
 type Connection struct {
@@ -14,14 +14,14 @@ type Connection struct {
 	wsCon       *websocket.Conn
 	connectCh   chan error
 	Wg          sync.WaitGroup
-	msgListener listener.Listener
+	msgListener common.Listener
 	joinedRoom  bool
 
 	pingCancel context.CancelFunc
 	ctxCancel  context.Context
 }
 
-func NewConnection(url string, coreListener MessageListener) *Connection {
+func NewConnection(url string, coreListener common.Listener) *Connection {
 	cInstance := &Connection{
 		url:         url,
 		connectCh:   make(chan error, 1),

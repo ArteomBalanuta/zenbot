@@ -6,6 +6,7 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/config"
 	"zenbot/internal/factory"
+	"zenbot/internal/listener"
 	"zenbot/internal/model"
 )
 
@@ -54,9 +55,11 @@ func (u *List) Execute() {
 	callbackChan := make(chan string, 1)
 
 	zombie := factory.NewEngine(model.ZOMBIE, c, nil)
-	zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *common.Engine) {
-		callbackChan <- formatActiveUsers(z.GetActiveUsers())
+
+	listener := listener.NewOnlineSetListener(zombie, func(z common.Engine) {
+		callbackChan <- formatActiveUsers(*z.GetActiveUsers())
 	})
+	zombie.SetOnlineSetListener(listener)
 
 	go zombie.Start()
 

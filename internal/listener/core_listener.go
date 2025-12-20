@@ -9,9 +9,9 @@ type CoreListener struct {
 	engine common.Engine
 }
 
-func NewCoreListener(e *common.Engine) *CoreListener {
+func NewCoreListener(e common.Engine) *CoreListener {
 	return &CoreListener{
-		engine: *e,
+		engine: e,
 	}
 }
 

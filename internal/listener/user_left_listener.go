@@ -25,8 +25,8 @@ func (l *UserLeftListener) Notify(jsonMessage string) {
 	log.Printf("User left: %s", u.Name)
 }
 
-func NewUserLeftListener(e *common.Engine) *UserLeftListener {
+func NewUserLeftListener(e common.Engine) *UserLeftListener {
 	return &UserLeftListener{
-		e: *e,
+		e: e,
 	}
 }

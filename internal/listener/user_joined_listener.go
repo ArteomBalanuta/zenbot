@@ -22,8 +22,8 @@ func (l *UserJoinedListener) Notify(jsonMessage string) {
 	log.Printf("User joined: %s", u.Name)
 }
 
-func NewUserJoinedListener(e *common.Engine) *UserJoinedListener {
+func NewUserJoinedListener(e common.Engine) *UserJoinedListener {
 	return &UserJoinedListener{
-		e: *e,
+		e: e,
 	}
 }

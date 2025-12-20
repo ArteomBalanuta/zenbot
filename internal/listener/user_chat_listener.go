@@ -12,9 +12,9 @@ type UserChatListener struct {
 	engine common.Engine
 }
 
-func NewUserChatListener(e *common.Engine) *UserChatListener {
+func NewUserChatListener(e common.Engine) *UserChatListener {
 	return &UserChatListener{
-		engine: *e,
+		engine: e,
 	}
 }
 

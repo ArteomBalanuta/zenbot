@@ -13,9 +13,9 @@ type InfoChatListener struct {
 	engine common.Engine
 }
 
-func NewInfoChatListener(e *common.Engine) *InfoChatListener {
+func NewInfoChatListener(e common.Engine) *InfoChatListener {
 	return &InfoChatListener{
-		engine: *e,
+		engine: e,
 	}
 }
 

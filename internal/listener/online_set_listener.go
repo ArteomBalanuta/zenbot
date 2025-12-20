@@ -7,7 +7,7 @@ import (
 
 type OnlineSetListener struct {
 	e        common.Engine
-	callback func(*common.Engine)
+	callback func(common.Engine)
 }
 
 func (l *OnlineSetListener) Notify(jsonMessage string) {
@@ -18,13 +18,13 @@ func (l *OnlineSetListener) Notify(jsonMessage string) {
 
 	// our callback for replica,zombie instances
 	if l.callback != nil {
-		l.callback(&l.e)
+		l.callback(l.e)
 	}
 }
 
-func NewOnlineSetListener(e *common.Engine, callback func(*common.Engine)) *OnlineSetListener {
+func NewOnlineSetListener(e common.Engine, callback func(common.Engine)) *OnlineSetListener {
 	return &OnlineSetListener{
-		e:        *e,
+		e:        e,
 		callback: callback,
 	}
 }

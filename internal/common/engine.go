@@ -22,13 +22,13 @@ type Engine interface {
 	GetPrefix() string
 	GetName() string
 	GetChannel() string
-
+	// GetConnection() *Connection
 	SetName(n string)
 
 	RegisterCommand(c *Command)
 	GetEnabledCommands() *map[string]CommandMetadata
 
-	SetOnlineSetListener(l *Listener)
+	SetOnlineSetListener(l Listener)
 
 	LogMessage(trip, name, hash, message, channel string) (int64, error)
 	LogPresence(trip, name, hash, eventType, channel string) (int64, error)

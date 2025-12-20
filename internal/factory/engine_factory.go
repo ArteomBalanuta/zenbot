@@ -7,6 +7,7 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/config"
 	"zenbot/internal/core"
+	"zenbot/internal/listener"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
@@ -19,7 +20,7 @@ func NewEngine(etype model.EngineType, c *config.Config, repo repository.Reposit
 		panic("Error parsing Websocket URL")
 	}
 
-	e := core.EngineImpl{
+	e := &core.EngineImpl{
 		Type:     etype,
 		Prefix:   c.CmdPrefix,
 		Channel:  c.Channel,
@@ -34,24 +35,24 @@ func NewEngine(etype model.EngineType, c *config.Config, repo repository.Reposit
 		AfkUsers:        make(map[*model.User]string),
 	}
 
-	e.CoreListener = core.NewCoreListener(e)
+	e.CoreListener = listener.NewCoreListener(e)
 	e.HcConnection = core.NewConnection(u.String(), e.CoreListener)
 
 	e.Repository = repo
 	e.SecurityService = service.NewSecurityService(c)
-	e.OnlineSetListener = core.NewOnlineSetListener(e, nil)
+	e.OnlineSetListener = listener.NewOnlineSetListener(e, nil)
 
-	e.UserChatListener = core.NewUserChatListener(e)
-	e.UserInfoListener = core.NewInfoChatListener(e)
-	e.UserJoinedListener = core.NewUserJoinedListener(e)
-	e.UserLeftListener = core.NewUserLeftListener(e)
+	e.UserChatListener = listener.NewUserChatListener(e)
+	e.UserInfoListener = listener.NewInfoChatListener(e)
+	e.UserJoinedListener = listener.NewUserJoinedListener(e)
+	e.UserLeftListener = listener.NewUserLeftListener(e)
 
 	if etype == model.ZOMBIE {
 		e.Repository = &repository.DummyImpl{}
-		e.UserChatListener = core.NewDummyListener()
-		e.UserJoinedListener = core.NewDummyListener()
-		e.UserLeftListener = core.NewDummyListener()
+		e.UserChatListener = common.NewDummyListener()
+		e.UserJoinedListener = common.NewDummyListener()
+		e.UserLeftListener = common.NewDummyListener()
 	}
 
-	return &e
+	return e
 }

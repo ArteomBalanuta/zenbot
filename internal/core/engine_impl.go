@@ -240,8 +240,8 @@ func (e *EngineImpl) GetEnabledCommands() *map[string]common.CommandMetadata {
 	return &e.EnabledCommands
 }
 
-func (e *EngineImpl) SetOnlineSetListener(l *common.Listener) {
-	e.OnlineSetListener = *l
+func (e *EngineImpl) SetOnlineSetListener(l common.Listener) {
+	e.OnlineSetListener = l
 }
 
 func (e *EngineImpl) SetLastKickedUser(u string) {
