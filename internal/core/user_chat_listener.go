@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"zenbot/internal/model"
@@ -19,12 +20,15 @@ func NewUserChatListener(e *Engine) *UserChatListener {
 func (u *UserChatListener) Notify(jsonText string) {
 	engine := u.engine
 
-	log.Println("chat json message: ", jsonText)
-	var chatMessage = model.FromJson(jsonText)
+	var chatMessage = model.FromJson[model.ChatMessage](jsonText)
 
-	engine.Repository.LogMessage(chatMessage.Text, chatMessage.Name, chatMessage.Hash, chatMessage.Text, engine.Channel)
+	_, err := engine.Repository.LogMessage(chatMessage.Text, chatMessage.Name, chatMessage.Hash, chatMessage.Text, engine.Channel)
+	if err != nil {
+		fmt.Println("ERROR logging message:", err)
+		return
+	}
 
-	/* bot owns this message so we ignore it */
+	/* bot owned message. cmd self invocation is fun. for now ignore it */
 	if u.engine.Name == chatMessage.Name {
 		return
 	}
@@ -45,8 +49,8 @@ func (u *UserChatListener) Notify(jsonText string) {
 		return
 	}
 
-	var cmdText string = ParseCommandText(chatMessage.Text, engine.prefix)
-	var cmd Command = BuildCommand(cmdText, engine, chatMessage)
+	var cmdText = ParseCommandText(chatMessage.Text, engine.prefix)
+	var cmd = BuildCommand(cmdText, engine, chatMessage)
 	if cmd == nil {
 		log.Printf("Command: %s, not found. ", cmdText)
 		return
@@ -59,16 +63,4 @@ func (u *UserChatListener) Notify(jsonText string) {
 
 	log.Printf("User [IS] whitelisted, hash: %s, trip: %s, name: %s", author.Hash, author.Trip, author.Name)
 	cmd.Execute()
-}
-
-func BuildCommand(alias string, e *Engine, msg *model.ChatMessage) Command {
-	command, exists := e.EnabledCommands[alias]
-	if !exists {
-		log.Println("Unknown command")
-	} else {
-		log.Println("Returning command: ", alias)
-		return command.Command(msg)
-	}
-
-	return nil
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestUsert_GetUser(t *testing.T) {
+func Test_GetUser(t *testing.T) {
 	actual, err := GetUser(`{"cmd":"onlineAdd","nick":"blahuser","trip":"","uType":"user","hash":"1EaG3s9EQge89i2","level":100,"userid":143778215917,"isBot":false,"color":"e6ed5e","flair":false,"channel":"programming","time":1748291833145}`)
 
 	expected := User{

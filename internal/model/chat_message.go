@@ -6,10 +6,24 @@ import (
 	"strings"
 )
 
+type InfoMessage struct {
+	Size    string
+	Info    string      `json:"info"`
+	From    string      `json:"from"`
+	Name    string      `json:"nick"`
+	Trip    string      `json:"trip"`
+	Time    uint64      `json:"time"`
+	Channel string      `json:"channel"`
+	Text    string      `json:"text"`
+	Mod     bool        `json:"mod"`
+	Flair   interface{} `json:"flair"`
+	Color   string      `json:"color"`
+}
+
 type ChatMessage struct {
 	IsWhisper bool
-	Cmd       string `json:"cmd"`
 	Size      string
+	Cmd       string      `json:"cmd"`
 	Name      string      `json:"nick"`
 	Trip      string      `json:"trip"`
 	Hash      string      `json:"hash"`
@@ -21,10 +35,10 @@ type ChatMessage struct {
 	Color     string      `json:"color"`
 }
 
-func FromJson(jsonText string) *ChatMessage {
-	var chatMessage ChatMessage
+func FromJson[T ChatMessage | InfoMessage](jsonText string) *T {
+	var chatMessage T
 
-	// Unmarshal the JSON into the struct
+	// unmarshal the JSON into the struct
 	err := json.Unmarshal([]byte(jsonText), &chatMessage)
 	if err != nil {
 		fmt.Println("Error:", err)

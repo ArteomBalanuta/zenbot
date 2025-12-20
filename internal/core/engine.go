@@ -20,35 +20,28 @@ type Engine struct {
 	Name     string
 	Password string
 
+	lastKickedUser    string
+	lastKickedChannel string
+
 	engineWg *sync.WaitGroup
 
 	OutMessageQueue chan string
 	ActiveUsers     map[*model.User]struct{}
+	AfkUsers        map[*model.User]struct{}
 	HcConnection    *Connection
 	Repository      repository.Repository
 
+	//TODO: use a proper collection.
 	CoreListener       MessageListener
 	OnlineSetListener  MessageListener
 	UserJoinedListener MessageListener
 	UserChatListener   MessageListener
 	UserLeftListener   MessageListener
+	InfoChatListener   MessageListener
 
 	SecurityService *service.SecurityService
 
 	EnabledCommands map[string]CommandMetadata
-}
-
-/* common interface */
-type MessageListener interface {
-	Notify(jsonMessage string)
-}
-
-/* dummy listener for our zombie engine */
-type DummyListener struct{}
-
-func (l *DummyListener) Notify(jsonMessage string) {}
-func NewDummyListener() *DummyListener {
-	return &DummyListener{}
 }
 
 func NewEngine(etype model.EngineType, c *config.Config, repo repository.Repository) *Engine {
@@ -116,7 +109,6 @@ func (e *Engine) Start() {
 
 	e.engineWg.Add(1)
 	go e.StartSharingMessages()
-
 	e.engineWg.Wait()
 	fmt.Println("Engine WGroup stopped")
 }
@@ -164,7 +156,7 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 	case "chat":
 		e.UserChatListener.Notify(jsonMessage)
 	case "info":
-		log.Printf("info: %s", jsonMessage)
+		e.InfoChatListener.Notify(jsonMessage)
 	case "session":
 	default:
 		log.Printf("Non functional payload: %s", jsonMessage)
@@ -175,9 +167,9 @@ func (e *Engine) SendRawMessage(message string) {
 	e.OutMessageQueue <- message
 }
 
-func (e *Engine) SendMessage(author, message string, IsWhisper bool) error {
+func (e *Engine) SendMessage(author, message string, IsWhisper bool) (string, error) {
 	if strings.TrimSpace(author) == "" {
-		return fmt.Errorf("author can't be null")
+		return "", fmt.Errorf("author can't be null")
 	}
 
 	if IsWhisper {
@@ -187,7 +179,7 @@ func (e *Engine) SendMessage(author, message string, IsWhisper bool) error {
 	}
 
 	e.OutMessageQueue <- message
-	return nil
+	return message, nil
 }
 
 func (e *Engine) StartSharingMessages() {
@@ -232,7 +224,6 @@ func (e *Engine) GetUserByName(name string) *model.User {
 			return u
 		}
 	}
-
 	return nil
 }
 
@@ -247,14 +238,7 @@ func (e *Engine) GetChannel() string {
 func ParseCommandText(text, prefix string) string {
 	afterPrefix := text[len(prefix):]
 	fields := strings.Fields(afterPrefix)
-	log.Println("Extracted cmd: ", fields[0])
-
 	return fields[0]
-}
-
-type CommandMetadata struct {
-	Alias   string
-	Command func(msg *model.ChatMessage) Command
 }
 
 func (e *Engine) RegisterCommand(c Command) {

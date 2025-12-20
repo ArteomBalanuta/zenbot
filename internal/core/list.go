@@ -38,45 +38,49 @@ func (u *List) Execute() {
 
 	var message = ""
 	if u.engine.GetChannel() == channel || channel == "" {
-		for u := range u.engine.GetActiveUsers() {
-			message += "\n" + u.Hash + " | " + u.Trip + " | " + u.Name + "\n"
+		message = formatActiveUsers(u.engine.GetActiveUsers())
+		_, err := u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
+		if err != nil {
+			fmt.Println(err)
+			return
 		}
-	} else {
-		c := config.SetupConfig()
-		c.Channel = channel
-		callbackChan := make(chan string, 1)
-
-		zombie := NewEngine(model.ZOMBIE, c, nil)
-		// setting callback!
-		zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *Engine) {
-			fmt.Println("########qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")
-			var message = ""
-			for u := range z.GetActiveUsers() {
-				message += "\n" + u.Hash + " | " + u.Trip + " | " + u.Name + "\n"
-			}
-
-			callbackChan <- message
-		})
-
-		go zombie.Start()
-
-		// Wait for callback result
-		select {
-		case outMessage := <-callbackChan:
-			fmt.Println("Callback executed..", outMessage)
-			message = outMessage
-
-		case <-time.After(30 * time.Second):
-			fmt.Println("Callback timeout")
-		}
-
-		close(callbackChan)
-
-		// IMPORTANT: Stop engine BEFORE waiting for WaitGroup
-		zombie.Stop()
-
-		zombie.HcConnection.Wg.Wait()
+		return
 	}
 
-	u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
+	c := config.SetupConfig()
+	c.Channel = channel
+	callbackChan := make(chan string, 1)
+
+	zombie := NewEngine(model.ZOMBIE, c, nil)
+	zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *Engine) {
+		callbackChan <- formatActiveUsers(z.GetActiveUsers())
+	})
+
+	go zombie.Start()
+
+	select {
+	case activeUsersFmt := <-callbackChan:
+		message = activeUsersFmt
+	case <-time.After(30 * time.Second):
+		fmt.Println("ERROR: Callback timeout")
+	}
+
+	close(callbackChan)
+
+	zombie.Stop()
+	zombie.HcConnection.Wg.Wait()
+
+	_, _ = u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
+}
+
+func formatActiveUsers(users map[*model.User]struct{}) string {
+	var message = ""
+	for u := range users {
+		var trip = u.Trip
+		if trip == "" {
+			trip = "------"
+		}
+		message += "\n" + u.Hash + " | " + trip + " | " + u.Name + "\n"
+	}
+	return message
 }
