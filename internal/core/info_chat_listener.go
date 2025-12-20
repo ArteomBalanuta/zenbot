@@ -61,7 +61,6 @@ func (u *InfoChatListener) processRename(message *model.InfoMessage) bool {
 		split := strings.Split(text, " is now ")
 		before := split[0]
 		after := split[1]
-		log.Println("User renamed from: {} to {}", before, after)
 
 		// renaming self
 		if e.Name == before {
@@ -87,7 +86,6 @@ func (u *InfoChatListener) Notify(jsonText string) {
 	_, err := engine.Repository.LogMessage(infoMessage.Text, infoMessage.Name, "", infoMessage.Text, engine.Channel)
 	if err != nil {
 		fmt.Println("ERROR logging message:", err)
-		return
 	}
 
 	/* bot owned message. cmd self invocation is fun. for now ignore it */

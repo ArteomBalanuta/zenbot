@@ -37,7 +37,7 @@ type Engine struct {
 	UserJoinedListener MessageListener
 	UserChatListener   MessageListener
 	UserLeftListener   MessageListener
-	InfoChatListener   MessageListener
+	UserInfoListener   MessageListener
 
 	SecurityService *service.SecurityService
 
@@ -73,6 +73,7 @@ func NewEngine(etype model.EngineType, c *config.Config, repo repository.Reposit
 	e.OnlineSetListener = NewOnlineSetListener(e, nil)
 
 	e.UserChatListener = NewUserChatListener(e)
+	e.UserInfoListener = NewInfoChatListener(e)
 	e.UserJoinedListener = NewUserJoinedListener(e)
 	e.UserLeftListener = NewUserLeftListener(e)
 
@@ -156,7 +157,7 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 	case "chat":
 		e.UserChatListener.Notify(jsonMessage)
 	case "info":
-		e.InfoChatListener.Notify(jsonMessage)
+		e.UserInfoListener.Notify(jsonMessage)
 	case "session":
 	default:
 		log.Printf("Non functional payload: %s", jsonMessage)

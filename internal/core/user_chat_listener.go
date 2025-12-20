@@ -25,7 +25,6 @@ func (u *UserChatListener) Notify(jsonText string) {
 	_, err := engine.Repository.LogMessage(chatMessage.Text, chatMessage.Name, chatMessage.Hash, chatMessage.Text, engine.Channel)
 	if err != nil {
 		fmt.Println("ERROR logging message:", err)
-		return
 	}
 
 	/* bot owned message. cmd self invocation is fun. for now ignore it */
