@@ -9,7 +9,7 @@ import (
 type InfoMessage struct {
 	Size    string
 	Info    string      `json:"info"`
-	From    string      `json:"from"`
+	From    interface{} `json:"from"`
 	Name    string      `json:"nick"`
 	Trip    string      `json:"trip"`
 	Time    uint64      `json:"time"`

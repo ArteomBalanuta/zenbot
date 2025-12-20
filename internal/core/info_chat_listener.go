@@ -28,19 +28,18 @@ func SliceDownTo(s string, n int) string {
 }
 
 func (u *InfoChatListener) infoToChatMessage(message *model.InfoMessage) model.ChatMessage {
-	if message.From == "" {
-		log.Printf("Received info message: %v, from server\"", message)
-	}
+	log.Printf("Received info message: %v, from server\"", message)
 
 	authorName := message.From
 	if strings.Contains(message.Text, "whispered:") {
-		split := strings.Split(message.Text, authorName+" whispered: ")
+		split := strings.Split(message.Text, fmt.Sprintf("%v", authorName)+" whispered: ")
 		text := split[1]
 
 		var author *model.User
 		for user := range u.engine.ActiveUsers {
 			if user.Name == authorName {
 				author = user
+				break
 			}
 		}
 
@@ -55,6 +54,7 @@ func (u *InfoChatListener) infoToChatMessage(message *model.InfoMessage) model.C
 }
 
 func (u *InfoChatListener) processRename(message *model.InfoMessage) bool {
+	fmt.Println("in processRename")
 	e := u.engine
 	var text = message.Text
 	if strings.Contains(text, " is now ") {

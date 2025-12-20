@@ -174,7 +174,7 @@ func (e *Engine) SendMessage(author, message string, IsWhisper bool) (string, er
 	}
 
 	if IsWhisper {
-		message = "/whisper @" + author + " " + message
+		message = "/whisper @" + author + " .\n" + message
 	} else {
 		message = "@" + author + " " + message
 	}
