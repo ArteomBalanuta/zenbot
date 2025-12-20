@@ -54,7 +54,6 @@ func (u *InfoChatListener) infoToChatMessage(message *model.InfoMessage) model.C
 }
 
 func (u *InfoChatListener) processRename(message *model.InfoMessage) bool {
-	fmt.Println("in processRename")
 	e := u.engine
 	var text = message.Text
 	if strings.Contains(text, " is now ") {

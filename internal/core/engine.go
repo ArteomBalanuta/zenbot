@@ -27,7 +27,7 @@ type Engine struct {
 
 	OutMessageQueue chan string
 	ActiveUsers     map[*model.User]struct{}
-	AfkUsers        map[*model.User]struct{}
+	AfkUsers        map[*model.User]string
 	HcConnection    *Connection
 	Repository      repository.Repository
 
@@ -63,6 +63,7 @@ func NewEngine(etype model.EngineType, c *config.Config, repo repository.Reposit
 
 		OutMessageQueue: make(chan string, 256),
 		ActiveUsers:     make(map[*model.User]struct{}),
+		AfkUsers:        make(map[*model.User]string),
 	}
 
 	e.CoreListener = NewCoreListener(e)
@@ -107,10 +108,12 @@ func (e *Engine) Start() {
 
 	e.RegisterCommand(&List{})
 	e.RegisterCommand(&Say{})
+	e.RegisterCommand(&Afk{})
 
 	e.engineWg.Add(1)
 	go e.StartSharingMessages()
 	e.engineWg.Wait()
+
 	fmt.Println("Engine WGroup stopped")
 }
 
@@ -143,8 +146,6 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 		fmt.Println("Key 'cmd' not found or not a string")
 		return
 	}
-
-	fmt.Println("Command:", cmd)
 
 	switch cmd {
 	case "join":
@@ -215,6 +216,31 @@ func (e *Engine) RemoveActiveUser(left *model.User) {
 		if u.Name == left.Name {
 			delete(e.ActiveUsers, u)
 			break
+		}
+	}
+}
+
+func (e *Engine) AddAfkUser(u *model.User, reason string) {
+	e.AfkUsers[u] = reason
+	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", u.Name, u.Trip, reason)
+}
+
+func (e *Engine) removeIfAfk(u *model.User) {
+	for user := range e.AfkUsers {
+		if (user.Name == u.Name) || (u.Trip != "" && user.Trip == u.Trip) {
+			delete(e.AfkUsers, user)
+			log.Printf("Removed Afk user %s", u.Name)
+			e.SendMessage(u.Name, " is not afk anymore - welcome back.", false)
+			break
+		}
+	}
+}
+
+// TODO: improve to mention users by checking against trip of the mentioned user
+func (e *Engine) notifyAfkIfMentioned(m *model.ChatMessage) {
+	for a, reason := range e.AfkUsers {
+		if strings.Contains(m.Text, a.Trip) || strings.Contains(m.Text, a.Name) {
+			e.SendMessage(m.Name, fmt.Sprintf(" user: %s is afk, reason: %s", a.Name, reason), false)
 		}
 	}
 }

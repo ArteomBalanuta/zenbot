@@ -1,0 +1,40 @@
+package core
+
+import (
+	"strings"
+	"zenbot/internal/model"
+)
+
+type Afk struct {
+	AccessLevel model.Role
+	engine      *Engine
+	chatMessage *model.ChatMessage
+}
+
+func (u *Afk) GetAliases() []string {
+	return []string{"afk", "away"}
+}
+
+func (u *Afk) GetRole() *model.Role {
+	return &u.AccessLevel
+}
+
+func (u *Afk) NewInstance(engine *Engine, chatMessage *model.ChatMessage) Command {
+	return &Afk{
+		AccessLevel: model.USER,
+		engine:      engine,
+		chatMessage: chatMessage,
+	}
+}
+
+func (u *Afk) Execute() {
+	var reason = strings.Join(u.chatMessage.GetArguments()[1:], " ")
+
+	for user := range u.engine.ActiveUsers {
+		if user.Name == u.chatMessage.Name {
+			u.engine.AddAfkUser(user, reason)
+		}
+	}
+
+	u.engine.SendMessage(u.chatMessage.Name, " is afk.", u.chatMessage.IsWhisper)
+}

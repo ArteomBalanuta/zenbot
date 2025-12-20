@@ -40,6 +40,7 @@ func (r *DatabaseRepositoryImpl) LogPresence(trip, name, hash, eventType, channe
 }
 
 func NewRepository(dbPath string) (Repository, error) {
+	//TODO: file doesnt exist yet sqlite succeeds
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err

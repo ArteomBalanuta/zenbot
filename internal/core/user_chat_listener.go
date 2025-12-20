@@ -41,7 +41,11 @@ func (u *UserChatListener) Notify(jsonText string) {
 	}
 
 	//TODO: deliver mail for user if present
+	//
+
 	//TODO: if afk notify; if not afk notify
+	u.engine.removeIfAfk(author)
+	u.engine.notifyAfkIfMentioned(chatMessage)
 
 	isCommand := strings.HasPrefix(chatMessage.Text, engine.prefix)
 	if !isCommand {
