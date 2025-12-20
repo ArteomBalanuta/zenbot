@@ -2,11 +2,11 @@ package core
 
 import (
 	"context"
+	"github.com/gorilla/websocket"
 	"log"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
+	"zenbot/internal/listener"
 )
 
 type Connection struct {
@@ -14,7 +14,7 @@ type Connection struct {
 	wsCon       *websocket.Conn
 	connectCh   chan error
 	Wg          sync.WaitGroup
-	msgListener MessageListener
+	msgListener listener.Listener
 	joinedRoom  bool
 
 	pingCancel context.CancelFunc

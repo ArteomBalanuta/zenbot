@@ -2,12 +2,13 @@ package core
 
 import (
 	"strings"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
 
 type Afk struct {
 	AccessLevel model.Role
-	engine      *Engine
+	engine      common.Engine
 	chatMessage *model.ChatMessage
 }
 
@@ -19,7 +20,7 @@ func (u *Afk) GetRole() *model.Role {
 	return &u.AccessLevel
 }
 
-func (u *Afk) NewInstance(engine *Engine, chatMessage *model.ChatMessage) Command {
+func (u *Afk) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) common.Command {
 	return &Afk{
 		AccessLevel: model.USER,
 		engine:      engine,
@@ -30,7 +31,7 @@ func (u *Afk) NewInstance(engine *Engine, chatMessage *model.ChatMessage) Comman
 func (u *Afk) Execute() {
 	var reason = strings.Join(u.chatMessage.GetArguments()[1:], " ")
 
-	for user := range u.engine.ActiveUsers {
+	for user := range *u.engine.GetActiveUsers() {
 		if user.Name == u.chatMessage.Name {
 			u.engine.AddAfkUser(user, reason)
 		}

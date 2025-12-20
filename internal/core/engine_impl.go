@@ -4,26 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/url"
 	"strings"
 	"sync"
-	"zenbot/internal/config"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
 )
 
-type Engine struct {
-	eType    model.EngineType
-	prefix   string
+type EngineImpl struct {
+	Type     model.EngineType
+	Prefix   string
 	Channel  string
 	Name     string
 	Password string
 
-	lastKickedUser    string
-	lastKickedChannel string
+	LastKickedUser    string
+	LastKickedChannel string
 
-	engineWg *sync.WaitGroup
+	EngineWg *sync.WaitGroup
 
 	OutMessageQueue chan string
 	ActiveUsers     map[*model.User]struct{}
@@ -32,63 +31,19 @@ type Engine struct {
 	Repository      repository.Repository
 
 	//TODO: use a proper collection.
-	CoreListener       MessageListener
-	OnlineSetListener  MessageListener
-	UserJoinedListener MessageListener
-	UserChatListener   MessageListener
-	UserLeftListener   MessageListener
-	UserInfoListener   MessageListener
+	CoreListener       common.Listener
+	OnlineSetListener  common.Listener
+	UserJoinedListener common.Listener
+	UserChatListener   common.Listener
+	UserLeftListener   common.Listener
+	UserInfoListener   common.Listener
 
 	SecurityService *service.SecurityService
 
-	EnabledCommands map[string]CommandMetadata
+	EnabledCommands map[string]common.CommandMetadata
 }
 
-func NewEngine(etype model.EngineType, c *config.Config, repo repository.Repository) *Engine {
-	u, err := url.Parse(c.WebsocketUrl)
-	if err != nil {
-		log.Fatalln("Can't parse websocket URL:", c.WebsocketUrl)
-		panic("Error parsing Websocket URL")
-	}
-
-	e := &Engine{
-		eType:    etype,
-		prefix:   c.CmdPrefix,
-		Channel:  c.Channel,
-		Name:     c.Name,
-		Password: c.Password,
-
-		engineWg:        new(sync.WaitGroup),
-		EnabledCommands: make(map[string]CommandMetadata),
-
-		OutMessageQueue: make(chan string, 256),
-		ActiveUsers:     make(map[*model.User]struct{}),
-		AfkUsers:        make(map[*model.User]string),
-	}
-
-	e.CoreListener = NewCoreListener(e)
-	e.HcConnection = NewConnection(u.String(), e.CoreListener)
-
-	e.Repository = repo
-	e.SecurityService = service.NewSecurityService(c)
-	e.OnlineSetListener = NewOnlineSetListener(e, nil)
-
-	e.UserChatListener = NewUserChatListener(e)
-	e.UserInfoListener = NewInfoChatListener(e)
-	e.UserJoinedListener = NewUserJoinedListener(e)
-	e.UserLeftListener = NewUserLeftListener(e)
-
-	if etype == model.ZOMBIE {
-		e.Repository = &repository.DummyImpl{}
-		e.UserChatListener = NewDummyListener()
-		e.UserJoinedListener = NewDummyListener()
-		e.UserLeftListener = NewDummyListener()
-	}
-
-	return e
-}
-
-func (e *Engine) Start() {
+func (e *EngineImpl) Start() {
 	c := e.HcConnection
 	c.Wg.Add(1)
 	go c.Connect()
@@ -106,18 +61,18 @@ func (e *Engine) Start() {
 		}
 	}
 
-	e.RegisterCommand(&List{})
-	e.RegisterCommand(&Say{})
-	e.RegisterCommand(&Afk{})
+	// e.RegisterCommand(&List{})
+	// e.RegisterCommand(&Say{})
+	// e.RegisterCommand(&Afk{})
 
-	e.engineWg.Add(1)
-	go e.StartSharingMessages()
-	e.engineWg.Wait()
+	e.EngineWg.Add(1)
+	go e.startSharingMessages()
+	e.EngineWg.Wait()
 
 	fmt.Println("Engine WGroup stopped")
 }
 
-func (e *Engine) Stop() {
+func (e *EngineImpl) Stop() {
 	e.HcConnection.pingCancel()
 
 	err := e.HcConnection.Close()
@@ -131,7 +86,7 @@ func (e *Engine) Stop() {
 	fmt.Println("Connection WGroup finished.")
 }
 
-func (e *Engine) DispatchMessage(jsonMessage string) {
+func (e *EngineImpl) DispatchMessage(jsonMessage string) {
 	// Parse into a map
 	var data map[string]interface{}
 	err := json.Unmarshal([]byte(jsonMessage), &data)
@@ -165,11 +120,11 @@ func (e *Engine) DispatchMessage(jsonMessage string) {
 	}
 }
 
-func (e *Engine) SendRawMessage(message string) {
+func (e *EngineImpl) SendRawMessage(message string) {
 	e.OutMessageQueue <- message
 }
 
-func (e *Engine) SendMessage(author, message string, IsWhisper bool) (string, error) {
+func (e *EngineImpl) SendMessage(author, message string, IsWhisper bool) (string, error) {
 	if strings.TrimSpace(author) == "" {
 		return "", fmt.Errorf("author can't be null")
 	}
@@ -184,14 +139,129 @@ func (e *Engine) SendMessage(author, message string, IsWhisper bool) (string, er
 	return message, nil
 }
 
-func (e *Engine) StartSharingMessages() {
-	defer e.engineWg.Done()
+func (e *EngineImpl) startSharingMessages() {
+	defer e.EngineWg.Done()
 	for msg := range e.OutMessageQueue {
 		chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(msg))
 
 		log.Println("sending: ", chatPayload)
 		e.HcConnection.Write(chatPayload)
 	}
+}
+
+func (e *EngineImpl) AddActiveUser(joined *model.User) {
+	e.ActiveUsers[joined] = struct{}{}
+}
+
+func (e *EngineImpl) RemoveActiveUser(left *model.User) {
+	for u := range e.ActiveUsers {
+		if u.Name == left.Name {
+			delete(e.ActiveUsers, u)
+			break
+		}
+	}
+}
+
+func (e *EngineImpl) GetAfkUsers() *map[*model.User]string {
+	return &e.AfkUsers
+}
+
+func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
+	e.AfkUsers[u] = reason
+	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", u.Name, u.Trip, reason)
+}
+
+func (e *EngineImpl) RemoveIfAfk(u *model.User) {
+	for user := range e.AfkUsers {
+		if (user.Name == u.Name) || (u.Trip != "" && user.Trip == u.Trip) {
+			delete(e.AfkUsers, user)
+			log.Printf("Removed Afk user %s", u.Name)
+			e.SendMessage(u.Name, " is not afk anymore - welcome back.", false)
+			break
+		}
+	}
+}
+
+// TODO: improve to mention users by checking against trip of the mentioned user
+func (e *EngineImpl) NotifyAfkIfMentioned(m *model.ChatMessage) {
+	for a, reason := range e.AfkUsers {
+		if strings.Contains(m.Text, a.Trip) || strings.Contains(m.Text, a.Name) {
+			e.SendMessage(m.Name, fmt.Sprintf(" user: %s is afk, reason: %s", a.Name, reason), false)
+		}
+	}
+}
+
+func (e *EngineImpl) GetActiveUserByName(name string) *model.User {
+	for u := range e.ActiveUsers {
+		if u.Name == name {
+			return u
+		}
+	}
+	return nil
+}
+
+func (e *EngineImpl) LogMessage(trip, name, hash, message, channel string) (int64, error) {
+	return e.Repository.LogMessage(trip, name, hash, message, channel)
+}
+
+func (e *EngineImpl) LogPresence(trip, name, hash, eventType, channel string) (int64, error) {
+	return e.Repository.LogMessage(trip, name, hash, eventType, channel)
+}
+
+func (e *EngineImpl) GetActiveUsers() *map[*model.User]struct{} {
+	return &e.ActiveUsers
+}
+
+func (e *EngineImpl) GetChannel() string {
+	return e.Channel
+}
+
+func (e *EngineImpl) GetName() string {
+	return e.Name
+}
+
+func (e *EngineImpl) RegisterCommand(c *common.Command) {
+	aliases := (*c).GetAliases()
+	var constructorFn = func(msg *model.ChatMessage) common.Command {
+		return (*c).NewInstance(e, msg)
+	}
+
+	for _, alias := range aliases {
+		e.EnabledCommands[alias] = common.CommandMetadata{
+			Alias:   alias,
+			Command: constructorFn,
+		}
+	}
+
+	fmt.Printf("Registered command with aliases: %v\n", aliases)
+}
+
+func (e *EngineImpl) GetEnabledCommands() *map[string]common.CommandMetadata {
+	return &e.EnabledCommands
+}
+
+func (e *EngineImpl) SetOnlineSetListener(l *common.Listener) {
+	e.OnlineSetListener = *l
+}
+
+func (e *EngineImpl) SetLastKickedUser(u string) {
+	e.LastKickedUser = u
+}
+
+func (e *EngineImpl) SetLastKickedChannel(c string) {
+	e.LastKickedChannel = c
+}
+
+func (e *EngineImpl) SetName(name string) {
+	e.Name = name
+}
+
+func (e *EngineImpl) GetPrefix() string {
+	return e.Prefix
+}
+
+func (e *EngineImpl) IsUserAuthorized(u *model.User, r *model.Role) bool {
+	return e.SecurityService.IsAuthorized(u, r)
 }
 
 func escapeJSON(input string) string {
@@ -205,81 +275,4 @@ func escapeJSON(input string) string {
 	s = strings.ReplaceAll(s, `\r`, "\\r")
 
 	return s
-}
-
-func (e *Engine) AddActiveUser(joined *model.User) {
-	e.ActiveUsers[joined] = struct{}{}
-}
-
-func (e *Engine) RemoveActiveUser(left *model.User) {
-	for u := range e.ActiveUsers {
-		if u.Name == left.Name {
-			delete(e.ActiveUsers, u)
-			break
-		}
-	}
-}
-
-func (e *Engine) AddAfkUser(u *model.User, reason string) {
-	e.AfkUsers[u] = reason
-	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", u.Name, u.Trip, reason)
-}
-
-func (e *Engine) removeIfAfk(u *model.User) {
-	for user := range e.AfkUsers {
-		if (user.Name == u.Name) || (u.Trip != "" && user.Trip == u.Trip) {
-			delete(e.AfkUsers, user)
-			log.Printf("Removed Afk user %s", u.Name)
-			e.SendMessage(u.Name, " is not afk anymore - welcome back.", false)
-			break
-		}
-	}
-}
-
-// TODO: improve to mention users by checking against trip of the mentioned user
-func (e *Engine) notifyAfkIfMentioned(m *model.ChatMessage) {
-	for a, reason := range e.AfkUsers {
-		if strings.Contains(m.Text, a.Trip) || strings.Contains(m.Text, a.Name) {
-			e.SendMessage(m.Name, fmt.Sprintf(" user: %s is afk, reason: %s", a.Name, reason), false)
-		}
-	}
-}
-
-func (e *Engine) GetUserByName(name string) *model.User {
-	for u := range e.ActiveUsers {
-		if u.Name == name {
-			return u
-		}
-	}
-	return nil
-}
-
-func (e *Engine) GetActiveUsers() map[*model.User]struct{} {
-	return e.ActiveUsers
-}
-
-func (e *Engine) GetChannel() string {
-	return e.Channel
-}
-
-func ParseCommandText(text, prefix string) string {
-	afterPrefix := text[len(prefix):]
-	fields := strings.Fields(afterPrefix)
-	return fields[0]
-}
-
-func (e *Engine) RegisterCommand(c Command) {
-	aliases := c.GetAliases()
-	var constructorFn = func(msg *model.ChatMessage) Command {
-		return c.NewInstance(e, msg)
-	}
-
-	for _, alias := range aliases {
-		e.EnabledCommands[alias] = CommandMetadata{
-			Alias:   alias,
-			Command: constructorFn,
-		}
-	}
-
-	fmt.Printf("Registered command with aliases: %v\n", aliases)
 }

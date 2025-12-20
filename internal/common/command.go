@@ -1,4 +1,4 @@
-package core
+package common
 
 import (
 	"log"
@@ -9,7 +9,7 @@ type Command interface {
 	Execute()
 	GetRole() *model.Role
 	GetAliases() []string
-	NewInstance(e *Engine, m *model.ChatMessage) Command
+	NewInstance(e Engine, m *model.ChatMessage) Command
 }
 
 type CommandMetadata struct {
@@ -17,8 +17,8 @@ type CommandMetadata struct {
 	Command func(msg *model.ChatMessage) Command
 }
 
-func BuildCommand(alias string, e *Engine, msg *model.ChatMessage) Command {
-	command, exists := e.EnabledCommands[alias]
+func BuildCommand(alias string, e Engine, msg *model.ChatMessage) Command {
+	command, exists := (*e.GetEnabledCommands())[alias]
 	if !exists {
 		log.Println("Unknown command")
 	} else {

@@ -1,16 +1,17 @@
-package core
+package listener
 
 import (
 	"log"
+	"zenbot/internal/common"
 )
 
 type CoreListener struct {
-	engine *Engine
+	engine common.Engine
 }
 
-func NewCoreListener(e *Engine) *CoreListener {
+func NewCoreListener(e *common.Engine) *CoreListener {
 	return &CoreListener{
-		engine: e,
+		engine: *e,
 	}
 }
 

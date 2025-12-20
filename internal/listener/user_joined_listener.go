@@ -1,13 +1,14 @@
-package core
+package listener
 
 import (
 	"fmt"
 	"log"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
 
 type UserJoinedListener struct {
-	e *Engine
+	e common.Engine
 }
 
 func (l *UserJoinedListener) Notify(jsonMessage string) {
@@ -17,12 +18,12 @@ func (l *UserJoinedListener) Notify(jsonMessage string) {
 		return
 	}
 	l.e.AddActiveUser(u)
-	l.e.Repository.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.Channel)
+	l.e.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.GetChannel())
 	log.Printf("User joined: %s", u.Name)
 }
 
-func NewUserJoinedListener(e *Engine) *UserJoinedListener {
+func NewUserJoinedListener(e *common.Engine) *UserJoinedListener {
 	return &UserJoinedListener{
-		e: e,
+		e: *e,
 	}
 }

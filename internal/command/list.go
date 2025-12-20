@@ -3,13 +3,15 @@ package core
 import (
 	"fmt"
 	"time"
+	"zenbot/internal/common"
 	"zenbot/internal/config"
+	"zenbot/internal/factory"
 	"zenbot/internal/model"
 )
 
 type List struct {
 	AccessLevel model.Role
-	engine      *Engine
+	engine      common.Engine
 	chatMessage *model.ChatMessage
 }
 
@@ -17,7 +19,7 @@ func (u *List) GetAliases() []string {
 	return []string{"list", "l"}
 }
 
-func (u *List) NewInstance(engine *Engine, chatMessage *model.ChatMessage) Command {
+func (u *List) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) common.Command {
 	return &List{
 		AccessLevel: model.ADMIN,
 		engine:      engine,
@@ -38,7 +40,7 @@ func (u *List) Execute() {
 
 	var message = ""
 	if u.engine.GetChannel() == channel || channel == "" {
-		message = formatActiveUsers(u.engine.GetActiveUsers())
+		message = formatActiveUsers(*u.engine.GetActiveUsers())
 		_, err := u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
 		if err != nil {
 			fmt.Println(err)
@@ -51,8 +53,8 @@ func (u *List) Execute() {
 	c.Channel = channel
 	callbackChan := make(chan string, 1)
 
-	zombie := NewEngine(model.ZOMBIE, c, nil)
-	zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *Engine) {
+	zombie := factory.NewEngine(model.ZOMBIE, c, nil)
+	zombie.OnlineSetListener = NewOnlineSetListener(zombie, func(z *common.Engine) {
 		callbackChan <- formatActiveUsers(z.GetActiveUsers())
 	})
 

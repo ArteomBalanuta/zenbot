@@ -1,19 +1,20 @@
-package core
+package listener
 
 import (
 	"fmt"
 	"log"
 	"strings"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
 
 type UserChatListener struct {
-	engine *Engine
+	engine common.Engine
 }
 
-func NewUserChatListener(e *Engine) *UserChatListener {
+func NewUserChatListener(e *common.Engine) *UserChatListener {
 	return &UserChatListener{
-		engine: e,
+		engine: *e,
 	}
 }
 
@@ -22,18 +23,18 @@ func (u *UserChatListener) Notify(jsonText string) {
 
 	var chatMessage = model.FromJson[model.ChatMessage](jsonText)
 
-	_, err := engine.Repository.LogMessage(chatMessage.Text, chatMessage.Name, chatMessage.Hash, chatMessage.Text, engine.Channel)
+	_, err := engine.LogMessage(chatMessage.Text, chatMessage.Name, chatMessage.Hash, chatMessage.Text, engine.GetChannel())
 	if err != nil {
 		fmt.Println("ERROR logging message:", err)
 	}
 
 	/* bot owned message. cmd self invocation is fun. for now ignore it */
-	if u.engine.Name == chatMessage.Name {
+	if u.engine.GetName() == chatMessage.Name {
 		return
 	}
 
 	var author *model.User
-	for au, _ := range engine.ActiveUsers {
+	for au, _ := range *engine.GetActiveUsers() {
 		if strings.EqualFold(au.Name, chatMessage.Name) {
 			author = au
 			break
@@ -44,22 +45,22 @@ func (u *UserChatListener) Notify(jsonText string) {
 	//
 
 	//TODO: if afk notify; if not afk notify
-	u.engine.removeIfAfk(author)
-	u.engine.notifyAfkIfMentioned(chatMessage)
+	u.engine.RemoveIfAfk(author)
+	u.engine.NotifyAfkIfMentioned(chatMessage)
 
-	isCommand := strings.HasPrefix(chatMessage.Text, engine.prefix)
+	isCommand := strings.HasPrefix(chatMessage.Text, engine.GetPrefix())
 	if !isCommand {
 		return
 	}
 
-	var cmdText = ParseCommandText(chatMessage.Text, engine.prefix)
-	var cmd = BuildCommand(cmdText, engine, chatMessage)
+	var cmdText = common.ParseCommandText(chatMessage.Text, engine.GetPrefix())
+	var cmd = common.BuildCommand(cmdText, engine, chatMessage)
 	if cmd == nil {
 		log.Printf("Command: %s, not found. ", cmdText)
 		return
 	}
 
-	if !engine.SecurityService.IsAuthorized(author, cmd.GetRole()) {
+	if !engine.IsUserAuthorized(author, cmd.GetRole()) {
 		log.Printf("User is [NOT] Authorized to run command: [%s], hash: %s, trip: %s, name: %s", cmdText, author.Hash, author.Trip, author.Name)
 		engine.SendMessage(author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", cmdText), chatMessage.IsWhisper)
 		return

@@ -1,13 +1,14 @@
-package core
+package listener
 
 import (
 	"fmt"
 	"log"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
 
 type UserLeftListener struct {
-	e *Engine
+	e common.Engine
 }
 
 func (l *UserLeftListener) Notify(jsonMessage string) {
@@ -17,15 +18,15 @@ func (l *UserLeftListener) Notify(jsonMessage string) {
 		return
 	}
 
-	usr := l.e.GetUserByName(u.Name)
-	l.e.Repository.LogPresence(usr.Trip, usr.Name, usr.Hash, "left", l.e.Channel)
+	usr := l.e.GetActiveUserByName(u.Name)
+	l.e.LogPresence(usr.Trip, usr.Name, usr.Hash, "left", l.e.GetChannel())
 
 	l.e.RemoveActiveUser(usr)
 	log.Printf("User left: %s", u.Name)
 }
 
-func NewUserLeftListener(e *Engine) *UserLeftListener {
+func NewUserLeftListener(e *common.Engine) *UserLeftListener {
 	return &UserLeftListener{
-		e: e,
+		e: *e,
 	}
 }
