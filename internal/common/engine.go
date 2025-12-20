@@ -29,6 +29,7 @@ type Engine interface {
 	GetEnabledCommands() *map[string]CommandMetadata
 
 	SetOnlineSetListener(l Listener)
+	WaitConnectionWgDone() // TODO: ugly refactor
 
 	LogMessage(trip, name, hash, message, channel string) (int64, error)
 	LogPresence(trip, name, hash, eventType, channel string) (int64, error)

@@ -252,6 +252,10 @@ func (e *EngineImpl) SetLastKickedChannel(c string) {
 	e.LastKickedChannel = c
 }
 
+func (e *EngineImpl) WaitConnectionWgDone() {
+	e.HcConnection.Wg.Wait()
+}
+
 func (e *EngineImpl) SetName(name string) {
 	e.Name = name
 }

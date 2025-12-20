@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"zenbot/internal/config"
-	"zenbot/internal/core"
+	"zenbot/internal/factory"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 )
@@ -26,7 +26,7 @@ func main() {
 		log.Fatal("Can't connect to db: ", c.DbPath)
 	}
 
-	e := core.NewEngine(model.MASTER, c, db)
+	e := factory.NewEngine(model.MASTER, c, db)
 	go e.Start()
 
 	select {
@@ -35,5 +35,5 @@ func main() {
 		e.Stop()
 	}
 
-	e.HcConnection.Wg.Wait()
+	e.WaitConnectionWgDone()
 }

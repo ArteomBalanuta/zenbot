@@ -73,7 +73,7 @@ func (u *List) Execute() {
 	close(callbackChan)
 
 	zombie.Stop()
-	zombie.HcConnection.Wg.Wait()
+	zombie.WaitConnectionWgDone()
 
 	_, _ = u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
 }
