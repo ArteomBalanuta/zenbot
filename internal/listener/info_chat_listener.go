@@ -132,7 +132,7 @@ func (u *InfoChatListener) Notify(jsonText string) {
 
 	if !engine.IsUserAuthorized(author, cmd.GetRole()) {
 		log.Printf("User is [NOT] Authorized to run command: [%s], hash: %s, trip: %s, name: %s", cmdText, author.Hash, author.Trip, author.Name)
-		engine.SendMessage(author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", cmdText), chatMessage.IsWhisper)
+		engine.SendChatMessage(author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", cmdText), chatMessage.IsWhisper)
 		return
 	}
 

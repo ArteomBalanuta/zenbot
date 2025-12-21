@@ -32,6 +32,7 @@ func main() {
 	e.RegisterCommand(&command.List{})
 	e.RegisterCommand(&command.Say{})
 	e.RegisterCommand(&command.Afk{})
+	e.RegisterCommand(&command.Kick{})
 
 	go e.Start()
 

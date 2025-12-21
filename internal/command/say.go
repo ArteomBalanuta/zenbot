@@ -35,5 +35,5 @@ func (u *Say) Execute() {
 	var argArr = u.chatMessage.GetArguments()[1:]
 	str := strings.Join(argArr, " ") // TODO: fix - make sure \n \t are preserved!
 
-	u.engine.SendRawMessage(str)
+	u.engine.SendChatMessage("", str, false)
 }

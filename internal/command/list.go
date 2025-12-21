@@ -42,7 +42,7 @@ func (u *List) Execute() {
 	var message = ""
 	if u.engine.GetChannel() == channel || channel == "" {
 		message = formatActiveUsers(*u.engine.GetActiveUsers())
-		_, err := u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
+		_, err := u.engine.SendChatMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -75,7 +75,7 @@ func (u *List) Execute() {
 	zombie.Stop()
 	zombie.WaitConnectionWgDone()
 
-	_, _ = u.engine.SendMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
+	_, _ = u.engine.SendChatMessage(u.chatMessage.Name, message, u.chatMessage.IsWhisper)
 }
 
 func formatActiveUsers(users map[*model.User]struct{}) string {

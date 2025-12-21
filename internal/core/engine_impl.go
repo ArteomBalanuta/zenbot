@@ -120,28 +120,23 @@ func (e *EngineImpl) SendRawMessage(message string) {
 	e.OutMessageQueue <- message
 }
 
-func (e *EngineImpl) SendMessage(author, message string, IsWhisper bool) (string, error) {
-	if strings.TrimSpace(author) == "" {
-		return "", fmt.Errorf("author can't be null")
-	}
-
-	if IsWhisper {
+func (e *EngineImpl) SendChatMessage(author, message string, IsWhisper bool) (string, error) {
+	if author != "" && IsWhisper {
 		message = "/whisper @" + author + " .\n" + message
-	} else {
+	} else if author != "" {
 		message = "@" + author + " " + message
 	}
 
-	e.OutMessageQueue <- message
+	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
+	e.OutMessageQueue <- chatPayload
 	return message, nil
 }
 
 func (e *EngineImpl) startSharingMessages() {
 	defer e.EngineWg.Done()
 	for msg := range e.OutMessageQueue {
-		chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(msg))
-
-		log.Println("sending: ", chatPayload)
-		e.HcConnection.Write(chatPayload)
+		log.Println("sending: ", msg)
+		e.HcConnection.Write(msg)
 	}
 }
 
@@ -172,7 +167,7 @@ func (e *EngineImpl) RemoveIfAfk(u *model.User) {
 		if (user.Name == u.Name) || (u.Trip != "" && user.Trip == u.Trip) {
 			delete(e.AfkUsers, user)
 			log.Printf("Removed Afk user %s", u.Name)
-			e.SendMessage(u.Name, " is not afk anymore - welcome back.", false)
+			e.SendChatMessage(u.Name, " is not afk anymore - welcome back.", false)
 			break
 		}
 	}
@@ -182,7 +177,7 @@ func (e *EngineImpl) RemoveIfAfk(u *model.User) {
 func (e *EngineImpl) NotifyAfkIfMentioned(m *model.ChatMessage) {
 	for a, reason := range e.AfkUsers {
 		if strings.Contains(m.Text, a.Trip) || strings.Contains(m.Text, a.Name) {
-			e.SendMessage(m.Name, fmt.Sprintf(" user: %s is afk, reason: %s", a.Name, reason), false)
+			e.SendChatMessage(m.Name, fmt.Sprintf(" user: %s is afk, reason: %s", a.Name, reason), false)
 		}
 	}
 }

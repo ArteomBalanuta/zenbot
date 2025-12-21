@@ -37,5 +37,5 @@ func (u *Afk) Execute() {
 		}
 	}
 
-	u.engine.SendMessage(u.chatMessage.Name, " is afk.", u.chatMessage.IsWhisper)
+	u.engine.SendChatMessage(u.chatMessage.Name, " is afk.", u.chatMessage.IsWhisper)
 }

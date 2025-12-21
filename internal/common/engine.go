@@ -8,7 +8,7 @@ type Engine interface {
 
 	DispatchMessage(jsonMessage string)
 	SendRawMessage(message string)
-	SendMessage(author, message string, IsWhisper bool) (string, error)
+	SendChatMessage(author, message string, IsWhisper bool) (string, error)
 
 	AddActiveUser(joined *model.User)
 	RemoveActiveUser(left *model.User)
@@ -24,7 +24,7 @@ type Engine interface {
 	GetPrefix() string
 	GetName() string
 	GetChannel() string
-	// GetConnection() *Connection
+
 	SetName(n string)
 
 	RegisterCommand(c Command)
