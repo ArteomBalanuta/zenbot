@@ -20,6 +20,11 @@ type Engine interface {
 	GetActiveUsers() *map[*model.User]struct{}
 
 	Kick(name string, channel string)
+	Ban(name string)
+	Unban(hash string)
+	UnbanAll()
+	Lock()
+	Unlock()
 
 	GetPrefix() string
 	GetName() string

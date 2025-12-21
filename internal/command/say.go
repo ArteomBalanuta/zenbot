@@ -1,7 +1,6 @@
 package command
 
 import (
-	"log"
 	"strings"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
@@ -22,7 +21,6 @@ func (u *Say) GetRole() *model.Role {
 }
 
 func (u *Say) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) common.Command {
-	println("New instance")
 	return &Say{
 		AccessLevel: model.USER,
 		engine:      engine,
@@ -31,7 +29,6 @@ func (u *Say) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) 
 }
 
 func (u *Say) Execute() {
-	log.Println("In say executing")
 	var argArr = u.chatMessage.GetArguments()[1:]
 	str := strings.Join(argArr, " ") // TODO: fix - make sure \n \t are preserved!
 

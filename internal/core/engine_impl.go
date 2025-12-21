@@ -216,6 +216,28 @@ func (e *EngineImpl) Kick(name string, channel string) {
 	e.SendRawMessage(p)
 }
 
+func (e *EngineImpl) Ban(name string) {
+	p := fmt.Sprintf(`{ "cmd": "ban", "nick": "%s" }`, name)
+	e.SendRawMessage(p)
+}
+
+func (e *EngineImpl) Unban(hash string) {
+	p := fmt.Sprintf(`{ "cmd": "unban", "hash": "%s" }`, hash)
+	e.SendRawMessage(p)
+}
+
+func (e *EngineImpl) UnbanAll() {
+	e.SendRawMessage(`{ "cmd": "unbanall" }`)
+}
+
+func (e *EngineImpl) Lock() {
+	e.SendRawMessage(`{ "cmd": "lockroom" }`)
+}
+
+func (e *EngineImpl) Unlock() {
+	e.SendRawMessage(`{ "cmd": "unlockroom" }`)
+}
+
 func (e *EngineImpl) RegisterCommand(c common.Command) {
 	aliases := c.GetAliases()
 	var constructorFn = func(msg *model.ChatMessage) common.Command {
