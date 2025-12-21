@@ -22,7 +22,7 @@ func (u *List) GetAliases() []string {
 
 func (u *List) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) common.Command {
 	return &List{
-		AccessLevel: model.ADMIN,
+		AccessLevel: model.USER,
 		engine:      engine,
 		chatMessage: chatMessage,
 	}

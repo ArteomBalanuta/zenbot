@@ -216,6 +216,11 @@ func (e *EngineImpl) GetName() string {
 	return e.Name
 }
 
+func (e *EngineImpl) Kick(name string, channel string) {
+	p := fmt.Sprintf(`{ "cmd": "kick", "nick": "%s", "to": "%s" }`, name, channel)
+	e.SendRawMessage(p)
+}
+
 func (e *EngineImpl) RegisterCommand(c common.Command) {
 	aliases := c.GetAliases()
 	var constructorFn = func(msg *model.ChatMessage) common.Command {

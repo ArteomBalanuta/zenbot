@@ -19,6 +19,8 @@ type Engine interface {
 	GetActiveUserByName(name string) *model.User
 	GetActiveUsers() *map[*model.User]struct{}
 
+	Kick(name string, channel string)
+
 	GetPrefix() string
 	GetName() string
 	GetChannel() string
