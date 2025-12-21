@@ -13,7 +13,7 @@ type InfoMessage struct {
 	Name    string      `json:"nick"`
 	Trip    string      `json:"trip"`
 	Time    uint64      `json:"time"`
-	Channel string      `json:"channel"`
+	Channel interface{} `json:"channel"`
 	Text    string      `json:"text"`
 	Mod     bool        `json:"mod"`
 	Flair   interface{} `json:"flair"`
