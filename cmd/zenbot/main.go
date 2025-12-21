@@ -33,6 +33,11 @@ func main() {
 	e.RegisterCommand(&command.Say{})
 	e.RegisterCommand(&command.Afk{})
 	e.RegisterCommand(&command.Kick{})
+	e.RegisterCommand(&command.Ban{})
+	e.RegisterCommand(&command.Unban{})
+	e.RegisterCommand(&command.UnbanAll{})
+	e.RegisterCommand(&command.Lock{})
+	e.RegisterCommand(&command.Unlock{})
 
 	go e.Start()
 
