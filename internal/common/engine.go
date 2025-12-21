@@ -25,7 +25,7 @@ type Engine interface {
 	// GetConnection() *Connection
 	SetName(n string)
 
-	RegisterCommand(c *Command)
+	RegisterCommand(c Command)
 	GetEnabledCommands() *map[string]CommandMetadata
 
 	SetOnlineSetListener(l Listener)

@@ -61,10 +61,6 @@ func (e *EngineImpl) Start() {
 		}
 	}
 
-	// e.RegisterCommand(&List{})
-	// e.RegisterCommand(&Say{})
-	// e.RegisterCommand(&Afk{})
-
 	e.EngineWg.Add(1)
 	go e.startSharingMessages()
 	e.EngineWg.Wait()
@@ -220,10 +216,10 @@ func (e *EngineImpl) GetName() string {
 	return e.Name
 }
 
-func (e *EngineImpl) RegisterCommand(c *common.Command) {
-	aliases := (*c).GetAliases()
+func (e *EngineImpl) RegisterCommand(c common.Command) {
+	aliases := c.GetAliases()
 	var constructorFn = func(msg *model.ChatMessage) common.Command {
-		return (*c).NewInstance(e, msg)
+		return c.NewInstance(e, msg)
 	}
 
 	for _, alias := range aliases {

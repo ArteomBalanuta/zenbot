@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"zenbot/internal/command"
 	"zenbot/internal/config"
 	"zenbot/internal/factory"
 	"zenbot/internal/model"
@@ -27,6 +28,11 @@ func main() {
 	}
 
 	e := factory.NewEngine(model.MASTER, c, db)
+
+	e.RegisterCommand(&command.List{})
+	e.RegisterCommand(&command.Say{})
+	e.RegisterCommand(&command.Afk{})
+
 	go e.Start()
 
 	select {
