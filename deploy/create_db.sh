@@ -83,3 +83,5 @@ CREATE TABLE "trip_names" (
     UNIQUE ("trip_id", "name_id")
 );
 EOF
+
+echo "Database files: $(ls database)"
