@@ -9,9 +9,15 @@ type Engine interface {
 	DispatchMessage(jsonMessage string)
 	SendRawMessage(message string)
 	SendChatMessage(author, message string, IsWhisper bool) (string, error)
+	SendWhisperMessage(author, payload string) (string, error)
+	SendAddressedMessage(author, payload string, whisper bool) (string, error)
 
 	AddActiveUser(joined *model.User)
 	RemoveActiveUser(left *model.User)
+	SubscribeTrip(trip string) bool
+	UnsubscribeTrip(trip string) bool
+	IsSubscribedTrip(trip string) bool
+	GetSubscribedTrips() []string
 
 	AddAfkUser(u *model.User, reason string)
 	GetAfkUsers() *map[*model.User]string

@@ -14,7 +14,7 @@ type Unban struct {
 }
 
 func (u *Unban) GetAliases() []string {
-	return []string{"unban", "ub"}
+	return []string{"unban"}
 }
 
 func (u *Unban) GetRole() *model.Role {
@@ -30,10 +30,15 @@ func (u *Unban) NewInstance(engine common.Engine, chatMessage *model.ChatMessage
 }
 
 func (u *Unban) Execute() {
-	hash := u.chatMessage.GetArguments()[1:][0]
+	arguments := u.chatMessage.GetArguments()
+	if len(arguments) < 2 {
+		u.engine.SendChatMessage(u.chatMessage.Name, "Example: "+u.engine.GetPrefix()+"unban HjkUEWNlIRH35Xk", u.chatMessage.IsWhisper)
+		return
+	}
+	hash := arguments[1]
 	if strings.TrimSpace(hash) != "" {
 		u.engine.Unban(hash)
-		u.engine.SendChatMessage(u.chatMessage.Name, fmt.Sprintf(" user with hash: %s, unbanned", hash), u.chatMessage.IsWhisper)
+		u.engine.SendChatMessage(u.chatMessage.Name, fmt.Sprintf("%s has been unbanned", hash), u.chatMessage.IsWhisper)
 	} else {
 		u.engine.SendChatMessage(u.chatMessage.Name, " user not found", u.chatMessage.IsWhisper)
 	}

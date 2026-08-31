@@ -12,7 +12,7 @@ type Unlock struct {
 }
 
 func (u *Unlock) GetAliases() []string {
-	return []string{"unlock", "unlockroom", "unlockchannel", "unr"}
+	return []string{"unlock", "unlockroom"}
 }
 
 func (u *Unlock) GetRole() *model.Role {

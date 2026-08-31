@@ -2,6 +2,7 @@ package command
 
 import (
 	"strings"
+
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -29,8 +30,16 @@ func (u *Say) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) 
 }
 
 func (u *Say) Execute() {
-	var argArr = u.chatMessage.GetArguments()[1:]
-	str := strings.Join(argArr, " ") // TODO: fix - make sure \n \t are preserved!
+	message := strings.Join(u.chatMessage.GetArguments()[1:], " ") + " "
+	if user := u.engine.GetActiveUserByName(u.chatMessage.Name); user == nil || !u.engine.IsUserAuthorized(user, rolePtr(model.ADMIN)) {
+		message = strings.Map(func(r rune) rune {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' {
+				return r
+			}
+			return -1
+		}, message)
+	}
 
-	u.engine.SendChatMessage("", str, false)
+	// Saturn deliberately sends say output as a public, bot-authored message.
+	_, _ = u.engine.SendChatMessage("", message, false)
 }

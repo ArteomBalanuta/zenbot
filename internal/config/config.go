@@ -9,6 +9,8 @@ import (
 
 type Config struct {
 	WebsocketUrl                      string   `toml:"url"`
+	WsUrl                             string   `toml:"wsUrl"`
+	Nick                              string   `toml:"nick"`
 	CmdPrefix                         string   `toml:"cmdPrefix"`
 	Name                              string   `toml:"name"`
 	Password                          string   `toml:"password"`

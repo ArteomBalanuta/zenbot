@@ -1,15 +1,46 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
+	"zenbot/internal/transport"
+)
+
+type EngineTransport interface {
+	Start(context.Context) error
+	Messages() <-chan []byte
+	Errors() <-chan error
+	Connected() bool
+	SendText(context.Context, string) error
+	SendRaw(context.Context, []byte) error
+	Close(context.Context) error
+}
+
+type ManagedEngine interface {
+	common.Engine
+	StartContext(context.Context) error
+	StopContext(context.Context) error
+	Healthy() bool
+	EngineType() model.EngineType
+	ReplicaChannels() []string
+}
+
+type ListenerProfile int
+
+const (
+	Permanent ListenerProfile = iota
+	TemporaryOnlineSet
 )
 
 type EngineImpl struct {
@@ -28,6 +59,7 @@ type EngineImpl struct {
 	ActiveUsers     map[*model.User]struct{}
 	AfkUsers        map[*model.User]string
 	HcConnection    *Connection
+	Transport       EngineTransport
 	Repository      repository.Repository
 
 	//TODO: use a proper collection.
@@ -39,8 +71,21 @@ type EngineImpl struct {
 	UserInfoListener   common.Listener
 
 	SecurityService *service.SecurityService
+	Services        *service.Bundle
 
-	EnabledCommands map[string]common.CommandMetadata
+	EnabledCommands      map[string]common.CommandMetadata
+	usersMu              sync.RWMutex
+	subscribersMu        sync.RWMutex
+	subscribers          map[string]struct{}
+	runtimeMu            sync.Mutex
+	runtimeCancel        context.CancelFunc
+	runtimeDone          chan struct{}
+	joined               atomic.Bool
+	Profile              ListenerProfile
+	replicaController    *ManagedReplicaController
+	LifecycleErrors      chan<- error
+	runtimeFailure       func(error)
+	transportErrReported atomic.Bool
 }
 
 func (e *EngineImpl) Start() {
@@ -69,6 +114,12 @@ func (e *EngineImpl) Start() {
 }
 
 func (e *EngineImpl) Stop() {
+	if e.Transport != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = e.StopContext(ctx)
+		return
+	}
 	e.HcConnection.pingCancel()
 
 	err := e.HcConnection.Close()
@@ -80,6 +131,124 @@ func (e *EngineImpl) Stop() {
 
 	e.HcConnection.Wg.Wait()
 	fmt.Println("Connection WGroup finished.")
+}
+
+func (e *EngineImpl) reportTransportError(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrClosed) {
+		return err
+	}
+	wrapped := fmt.Errorf("engine %s transport: %w", e.Channel, err)
+	if e.transportErrReported.CompareAndSwap(false, true) {
+		if e.runtimeFailure != nil {
+			e.runtimeFailure(wrapped)
+		} else if e.LifecycleErrors != nil {
+			select {
+			case e.LifecycleErrors <- wrapped:
+			default:
+			}
+		}
+	}
+	return err
+}
+
+func (e *EngineImpl) StartContext(parent context.Context) error {
+	if e.Transport == nil {
+		return fmt.Errorf("managed transport is nil")
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	e.runtimeMu.Lock()
+	if e.runtimeCancel != nil {
+		e.runtimeMu.Unlock()
+		return fmt.Errorf("engine already started")
+	}
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	e.runtimeCancel, e.runtimeDone = cancel, done
+	e.runtimeMu.Unlock()
+	if err := e.Transport.Start(ctx); err != nil {
+		e.reportTransportError(err)
+		cancel()
+		e.runtimeMu.Lock()
+		e.runtimeCancel = nil
+		close(done)
+		e.runtimeMu.Unlock()
+		return err
+	}
+	if !e.joined.Swap(true) {
+		p := fmt.Sprintf(`{ "cmd": "join", "channel": "%s", "nick": "%s#%s" }`, e.Channel, e.Name, e.Password)
+		if err := e.Transport.SendText(ctx, p); err != nil {
+			_ = e.StopContext(context.Background())
+			return err
+		}
+	}
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-e.Transport.Messages():
+				if msg != nil {
+					e.DispatchMessage(string(msg))
+				}
+			case err := <-e.Transport.Errors():
+				if err != nil {
+					e.reportTransportError(err)
+					cancel()
+				}
+				return
+			}
+		}
+	}()
+	return nil
+}
+func (e *EngineImpl) StopContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	e.runtimeMu.Lock()
+	cancel, done := e.runtimeCancel, e.runtimeDone
+	e.runtimeCancel = nil
+	e.runtimeMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	err := e.Transport.Close(ctx)
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			if err == nil {
+				err = ctx.Err()
+			}
+		}
+	}
+	return err
+}
+func (e *EngineImpl) Healthy() bool                { return e.Transport != nil && e.Transport.Connected() }
+func (e *EngineImpl) EngineType() model.EngineType { return e.Type }
+func (e *EngineImpl) ReplicaChannels() []string {
+	if e.replicaController == nil {
+		return nil
+	}
+	return e.replicaController.ReplicaChannels()
+}
+func (e *EngineImpl) SetReplicaController(c *ManagedReplicaController) { e.replicaController = c }
+func (e *EngineImpl) SetRuntimeFailureHandler(fn func(error))          { e.runtimeFailure = fn }
+func (e *EngineImpl) AddReplica(ctx context.Context, channel string) error {
+	if e.replicaController == nil {
+		return fmt.Errorf("replica controller is not configured")
+	}
+	return e.replicaController.AddReplica(ctx, channel)
+}
+func (e *EngineImpl) RemoveReplica(ctx context.Context, channel string) error {
+	if e.replicaController == nil {
+		return fmt.Errorf("replica controller is not configured")
+	}
+	return e.replicaController.RemoveReplica(ctx, channel)
 }
 
 func (e *EngineImpl) DispatchMessage(jsonMessage string) {
@@ -116,8 +285,18 @@ func (e *EngineImpl) DispatchMessage(jsonMessage string) {
 	}
 }
 
-func (e *EngineImpl) SendRawMessage(message string) {
+func (e *EngineImpl) sendOutbound(message string) error {
+	if e.Transport != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return e.Transport.SendText(ctx, message)
+	}
 	e.OutMessageQueue <- message
+	return nil
+}
+
+func (e *EngineImpl) SendRawMessage(message string) {
+	_ = e.sendOutbound(message)
 }
 
 func (e *EngineImpl) SendChatMessage(author, message string, IsWhisper bool) (string, error) {
@@ -128,8 +307,25 @@ func (e *EngineImpl) SendChatMessage(author, message string, IsWhisper bool) (st
 	}
 
 	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
-	e.OutMessageQueue <- chatPayload
-	return message, nil
+	return message, e.sendOutbound(chatPayload)
+}
+
+func (e *EngineImpl) SendWhisperMessage(author, payload string) (string, error) {
+	message := "/whisper @" + author + " " + strings.ReplaceAll(payload, `\n`, "\n")
+	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
+	return message, e.sendOutbound(chatPayload)
+}
+
+func (e *EngineImpl) SendAddressedMessage(author, payload string, whisper bool) (string, error) {
+	payload = strings.ReplaceAll(payload, "\r\n", "\n")
+	payload = strings.ReplaceAll(payload, "\r", "\n")
+	payload = strings.ReplaceAll(payload, `\n`, "\n")
+	message := "@" + author + " " + payload
+	if whisper {
+		message = "/whisper @" + author + " " + payload
+	}
+	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
+	return message, e.sendOutbound(chatPayload)
 }
 
 func (e *EngineImpl) startSharingMessages() {
@@ -140,8 +336,82 @@ func (e *EngineImpl) startSharingMessages() {
 	}
 }
 
+func (e *EngineImpl) ReplaceActiveUsers(users []*model.User) {
+	next := make(map[*model.User]struct{}, len(users))
+	for _, u := range users {
+		if u != nil {
+			v := *u
+			next[&v] = struct{}{}
+		}
+	}
+	e.usersMu.Lock()
+	e.ActiveUsers = next
+	e.usersMu.Unlock()
+}
+
 func (e *EngineImpl) AddActiveUser(joined *model.User) {
+	if joined == nil {
+		return
+	}
+	e.usersMu.Lock()
+	defer e.usersMu.Unlock()
+	for u := range e.ActiveUsers {
+		if model.IdentityKey(u.Trip, u.Hash, u.Name) == model.IdentityKey(joined.Trip, joined.Hash, joined.Name) {
+			delete(e.ActiveUsers, u)
+		}
+	}
 	e.ActiveUsers[joined] = struct{}{}
+}
+
+func (e *EngineImpl) SubscribeTrip(trip string) bool {
+	trip = strings.TrimSpace(trip)
+	if trip == "" {
+		return false
+	}
+	e.subscribersMu.Lock()
+	defer e.subscribersMu.Unlock()
+	if e.subscribers == nil {
+		e.subscribers = make(map[string]struct{})
+	}
+	if _, exists := e.subscribers[trip]; exists {
+		return false
+	}
+	e.subscribers[trip] = struct{}{}
+	return true
+}
+
+func (e *EngineImpl) UnsubscribeTrip(trip string) bool {
+	trip = strings.TrimSpace(trip)
+	e.subscribersMu.Lock()
+	defer e.subscribersMu.Unlock()
+	for current := range e.subscribers {
+		if strings.EqualFold(current, trip) {
+			delete(e.subscribers, current)
+			return true
+		}
+	}
+	return false
+}
+
+func (e *EngineImpl) IsSubscribedTrip(trip string) bool {
+	e.subscribersMu.RLock()
+	defer e.subscribersMu.RUnlock()
+	for current := range e.subscribers {
+		if strings.EqualFold(current, strings.TrimSpace(trip)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *EngineImpl) GetSubscribedTrips() []string {
+	e.subscribersMu.RLock()
+	defer e.subscribersMu.RUnlock()
+	out := make([]string, 0, len(e.subscribers))
+	for trip := range e.subscribers {
+		out = append(out, trip)
+	}
+	return out
 }
 
 func (e *EngineImpl) RemoveActiveUser(left *model.User) {
@@ -203,6 +473,8 @@ func (e *EngineImpl) GetActiveUsers() *map[*model.User]struct{} {
 	return &e.ActiveUsers
 }
 
+func (e *EngineImpl) ServiceBundle() *service.Bundle { return e.Services }
+
 func (e *EngineImpl) GetChannel() string {
 	return e.Channel
 }
@@ -245,7 +517,7 @@ func (e *EngineImpl) RegisterCommand(c common.Command) {
 	}
 
 	for _, alias := range aliases {
-		e.EnabledCommands[alias] = common.CommandMetadata{
+		e.EnabledCommands[strings.ToLower(strings.TrimSpace(alias))] = common.CommandMetadata{
 			Alias:   alias,
 			Command: constructorFn,
 		}
@@ -283,6 +555,9 @@ func (e *EngineImpl) GetPrefix() string {
 }
 
 func (e *EngineImpl) IsUserAuthorized(u *model.User, r *model.Role) bool {
+	if e.SecurityService == nil {
+		return false
+	}
 	return e.SecurityService.IsAuthorized(u, r)
 }
 

@@ -2,6 +2,7 @@ package common
 
 import (
 	"log"
+	"strings"
 	"zenbot/internal/model"
 )
 
@@ -18,7 +19,7 @@ type CommandMetadata struct {
 }
 
 func BuildCommand(alias string, e Engine, msg *model.ChatMessage) Command {
-	command, exists := (*e.GetEnabledCommands())[alias]
+	command, exists := (*e.GetEnabledCommands())[strings.ToLower(strings.TrimSpace(alias))]
 	if !exists {
 		log.Println("Unknown command")
 	} else {
