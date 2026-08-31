@@ -15,13 +15,16 @@ type InfoMessage struct {
 	Time    uint64      `json:"time"`
 	Channel interface{} `json:"channel"`
 	Text    string      `json:"text"`
+	Type    string      `json:"type"`
 	Mod     bool        `json:"mod"`
 	Flair   interface{} `json:"flair"`
 	Color   string      `json:"color"`
+	To      interface{} `json:"to"`
 }
 
 type ChatMessage struct {
-	IsWhisper bool
+	Whisper   bool `json:"-"`
+	IsWhisper bool `json:"-"`
 	Size      string
 	Cmd       string      `json:"cmd"`
 	Name      string      `json:"nick"`
@@ -30,6 +33,7 @@ type ChatMessage struct {
 	Time      uint64      `json:"time"`
 	Channel   string      `json:"channel"`
 	Text      string      `json:"text"`
+	Type      string      `json:"type"`
 	Mod       bool        `json:"mod"`
 	Flair     interface{} `json:"flair"`
 	Color     string      `json:"color"`

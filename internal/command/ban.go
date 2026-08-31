@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"strings"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -13,7 +14,7 @@ type Ban struct {
 }
 
 func (u *Ban) GetAliases() []string {
-	return []string{"ban", "b"}
+	return []string{"ban"}
 }
 
 func (u *Ban) GetRole() *model.Role {
@@ -29,13 +30,16 @@ func (u *Ban) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) 
 }
 
 func (u *Ban) Execute() {
-	target := u.chatMessage.GetArguments()[1:][0]
-
-	user := u.engine.GetActiveUserByName(target)
-	if user != nil {
-		u.engine.Ban(target)
-		u.engine.SendChatMessage(u.chatMessage.Name, fmt.Sprintf(" user with hash: %s banned", user.Hash), u.chatMessage.IsWhisper)
-	} else {
-		u.engine.SendChatMessage(u.chatMessage.Name, " user not found", u.chatMessage.IsWhisper)
+	arguments := u.chatMessage.GetArguments()
+	if len(arguments) < 2 || strings.TrimSpace(arguments[1]) == "" {
+		u.engine.SendChatMessage(u.chatMessage.Name, "Example: "+u.engine.GetPrefix()+"ban merc", u.chatMessage.IsWhisper)
+		return
 	}
+	target := strings.TrimPrefix(strings.TrimSpace(arguments[1]), "@")
+	if target == "" {
+		return
+	}
+
+	u.engine.Ban(target)
+	u.engine.SendChatMessage(u.chatMessage.Name, fmt.Sprintf("%s has been banned", target), u.chatMessage.IsWhisper)
 }
