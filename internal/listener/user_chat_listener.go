@@ -15,7 +15,13 @@ type UserChatListener struct {
 }
 
 func NewUserChatListener(e common.Engine) *UserChatListener {
-	return &UserChatListener{engine: e, chain: message.DefaultChain()}
+	return NewUserChatListenerWithChain(e, nil)
+}
+func NewUserChatListenerWithChain(e common.Engine, chain *message.Chain) *UserChatListener {
+	if chain == nil {
+		chain = message.DefaultChain()
+	}
+	return &UserChatListener{engine: e, chain: chain}
 }
 func (u *UserChatListener) Notify(text string) {
 	var m model.ChatMessage

@@ -1,0 +1,28 @@
+# Agent configuration example
+[agent]
+enabled = false
+endpoint = "http://localhost:16261"
+model = "your-model"
+# Number of completed exchanges included in prompts (1..60).
+memoryTurns = 6
+# Durable memory retention in minutes (1..525600).
+memoryTtlMinutes = 1440
+# Maximum Unicode code points sent as one visible agent response (1..1000000).
+maxOutputChars = 8000
+# Autonomous join moderation is off by default and independent of agent.enabled.
+# It composes only when every positive threshold/window below is present.
+moderationEnabled = false
+moderationJoinBurstCount = 8
+moderationJoinWindowSeconds = 10
+moderationSameHashCount = 5
+moderationSameHashWindowSeconds = 20
+moderationNameClusterCount = 5
+moderationNameClusterWindowSeconds = 20
+moderationPostKickWindowSeconds = 600
+moderationActionCooldownSeconds = 30
+# Deterministic public-message anti-spam thresholds; no semantic/provider moderation.
+moderationMessageBurstCount = 6
+moderationMessageBurstWindowSeconds = 5
+moderationRepeatedMessageCount = 4
+moderationRepeatedMessageWindowSeconds = 10
+moderationSecondBreachWindowSeconds = 30

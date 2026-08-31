@@ -80,6 +80,49 @@ func TestPipelineRejectsCaseInsensitiveSelfAndConventionalBotAuthors(t *testing.
 	}
 }
 
+type recordingPipelineSubmitter struct{ invocations []api.Invocation }
+
+func (s *recordingPipelineSubmitter) Submit(inv api.Invocation) error {
+	s.invocations = append(s.invocations, inv)
+	return nil
+}
+
+func TestPipelinePassesResolvedBotAuthorAfterMonitoringWithoutAdvancingAmbientCadence(t *testing.T) {
+	submitter := &recordingPipelineSubmitter{}
+	monitored := 0
+	p := Pipeline{
+		Factory: NewInvocationFactory(nil),
+		Parser:  MentionParser{},
+		Submit:  submitter,
+		Monitor: func(Event) { monitored++ },
+	}
+	snapshot := TrustedSnapshot{Room: "room", Users: []string{}}
+
+	bot := p.Handle(Event{
+		Message:        model.ChatMessage{Name: "automaton", Text: "@bot help"},
+		Snapshot:       snapshot,
+		BotNick:        "bot",
+		AuthorIsBot:    true,
+		AmbientEnabled: true,
+		AmbientEvery:   1,
+	})
+	if bot.Decision != Pass || bot.Submitted || bot.Err != nil || len(submitter.invocations) != 0 || monitored != 1 {
+		t.Fatalf("resolved bot outcome=%+v invocations=%d monitored=%d", bot, len(submitter.invocations), monitored)
+	}
+
+	human := p.Handle(Event{
+		Message:        model.ChatMessage{Name: "alice", Text: "ordinary message"},
+		Snapshot:       snapshot,
+		BotNick:        "bot",
+		AuthorIsBot:    false,
+		AmbientEnabled: true,
+		AmbientEvery:   1,
+	})
+	if human.Decision != Pass || !human.Submitted || human.Mode != api.AMBIENT || len(submitter.invocations) != 1 || monitored != 2 {
+		t.Fatalf("human outcome=%+v invocations=%d monitored=%d", human, len(submitter.invocations), monitored)
+	}
+}
+
 func TestMentionParserSaturnParity(t *testing.T) {
 	p := MentionParser{}
 	for _, tc := range []struct {

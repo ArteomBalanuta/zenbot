@@ -9,6 +9,33 @@ import (
 	"time"
 )
 
+func TestRuntimeFailureSinkOnlyRepliesForRequiredModes(t *testing.T) {
+	var got []Mode
+	var mu sync.Mutex
+	failure := FailureSinkFunc(func(_ context.Context, inv Invocation, _ error) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, inv.Mode())
+	})
+	rt, err := NewWithFailureSink(Config{MaxConcurrent: 1, QueueCapacity: 1}, RunnerFunc(func(_ context.Context, inv Invocation) (Result, error) { return Result{}, errors.New("failed") }), nil, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	if err := rt.Submit(NewInvocation("mention", NewContext("r", "n", "", "", false, nil), "p", MENTION, "", false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Submit(NewInvocation("ambient", NewContext("r2", "n", "", "", false, nil), "p", AMBIENT, "", false)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(got) == 1 })
+	mu.Lock()
+	defer mu.Unlock()
+	if got[0] != MENTION {
+		t.Fatalf("failures=%v", got)
+	}
+}
+
 func TestRuntimeMemoryKeySeparatesPublicAndWhisperSessions(t *testing.T) {
 	public := NewContext("room", "alice", "trip", "hash", false, nil)
 	whisper := NewContext("room", "alice", "trip", "hash", true, nil)
@@ -172,4 +199,53 @@ func waitFor(t *testing.T, condition func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("condition was not met")
+}
+
+type postDeliveryRunner struct {
+	result Result
+	mu     sync.Mutex
+	calls  int
+}
+
+func (r *postDeliveryRunner) Run(context.Context, Invocation) (Result, error) { return r.result, nil }
+func (r *postDeliveryRunner) AfterDelivery(context.Context, Invocation, Result) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	return nil
+}
+func (r *postDeliveryRunner) persisted() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+func TestRuntimeCallsPostDeliveryOnlyAfterSuccessfulVisibleSink(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		result     Result
+		sinkErr    error
+		wantWrites int
+	}{
+		{name: "successful visible delivery", result: NewResult("success", "visible", true), wantWrites: 1},
+		{name: "sink failure", result: NewResult("sink-failure", "visible", true), sinkErr: errors.New("sink failure"), wantWrites: 0},
+		{name: "no reply", result: NewResult("no-reply", "", false), wantWrites: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &postDeliveryRunner{result: tc.result}
+			rt := mustRuntime(t, Config{MaxConcurrent: 1, QueueCapacity: 1}, runner, SinkFunc(func(context.Context, Invocation, Result) error { return tc.sinkErr }))
+			defer rt.Close()
+			if err := rt.Submit(invocation(tc.result.CorrelationID(), "room")); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantWrites == 1 {
+				waitFor(t, func() bool { return runner.persisted() == tc.wantWrites })
+			} else {
+				time.Sleep(20 * time.Millisecond)
+				if got := runner.persisted(); got != tc.wantWrites {
+					t.Fatalf("post-delivery writes=%d, want %d", got, tc.wantWrites)
+				}
+			}
+		})
+	}
 }

@@ -1,12 +1,16 @@
 package turn
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 
 	"strings"
 	"sync"
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/tool/contract"
+	"zenbot/internal/repository"
 )
 
 var ErrInvalidEvidence = errors.New("invalid tool evidence")
@@ -14,6 +18,44 @@ var ErrMemoryLoad = errors.New("Agent memory load failed")
 var ErrMemoryPersistence = errors.New("Agent memory persistence failed")
 
 type EvidenceEntry struct{ Tool, Content string }
+type PersistableEvidence struct{ Tool, Content string }
+
+// HistoricalEvidence is validated durable tool data for one later public request.
+type HistoricalEvidence struct {
+	Tool             string
+	Content          string
+	ObservedAtMillis int64
+}
+
+const maxDurableEvidenceBytes = 32000
+
+var durableEvidenceSchemas = map[string]json.RawMessage{
+	"user_message_history": contract.SchemaObject(map[string]json.RawMessage{
+		"rows":          json.RawMessage(`{"type":"array"}`),
+		"returnedCount": json.RawMessage(`{"type":"integer"}`),
+	}, []string{"rows", "returnedCount"}, false),
+	"room_users": contract.SchemaObject(map[string]json.RawMessage{
+		"room":          json.RawMessage(`{"type":"string"}`),
+		"users":         json.RawMessage(`{"type":"array","items":{"type":"string"}}`),
+		"count":         json.RawMessage(`{"type":"integer"}`),
+		"returnedCount": json.RawMessage(`{"type":"integer"}`),
+		"truncated":     json.RawMessage(`{"type":"boolean"}`),
+	}, []string{"room", "users", "count", "returnedCount", "truncated"}, false),
+}
+
+func validPersistableEvidence(e PersistableEvidence) bool {
+	schema, ok := durableEvidenceSchemas[e.Tool]
+	return ok && strings.TrimSpace(e.Content) != "" && len([]byte(e.Content)) <= maxDurableEvidenceBytes && json.Valid([]byte(e.Content)) && contract.ValidateResult(schema, []byte(e.Content)) == nil
+}
+
+func NewPersistableEvidence(d contract.Descriptor, result contract.Result) (PersistableEvidence, error) {
+	candidate := PersistableEvidence{Tool: d.Name(), Content: result.Content}
+	if result.IsError || d.ResultMode() != contract.ModelData || !d.IsReadOnly() || !d.Idempotent() || len(d.ResourceWrites()) != 0 || len(d.ResourceReads()) == 0 || d.Name() != result.ToolName || !validPersistableEvidence(candidate) || contract.ValidateResult(d.ResultSchema(), []byte(result.Content)) != nil {
+		return PersistableEvidence{}, ErrInvalidEvidence
+	}
+	return PersistableEvidence{Tool: candidate.Tool, Content: string(append([]byte(nil), candidate.Content...))}, nil
+}
+
 type MemoryStore interface {
 	Load(api.Context) ([]llm.LlmMessage, error)
 	Append(api.Context, string, string) error
@@ -105,7 +147,21 @@ func NewTurnMemory(store MemoryStore) (TurnMemory, error) {
 	return TurnMemory{store: store}, nil
 }
 func (m TurnMemory) Load(ctx api.Context, _ string) ([]llm.LlmMessage, error) {
-	h, err := m.store.Load(ctx)
+	return m.LoadContext(context.Background(), ctx, "")
+}
+func (m TurnMemory) LoadContext(parent context.Context, ctx api.Context, _ string) ([]llm.LlmMessage, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
+	var h []llm.LlmMessage
+	var err error
+	if loader, ok := m.store.(interface {
+		LoadContext(context.Context, api.Context) ([]llm.LlmMessage, error)
+	}); ok {
+		h, err = loader.LoadContext(parent, ctx)
+	} else {
+		h, err = m.store.Load(ctx)
+	}
 	if err != nil {
 		return nil, memoryError{sentinel: ErrMemoryLoad, cause: err}
 	}
@@ -124,7 +180,58 @@ func (m TurnMemory) Load(ctx api.Context, _ string) ([]llm.LlmMessage, error) {
 	}
 	return out, nil
 }
-func (m TurnMemory) Append(ctx api.Context, user, assistant, _ string) error {
+
+// LoadHistoricalEvidenceContext loads bounded structured durable evidence only for public requests.
+func (m TurnMemory) LoadHistoricalEvidenceContext(parent context.Context, ctx api.Context) ([]HistoricalEvidence, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
+	if ctx.Whisper() {
+		return []HistoricalEvidence{}, nil
+	}
+	loader, ok := m.store.(interface {
+		LoadToolEvidenceContext(context.Context, api.Context) ([]repository.AgentToolEvidence, error)
+	})
+	if !ok {
+		return []HistoricalEvidence{}, nil
+	}
+	rows, err := loader.LoadToolEvidenceContext(parent, ctx)
+	if err != nil {
+		return nil, memoryError{sentinel: ErrMemoryLoad, cause: err}
+	}
+	out := make([]HistoricalEvidence, 0, len(rows))
+	for _, row := range rows {
+		candidate := PersistableEvidence{Tool: row.ToolName, Content: row.Content}
+		if row.CreatedOnMillis < 0 || !validPersistableEvidence(candidate) {
+			continue
+		}
+		out = append(out, HistoricalEvidence{Tool: candidate.Tool, Content: string(append([]byte(nil), candidate.Content...)), ObservedAtMillis: row.CreatedOnMillis})
+	}
+	return out, nil
+}
+func (m TurnMemory) Append(ctx api.Context, user, assistant, correlationID string) error {
+	return m.AppendContext(context.Background(), ctx, user, assistant, correlationID)
+}
+func (m TurnMemory) AppendContext(parent context.Context, ctx api.Context, user, assistant, _ string) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	if exchange, ok := m.store.(interface {
+		AppendExchangeContext(context.Context, api.Context, string, string) error
+	}); ok {
+		if err := exchange.AppendExchangeContext(parent, ctx, user, assistant); err != nil {
+			return memoryError{sentinel: ErrMemoryPersistence, cause: err}
+		}
+		return nil
+	}
+	if exchange, ok := m.store.(interface {
+		AppendExchange(api.Context, string, string) error
+	}); ok {
+		if err := exchange.AppendExchange(ctx, user, assistant); err != nil {
+			return memoryError{sentinel: ErrMemoryPersistence, cause: err}
+		}
+		return nil
+	}
 	if err := m.store.Append(ctx, "user", user); err != nil {
 		return memoryError{sentinel: ErrMemoryPersistence, cause: err}
 	}
@@ -156,6 +263,30 @@ func (m TurnMemory) AppendToolEvidence(ctx api.Context, es []EvidenceEntry, _ st
 		}
 	}
 	return nil
+}
+func (m TurnMemory) AppendToolEvidenceContext(parent context.Context, ctx api.Context, es []PersistableEvidence) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	if len(es) == 0 {
+		return nil
+	}
+	entries := make([]EvidenceEntry, len(es))
+	for i, e := range es {
+		if !validPersistableEvidence(e) {
+			return ErrInvalidEvidence
+		}
+		entries[i] = EvidenceEntry{Tool: e.Tool, Content: string(append([]byte(nil), e.Content...))}
+	}
+	if batch, ok := m.store.(interface {
+		AppendEvidenceContext(context.Context, api.Context, []EvidenceEntry) error
+	}); ok {
+		if err := batch.AppendEvidenceContext(parent, ctx, entries); err != nil {
+			return memoryError{sentinel: ErrMemoryPersistence, cause: err}
+		}
+		return nil
+	}
+	return m.AppendToolEvidence(ctx, entries, "")
 }
 
 type memoryError struct{ sentinel, cause error }

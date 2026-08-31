@@ -38,6 +38,12 @@ func (a *legacyAdapter) NewInstance(e common.Engine, m *model.ChatMessage) commo
 // It intentionally does not expose the broader Saturn catalog while those
 // commands remain placeholders in Zenbot.
 func RegisterUserUtilities(e common.Engine) error {
+	return RegisterUserUtilitiesWithDirectAgent(e, nil)
+}
+
+// RegisterUserUtilitiesWithDirectAgent registers the concrete utility commands
+// and, when supplied, the composition-root direct l invoker.
+func RegisterUserUtilitiesWithDirectAgent(e common.Engine, invoker DirectAgentInvoker) error {
 	// These three user commands have dedicated legacy-dispatch implementations;
 	// register them explicitly rather than exposing catalog placeholders.
 	e.RegisterCommand(&Say{})
@@ -48,7 +54,7 @@ func RegisterUserUtilities(e common.Engine) error {
 	e.RegisterCommand(&UnbanAll{})
 	e.RegisterCommand(&Lock{})
 
-	canonicals := []string{"help", "crashcourse", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub"}
+	canonicals := []string{"help", "crashcourse", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub", "memory"}
 	if _, ok := e.(ReplicaController); ok {
 		canonicals = append(canonicals, "replica", "replicaoff", "replicastatus")
 	}
@@ -67,6 +73,9 @@ func RegisterUserUtilities(e common.Engine) error {
 			return fmt.Errorf("missing Saturn utility definition %q", canonical)
 		}
 		e.RegisterCommand(&legacyAdapter{engine: e, def: def})
+	}
+	if definition, ok := directLDefinition(invoker); ok {
+		e.RegisterCommand(&legacyAdapter{engine: e, def: definition})
 	}
 	return nil
 }

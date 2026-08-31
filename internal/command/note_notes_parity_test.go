@@ -2,29 +2,17 @@ package command
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
-	"zenbot/internal/repository/h2"
 	"zenbot/internal/service"
+	"zenbot/internal/testutil/h2fixture"
 )
 
 func openNotesParityEngine(t *testing.T) *commandEngineStub {
 	t.Helper()
-	dir := t.TempDir()
-	d, err := h2.Open(context.Background(), h2.Config{
-		BaseDir: dir, DatabaseStem: filepath.Join(dir, "db"),
-		H2Jar: "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar",
-		// Use a dedicated port: command integration tests already own 55437.
-		Port: 55438, StartupTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
+	d := h2fixture.Open(t, "notes")
 	return &commandEngineStub{
 		users:  map[string]*model.User{"alice": {Name: "alice", Trip: "trip"}},
 		bundle: &service.Bundle{Notes: &service.NoteService{DB: d.DB}},

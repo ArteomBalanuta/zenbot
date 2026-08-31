@@ -22,8 +22,10 @@ SELECT id FROM names WHERE name = ?
 FROM trip_names tn
 INNER JOIN trips t on tn.trip_id = t.id
 INNER JOIN names n on tn.name_id = n.id ORDER BY t.trip DESC;`
-	selectLastNMessages = `SELECT name,message,created_on FROM messages WHERE (name = ? or trip = ?) and (message not
-in ('LEFT','JOINED')) order by created_on desc limit ?;`
+	selectLastNMessages = `SELECT name,trip,message,created_on FROM messages WHERE (name = ? or trip = ?) and visibility = 'PUBLIC' and (message not
+in ('LEFT','JOINED')) order by created_on desc,id desc limit ?;`
+	selectLastNMessagesH2 = `SELECT name,trip,message,created_on FROM messages WHERE (name = $1 or trip = $2) and visibility = 'PUBLIC' and (message not
+in ('LEFT','JOINED')) order by created_on desc,id desc limit cast($3 as integer);`
 )
 
 var errSaturnUnauthorized = errors.New("saturn compatibility operation requires authorization")
@@ -134,7 +136,7 @@ func (d *Database) SaturnLastMessages(ctx context.Context, name *string, trip st
 	if count <= 0 {
 		count = 5
 	}
-	rows, err := d.DB.QueryContext(ctx, fmt.Sprintf("SELECT name,message,created_on FROM messages WHERE (name = $1 or trip = $2) and (message not in ('LEFT','JOINED')) order by created_on desc limit %d", count), name, trip)
+	rows, err := d.DB.QueryContext(ctx, selectLastNMessagesH2, name, trip, fmt.Sprint(count))
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +144,7 @@ func (d *Database) SaturnLastMessages(ctx context.Context, name *string, trip st
 	messages := make([]repository.SaturnLastMessage, 0)
 	for rows.Next() {
 		var message repository.SaturnLastMessage
-		if err := rows.Scan(&message.Name, &message.Message, &message.CreatedOn); err != nil {
+		if err := rows.Scan(&message.Name, &message.Trip, &message.Message, &message.CreatedOn); err != nil {
 			return nil, err
 		}
 		messages = append(messages, message)

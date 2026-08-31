@@ -79,6 +79,20 @@ func (m *ReplicaManager) Replicas() map[string]Replica {
 	}
 	return out
 }
+
+// ManagedEngines returns a snapshot of only managed replica engines. Ordinary
+// Replica implementations intentionally remain opaque to core observers.
+func (m *ReplicaManager) ManagedEngines() map[string]ManagedEngine {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]ManagedEngine, len(m.replicas))
+	for channel, replica := range m.replicas {
+		if managed, ok := replica.(managedReplica); ok {
+			out[channel] = managed.ManagedEngine
+		}
+	}
+	return out
+}
 func (m *ReplicaManager) Channels() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

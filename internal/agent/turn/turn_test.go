@@ -99,6 +99,37 @@ func TestHistoryNickAndFreshness(t *testing.T) {
 		}
 	}
 }
+func TestFreshnessPolicyRecognizesOnlySourceShapedPublicHistoryRequests(t *testing.T) {
+	policy := FreshnessPolicy{}
+	for _, tc := range []struct {
+		prompt, nick string
+	}{
+		{"user named @alice profile", "alice"},
+		{"describe user named alice\\_dev", "alice_dev"},
+		{"summarize Alice's history", "Alice"},
+		{"what did @bob say?", "bob"},
+		{"messages from carol", "carol"},
+	} {
+		tool, nick, ok := policy.Required(tc.prompt, nil, nil)
+		if !ok || tool != UserMessageHistory || nick != tc.nick {
+			t.Fatalf("recognized %q => %q/%q/%v", tc.prompt, tool, nick, ok)
+		}
+	}
+	for _, prompt := range []string{
+		"who is president", "who is in room", "tell me about Java", "user experience", "Rome history", "Shakespeare profile", "check it again",
+	} {
+		if tool, nick, ok := policy.Required(prompt, nil, nil); ok || tool != "" || nick != "" {
+			t.Fatalf("false positive %q => %q/%q/%v", prompt, tool, nick, ok)
+		}
+	}
+	history := []llm.LlmMessage{
+		llm.NewLlmMessage("user", "tell me about alice", nil, ""),
+		llm.NewLlmMessage("tool", "ignored", nil, ""),
+	}
+	if tool, nick, ok := policy.Required("check it again", history, nil); !ok || tool != UserMessageHistory || nick != "alice" {
+		t.Fatalf("follow-up => %q/%q/%v", tool, nick, ok)
+	}
+}
 func TestMemoryPrevalidatesAndRedacts(t *testing.T) {
 	m := NewMemoryStore()
 	if err := m.AppendEvidence([]EvidenceEntry{{Tool: "a", Content: "1"}, {Tool: "", Content: "2"}}); !errors.Is(err, ErrInvalidEvidence) {

@@ -9,8 +9,21 @@ import (
 
 	"github.com/gorilla/websocket"
 	"zenbot/internal/config"
+	"zenbot/internal/core"
 	"zenbot/internal/model"
+	"zenbot/internal/relay"
+	"zenbot/internal/repository"
 )
+
+type hostRelayStub struct{}
+
+func (hostRelayStub) RelayAgentMessage(context.Context, string, string) error { return nil }
+
+type shadowBanRepositoryStub struct{ repository.DummyImpl }
+
+func (shadowBanRepositoryStub) PersistShadowBan(context.Context, model.User, string) error {
+	return nil
+}
 
 func TestManagedMasterAndReplicaUseIndependentWebSockets(t *testing.T) {
 	joins := make(chan string, 2)
@@ -64,4 +77,66 @@ func TestManagedMasterAndReplicaUseIndependentWebSockets(t *testing.T) {
 	defer done()
 	_ = master.StopContext(stop)
 	_ = replica.StopContext(stop)
+}
+
+func TestNewEngineRejectsAgentWithoutHostRelay(t *testing.T) {
+	cfg := &config.Config{WebsocketUrl: "ws://example.test", Channel: "agent", Name: "bot"}
+	if _, err := NewEngineWithOptions(model.AGENT, cfg, nil, EngineOptions{}); err == nil {
+		t.Fatal("expected AGENT construction without a host relay to fail")
+	}
+}
+
+func TestNewEngineInstallsAgentHostRelayOnce(t *testing.T) {
+	cfg := &config.Config{WebsocketUrl: "ws://example.test", Channel: "agent", Name: "bot"}
+	var host relay.HostRelay = hostRelayStub{}
+	e, err := NewEngineWithOptions(model.AGENT, cfg, nil, EngineOptions{HostRelay: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.HostRelay(); got != host {
+		t.Fatalf("host relay=%T %p, want %T %p", got, got, host, host)
+	}
+}
+
+func TestComposeJoinAutomationFailsClosedWithoutShadowBanRepository(t *testing.T) {
+	cfg := &config.Config{Agent: config.AgentConfig{
+		ModerationEnabled: true, ModerationJoinBurstCount: 2, ModerationJoinWindowSeconds: 1,
+		ModerationSameHashCount: 2, ModerationSameHashWindowSeconds: 1,
+		ModerationNameClusterCount: 2, ModerationNameClusterWindowSeconds: 1,
+		ModerationPostKickWindowSeconds: 1, ModerationActionCooldownSeconds: 1,
+	}}
+	e := &core.EngineImpl{Name: "bot", Repository: &repository.DummyImpl{}}
+	if got := composeJoinAutomation(e, cfg); got != nil {
+		t.Fatalf("automation composed without authoritative shadow-ban persistence: %T", got)
+	}
+}
+
+func TestComposeMessageAutomationFailsClosedForIncompleteConfig(t *testing.T) {
+	cfg := &config.Config{Agent: config.AgentConfig{ModerationEnabled: true}}
+	e := &core.EngineImpl{Name: "bot", Repository: &repository.DummyImpl{}}
+	if got := ComposeMessageAutomation(e, cfg); got != nil {
+		t.Fatalf("message automation composed with incomplete authoritative configuration: %T", got)
+	}
+}
+
+func TestComposeMessageAutomationProtectsCaseVariantResolvedAdmin(t *testing.T) {
+	cfg := &config.Config{AdminTrips: []string{"admin-trip"}, Agent: config.AgentConfig{
+		ModerationEnabled:        true,
+		ModerationJoinBurstCount: 2, ModerationJoinWindowSeconds: 1,
+		ModerationSameHashCount: 2, ModerationSameHashWindowSeconds: 1,
+		ModerationNameClusterCount: 2, ModerationNameClusterWindowSeconds: 1,
+		ModerationPostKickWindowSeconds: 1, ModerationActionCooldownSeconds: 1,
+		ModerationMessageBurstCount: 1, ModerationMessageBurstWindowSeconds: 1,
+		ModerationRepeatedMessageCount: 2, ModerationRepeatedMessageWindowSeconds: 1,
+		ModerationSecondBreachWindowSeconds: 1,
+	}}
+	e := &core.EngineImpl{Name: "bot", Repository: &shadowBanRepositoryStub{}, ActiveUsers: map[*model.User]struct{}{}}
+	e.AddActiveUser(&model.User{Name: "Admin", Trip: "admin-trip"})
+	automation := ComposeMessageAutomation(e, cfg)
+	if automation == nil {
+		t.Fatal("expected complete authoritative message automation")
+	}
+	if decisions := automation.Monitor.OnMessage(model.ChatMessage{Name: "ADMIN", Text: "flood"}); len(decisions) != 0 {
+		t.Fatalf("case variant of resolved protected admin was moderated: %#v", decisions)
+	}
 }

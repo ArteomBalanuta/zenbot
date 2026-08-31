@@ -12,13 +12,20 @@ import (
 
 func openTestDB(t *testing.T) *Database {
 	t.Helper()
-	jar := "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
 	dir := t.TempDir()
-	d, err := Open(context.Background(), Config{BaseDir: dir, DatabaseStem: filepath.Join(dir, "db"), H2Jar: jar, Port: 55436, StartupTimeout: 5 * time.Second})
+	d, err := Open(context.Background(), Config{
+		BaseDir: dir, DatabaseStem: filepath.Join(dir, "db"),
+		H2Jar: "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar",
+		Host:  "127.0.0.1", AutoPort: true, StartupTimeout: 5 * time.Second,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.Close() })
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Errorf("close H2 fixture: %v", err)
+		}
+	})
 	return d
 }
 func TestAuditRecordsAndVisibility(t *testing.T) {

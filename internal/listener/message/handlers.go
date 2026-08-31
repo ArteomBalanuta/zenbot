@@ -8,6 +8,7 @@ import (
 	"time"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
+	"zenbot/internal/relay"
 	"zenbot/internal/service"
 )
 
@@ -39,7 +40,24 @@ func (IgnoreBotMessage) Handle(_ context.Context, c *Context) (bool, error) {
 
 type RelayAgentMessage struct{}
 
-func (RelayAgentMessage) Handle(_ context.Context, _ *Context) (bool, error) { return true, nil }
+func (RelayAgentMessage) Handle(ctx context.Context, c *Context) (bool, error) {
+	agent, ok := c.Engine.(interface {
+		EngineType() model.EngineType
+		relay.AgentHostRef
+	})
+	if !ok || agent.EngineType() != model.AGENT {
+		return true, nil
+	}
+	host := agent.HostRelay()
+	if host == nil {
+		log.Printf("agent relay host missing")
+		return false, nil
+	}
+	if err := host.RelayAgentMessage(ctx, c.Message.Name, c.Message.Text); err != nil {
+		return false, err
+	}
+	return false, nil
+}
 
 type LogChatMessage struct{}
 
@@ -125,9 +143,26 @@ func (CernEasterEgg) Handle(_ context.Context, c *Context) (bool, error) {
 	return true, nil
 }
 
-type AgentParticipation struct{}
+type Participation interface {
+	Handle(context.Context, *Context) (bool, error)
+}
+type PassParticipation struct{}
 
-func (AgentParticipation) Handle(_ context.Context, _ *Context) (bool, error) { return true, nil }
+func (PassParticipation) Handle(context.Context, *Context) (bool, error) { return false, nil }
+
+type AgentParticipation struct{ Participation Participation }
+
+func (h AgentParticipation) Handle(ctx context.Context, c *Context) (bool, error) {
+	p := h.Participation
+	if p == nil {
+		p = PassParticipation{}
+	}
+	claimed, err := p.Handle(ctx, c)
+	if err != nil {
+		return false, err
+	}
+	return !claimed, nil
+}
 
 type DispatchUserCommand struct{}
 
@@ -154,5 +189,11 @@ func (DispatchUserCommand) Handle(_ context.Context, c *Context) (bool, error) {
 	return false, nil
 }
 func DefaultChain() *Chain {
-	return NewChain(ResolveUserMetadata{}, AuditChatMessage{}, IgnoreBotMessage{}, RelayAgentMessage{}, LogChatMessage{}, DeliverPendingMail{}, UpdateAfkState{}, YoutubePreview{}, CernEasterEgg{}, AgentParticipation{}, DispatchUserCommand{})
+	return DefaultChainWithParticipation(PassParticipation{})
+}
+func DefaultChainWithParticipation(p Participation) *Chain {
+	if p == nil {
+		p = PassParticipation{}
+	}
+	return NewChain(ResolveUserMetadata{}, AuditChatMessage{}, IgnoreBotMessage{}, RelayAgentMessage{}, LogChatMessage{}, DeliverPendingMail{}, UpdateAfkState{}, YoutubePreview{}, CernEasterEgg{}, AgentParticipation{Participation: p}, DispatchUserCommand{})
 }

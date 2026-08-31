@@ -14,5 +14,8 @@ func (b APIBridge) Submit(inv agentapi.Invocation) error {
 	if err != nil {
 		return err
 	}
+	if v.Mode() == AMBIENT {
+		return b.Runtime.SubmitAmbient(v)
+	}
 	return b.Runtime.Submit(v)
 }

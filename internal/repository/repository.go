@@ -18,6 +18,13 @@ func (r *DummyImpl) LogCommand(context.Context, model.CommandAuditRecord) (int64
 }
 func (r *DummyImpl) Close() error { return nil }
 
+// ShadowBanRepository persists source-compatible shadow-ban identity records.
+// The narrow interface keeps privileged enforcement unavailable for repositories
+// that do not implement the authoritative store.
+type ShadowBanRepository interface {
+	PersistShadowBan(context.Context, model.User, string) error
+}
+
 type Repository interface {
 	LogMessage(trip, name, hash, message, channel string) (int64, error)
 	LogPresence(trip, name, hash, eventType, channel string) (int64, error)

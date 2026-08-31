@@ -1,44 +1,16 @@
 package service_test
 
 import (
-	"context"
 	"database/sql"
-	"net"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 
-	"zenbot/internal/repository/h2"
 	"zenbot/internal/service"
+	"zenbot/internal/testutil/h2fixture"
 )
 
 func openMailGroupCDB(t *testing.T) *sql.DB {
 	t.Helper()
-	jar := os.Getenv("H2_JAR")
-	if jar == "" {
-		jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
-	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	if err = listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	db, err := h2.Open(context.Background(), h2.Config{
-		BaseDir:        dir,
-		DatabaseStem:   filepath.Join(dir, "mail-group-c.db"),
-		H2Jar:          jar,
-		Port:           port,
-		StartupTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := h2fixture.Open(t, "mail-group-c")
 	return db.DB
 }
 

@@ -10,6 +10,20 @@
 
 **Current verdict:** **NOT COMPLETE.** The verified audit records 325 Saturn Java source units, 12 SQL tables, 18 indexes, 197 SQL query occurrences, 88 repository/service methods, and 71 Zenbot Go files. The existing target baseline passed `go test ./...`, `go test -race ./...`, `go vet ./...`, and `go build ./...`; those are baseline health gates, not migration-completion evidence.
 
+### Execution-priority override — rapid command and agent parity
+
+This section is the active implementation priority. It supersedes the exhaustive test-first and bug-hunting cadence elsewhere in this plan until the command and live-agent capabilities below are present. Preserve Saturn-observable behavior where it is implemented, but prioritize shipping the missing capabilities over expanding audit, SQL, or hardening scope.
+
+1. **First:** implement the missing command behavior identified by the command inventory: remaining admin (`memory`, `mine`, `prefix`, lifecycle), moderator (activity, automove, captcha, color/flair, mute/shadow-ban/nuke/overflow/resurrect), remote-room/Whiskey, replica, DBZ, user last-online, and `l` command paths. A registered alias, generic acknowledgement, no-op, or “not configured” response is not command parity.
+2. **Second:** make the Saturn agent package live: construct it from runtime configuration, wire participation/relay and `l` into the listener/command path, then add the minimum required room automation, routing, tools, memory, and cancellation behavior for real requests. The existing private `internal/agent/**` packages and copied resources are foundation only, not completion.
+3. **Third:** connect remote-room/session/replica/Whiskey behavior and the listener ordering needed by those commands. Reuse the existing target snapshot, replica, transport, and service foundations rather than redesigning them.
+4. **Testing policy:** require one focused baseline test per delivered capability/slice plus the relevant package test and a final `go test ./...` before accepting a batch. Do not block rapid migration on extensive unit-test matrices, repeated stress suites, race sweeps, broad test-only refactors, or speculative hardening unless a concrete failure blocks functionality.
+5. **Bug-hunting policy:** defer proactive bug hunting, forensic excursions, and unrelated cleanup. Record discovered defects, but fix them only when they block the active parity capability, corrupt its observable behavior, or prevent the baseline gate.
+
+#### SQL implementation shortcuts — explicitly deferred
+
+For this rapid-parity phase, use the existing H2 repository/schema/service seams and add only SQL needed to make the active command or agent capability function. The following remain documented debt rather than blockers for command/agent delivery: exhaustive mapping of all 197 SQL occurrences, metadata/index audits, migration/backfill completeness, broad SQL-policy hardening, SQLite-elimination cleanup, and exhaustive transaction/error-edge coverage. Do not invent a parallel persistence layer; route new capability work through the existing H2 target boundary and return to these deferred SQL obligations after command and agent live integration are established.
+
 ### Current status checkpoint
 
 - The user has approved this mapping plan and explicitly requires migration of **all Saturn commands**, including replica, remote-room, whiskey, prefix, DBZ, lifecycle, admin, moderator, user, and agent-backed commands. Previously identified foundation blockers are scope risks to resolve, not permanent exclusions.

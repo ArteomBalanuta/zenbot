@@ -105,7 +105,7 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 		reply(&c.commandBase, "\\n Set your trip first. Example: "+c.engine.GetPrefix()+"grant 8Wotmg ADMIN")
 		return model.FAILED, nil
 	}
-	roleName := strings.ToUpper(strings.TrimSpace(a[1]))
+	roleName := a[1]
 	role, ok := parseRole(roleName)
 	if !ok {
 		return model.FAILED, nil
@@ -117,8 +117,11 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 	target := strings.TrimSpace(a[0])
 	if strings.Contains(target, ",") {
 		trips := strings.Split(target, ",")
+		for len(trips) > 0 && trips[len(trips)-1] == "" {
+			trips = trips[:len(trips)-1]
+		}
 		for _, trip := range trips {
-			b.Security.Authorization.GrantTrip(ctx, strings.TrimSpace(trip), model.USER)
+			b.Security.Authorization.GrantTrip(ctx, trip, model.USER)
 		}
 		reply(&c.commandBase, fmt.Sprintf("\\n Granted new Roles: %s to trips: %v", roleName, trips))
 		return model.SUCCESSFUL, nil
@@ -178,7 +181,7 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		var legacy []model.Message
 		legacy, err = s.LastMessages("", strings.TrimSpace(a[0]), n)
 		for _, m := range legacy {
-			ms = append(ms, repository.SaturnLastMessage{Name: m.Name, Message: m.Message, CreatedOn: m.CreatedOn})
+			ms = append(ms, repository.SaturnLastMessage{Name: m.Name, Trip: m.Trip, Message: m.Message, CreatedOn: m.CreatedOn})
 		}
 	}
 	if err != nil {
@@ -191,7 +194,7 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 			msg = msg[:200] + "..."
 		}
 		b.WriteString("\n")
-		b.WriteString(m.Name + "#" + strings.TrimSpace(a[0]) + ": " + msg)
+		b.WriteString(m.Name + "#" + m.Trip + ": " + msg)
 		b.WriteString("\n")
 	}
 	reply(&c.commandBase, escapeJava(b.String()))

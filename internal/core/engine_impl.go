@@ -12,6 +12,7 @@ import (
 	"time"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
+	"zenbot/internal/relay"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
 	"zenbot/internal/transport"
@@ -82,10 +83,18 @@ type EngineImpl struct {
 	runtimeDone          chan struct{}
 	joined               atomic.Bool
 	Profile              ListenerProfile
+	hostRelay            relay.HostRelay
 	replicaController    *ManagedReplicaController
 	LifecycleErrors      chan<- error
 	runtimeFailure       func(error)
 	transportErrReported atomic.Bool
+}
+
+// NewEngineImpl installs the construction-time relay dependency. The
+// dependency remains private to EngineImpl after construction.
+func NewEngineImpl(e EngineImpl, host relay.HostRelay) *EngineImpl {
+	e.hostRelay = host
+	return &e
 }
 
 func (e *EngineImpl) Start() {
@@ -230,6 +239,10 @@ func (e *EngineImpl) StopContext(ctx context.Context) error {
 }
 func (e *EngineImpl) Healthy() bool                { return e.Transport != nil && e.Transport.Connected() }
 func (e *EngineImpl) EngineType() model.EngineType { return e.Type }
+
+// HostRelay returns the relay dependency installed at AGENT construction.
+func (e *EngineImpl) HostRelay() relay.HostRelay { return e.hostRelay }
+
 func (e *EngineImpl) ReplicaChannels() []string {
 	if e.replicaController == nil {
 		return nil
@@ -286,13 +299,24 @@ func (e *EngineImpl) DispatchMessage(jsonMessage string) {
 }
 
 func (e *EngineImpl) sendOutbound(message string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return e.sendOutboundContext(ctx, message)
+}
+
+func (e *EngineImpl) sendOutboundContext(ctx context.Context, message string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if e.Transport != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		return e.Transport.SendText(ctx, message)
 	}
-	e.OutMessageQueue <- message
-	return nil
+	select {
+	case e.OutMessageQueue <- message:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (e *EngineImpl) SendRawMessage(message string) {
@@ -453,8 +477,10 @@ func (e *EngineImpl) NotifyAfkIfMentioned(m *model.ChatMessage) {
 }
 
 func (e *EngineImpl) GetActiveUserByName(name string) *model.User {
+	e.usersMu.RLock()
+	defer e.usersMu.RUnlock()
 	for u := range e.ActiveUsers {
-		if u.Name == name {
+		if strings.EqualFold(u.Name, strings.TrimSpace(name)) {
 			return u
 		}
 	}
@@ -473,6 +499,17 @@ func (e *EngineImpl) GetActiveUsers() *map[*model.User]struct{} {
 	return &e.ActiveUsers
 }
 
+// ActiveUserNames returns a read-safe immutable active-user snapshot.
+func (e *EngineImpl) ActiveUserNames() []string {
+	e.usersMu.RLock()
+	defer e.usersMu.RUnlock()
+	names := make([]string, 0, len(e.ActiveUsers))
+	for user := range e.ActiveUsers {
+		names = append(names, user.Name)
+	}
+	return names
+}
+
 func (e *EngineImpl) ServiceBundle() *service.Bundle { return e.Services }
 
 func (e *EngineImpl) GetChannel() string {
@@ -481,6 +518,91 @@ func (e *EngineImpl) GetChannel() string {
 
 func (e *EngineImpl) GetName() string {
 	return e.Name
+}
+
+func (e *EngineImpl) EnableCaptcha(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Saturn ModServiceImpl.enableCaptcha is the authoritative room protocol.
+	return e.sendOutboundContext(ctx, `{ "cmd": "enablecaptcha"}`)
+}
+
+func (e *EngineImpl) ShadowBan(ctx context.Context, principal string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	repo, ok := e.Repository.(repository.ShadowBanRepository)
+	if !ok {
+		return fmt.Errorf("authoritative shadow-ban repository is unavailable")
+	}
+	user := e.GetActiveUserByName(principal)
+	if user == nil {
+		return fmt.Errorf("shadow-ban principal %q is not active", principal)
+	}
+	copy := *user
+	return repo.PersistShadowBan(ctx, copy, "repeated same-hash raid")
+}
+
+// WarnFlood emits the source-defined non-whisper warning through the engine's
+// outbound transport; callers cannot supply message content or whisper mode.
+func (e *EngineImpl) WarnFlood(ctx context.Context, principal string) error {
+	name, err := e.activePrincipal(principal)
+	if err != nil {
+		return err
+	}
+	return e.sendModerationCommand(ctx, "chat", map[string]string{"text": "@" + name + " Please stop flooding."})
+}
+
+// MutePrincipal sends the only autonomous mute protocol shape.
+func (e *EngineImpl) MutePrincipal(ctx context.Context, principal string) error {
+	name, err := e.activePrincipal(principal)
+	if err != nil {
+		return err
+	}
+	return e.sendModerationCommand(ctx, "mute", map[string]string{"nick": name})
+}
+
+// KickPrincipal sends the only autonomous current-room kick protocol shape.
+func (e *EngineImpl) KickPrincipal(ctx context.Context, principal string) error {
+	name, err := e.activePrincipal(principal)
+	if err != nil {
+		return err
+	}
+	return e.sendModerationCommand(ctx, "kick", map[string]string{"nick": name})
+}
+
+func (e *EngineImpl) activePrincipal(principal string) (string, error) {
+	user := e.GetActiveUserByName(principal)
+	if user == nil || strings.TrimSpace(user.Name) == "" {
+		return "", fmt.Errorf("message moderation principal %q is not active", principal)
+	}
+	return user.Name, nil
+}
+
+func (e *EngineImpl) sendModerationCommand(ctx context.Context, command string, values map[string]string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	payload := make(map[string]string, len(values)+1)
+	payload["cmd"] = command
+	for key, value := range values {
+		payload[key] = value
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return e.sendOutboundContext(ctx, string(encoded))
 }
 
 func (e *EngineImpl) Kick(name string, channel string) {

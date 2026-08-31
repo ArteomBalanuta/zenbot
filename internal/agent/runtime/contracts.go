@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"zenbot/internal/agent/turn"
 )
 
 type Mode string
@@ -116,10 +117,14 @@ func (i Invocation) CreatedOn() time.Time       { return i.createdOn }
 type Result struct {
 	correlationID, text, errorCode string
 	shouldReply                    bool
+	durableEvidence                []turn.PersistableEvidence
 }
 
 func NewResult(correlationID, text string, shouldReply bool) Result {
 	return Result{correlationID: correlationID, text: text, shouldReply: shouldReply}
+}
+func NewResultWithEvidence(correlationID, text string, shouldReply bool, evidence []turn.PersistableEvidence) Result {
+	return Result{correlationID: correlationID, text: text, shouldReply: shouldReply, durableEvidence: append([]turn.PersistableEvidence(nil), evidence...)}
 }
 func NewErrorResult(correlationID, errorCode string) Result {
 	return Result{correlationID: correlationID, errorCode: errorCode}
@@ -128,6 +133,23 @@ func (r Result) CorrelationID() string { return r.correlationID }
 func (r Result) Text() string          { return r.text }
 func (r Result) ShouldReply() bool     { return r.shouldReply }
 func (r Result) ErrorCode() string     { return r.errorCode }
+func (r Result) DurableEvidence() []turn.PersistableEvidence {
+	return append([]turn.PersistableEvidence(nil), r.durableEvidence...)
+}
+
+// DirectCompletion is immutable request-local output for the direct delivery path.
+type DirectCompletion struct {
+	text     string
+	evidence []turn.PersistableEvidence
+}
+
+func NewDirectCompletion(text string, evidence []turn.PersistableEvidence) DirectCompletion {
+	return DirectCompletion{text: text, evidence: append([]turn.PersistableEvidence(nil), evidence...)}
+}
+func (c DirectCompletion) Text() string { return c.text }
+func (c DirectCompletion) DurableEvidence() []turn.PersistableEvidence {
+	return append([]turn.PersistableEvidence(nil), c.evidence...)
+}
 
 // Runner performs one bounded invocation. Implementations must honor ctx.
 type Runner interface {
@@ -142,6 +164,16 @@ type InvocationFactory interface {
 // Sink receives only successful results marked for reply.
 type Sink interface {
 	Deliver(ctx context.Context, invocation Invocation, result Result) error
+}
+
+// FailureSink delivers only execution failures for reply-required invocations.
+type FailureSink interface {
+	DeliverFailure(context.Context, Invocation, error)
+}
+type FailureSinkFunc func(context.Context, Invocation, error)
+
+func (f FailureSinkFunc) DeliverFailure(ctx context.Context, inv Invocation, err error) {
+	f(ctx, inv, err)
 }
 
 type RunnerFunc func(context.Context, Invocation) (Result, error)

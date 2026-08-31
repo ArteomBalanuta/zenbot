@@ -24,7 +24,7 @@ func TestGroupBExactSaturnConstants(t *testing.T) {
 		"DELETE_TRIP":                 "DELETE FROM trips WHERE trip = ?;",
 		"DELETE_NAME":                 "DELETE FROM names WHERE name = ?;",
 		"SELECT_NAME_TRIP_REGISTERED": "SELECT DISTINCT n.name,t.trip\nFROM trip_names tn\nINNER JOIN trips t on tn.trip_id = t.id\nINNER JOIN names n on tn.name_id = n.id ORDER BY t.trip DESC;",
-		"SELECT_LAST_N_MESSAGES":      "SELECT name,message,created_on FROM messages WHERE (name = ? or trip = ?) and (message not\nin ('LEFT','JOINED')) order by created_on desc limit ?;",
+		"SELECT_LAST_N_MESSAGES":      "SELECT name,trip,message,created_on FROM messages WHERE (name = ? or trip = ?) and visibility = 'PUBLIC' and (message not\nin ('LEFT','JOINED')) order by created_on desc,id desc limit ?;",
 	}
 	for name, got := range checks {
 		if strings.TrimSpace(got) != strings.TrimSpace(want[name]) {
@@ -116,32 +116,48 @@ func TestGroupBSaturnRegisteredUsersAndExistingRegisteredUsersStayDistinct(t *te
 	}
 }
 
-func TestGroupBSaturnLastMessagesIsSeparateAndExact(t *testing.T) {
+func TestGroupBSaturnLastMessagesReturnsPublicRowsWithRowTripAndStableTies(t *testing.T) {
 	d := openTestDB(t)
 	rows := []struct {
 		name, trip, msg string
 		ts              int64
 		vis             string
-	}{{"alice", "trip-a", "old", 1, "PUBLIC"}, {"alice", "trip-a", "new", 3, "WHISPER"}, {"bob", "trip-a", "mid", 2, "PUBLIC"}, {"alice", "trip-a", "LEFT", 4, "PUBLIC"}}
+	}{
+		{"alice", "trip-a", "old", 1, "PUBLIC"},
+		{"alice", "trip-a", "whisper-secret", 3, "WHISPER"},
+		{"bob", "trip-a", "first-at-tie", 5, "PUBLIC"},
+		{"alice", "trip-b", "second-at-tie", 5, "PUBLIC"},
+		{"alice", "trip-a", "LEFT", 6, "PUBLIC"},
+	}
 	for _, r := range rows {
 		if _, err := d.DB.Exec("INSERT INTO messages(name,trip,message,created_on,visibility) VALUES(?,?,?,?,?)", r.name, r.trip, r.msg, r.ts, r.vis); err != nil {
 			t.Fatal(err)
 		}
 	}
 	name := "alice"
-	got, err := d.SaturnLastMessages(context.Background(), &name, "trip-a", 0)
+	got, err := d.SaturnLastMessages(context.Background(), &name, "trip-a", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got[0].Message != "new" || got[1].Message != "mid" || got[2].Message != "old" {
-		t.Fatalf("got=%+v", got)
+	want := []repository.SaturnLastMessage{
+		{Name: "alice", Trip: "trip-b", Message: "second-at-tie", CreatedOn: 5},
+		{Name: "bob", Trip: "trip-a", Message: "first-at-tie", CreatedOn: 5},
+		{Name: "alice", Trip: "trip-a", Message: "old", CreatedOn: 1},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got=%+v want=%+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got=%+v want=%+v", got, want)
+		}
 	}
 	nilName, err := d.SaturnLastMessages(context.Background(), nil, "trip-a", 5)
-	if err != nil || len(nilName) != 3 {
+	if err != nil || len(nilName) != 2 || nilName[0].Message != "first-at-tie" || nilName[1].Message != "old" {
 		t.Fatalf("nullable name result=%+v err=%v", nilName, err)
 	}
 	public, err := d.LastMessages("alice", "trip-a", 5)
-	if err != nil || len(public) != 2 || public[0].Message != "mid" {
+	if err != nil || len(public) != 3 || public[0].Message != "second-at-tie" {
 		t.Fatalf("public=%+v err=%v", public, err)
 	}
 }

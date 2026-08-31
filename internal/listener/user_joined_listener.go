@@ -11,7 +11,14 @@ import (
 	"zenbot/internal/service"
 )
 
-type UserJoinedListener struct{ e common.Engine }
+type JoinAutomation interface {
+	OnJoin(context.Context, *model.User)
+}
+
+type UserJoinedListener struct {
+	e          common.Engine
+	automation JoinAutomation
+}
 
 func (l *UserJoinedListener) Notify(jsonMessage string) {
 	u, err := model.GetUser(jsonMessage)
@@ -20,6 +27,9 @@ func (l *UserJoinedListener) Notify(jsonMessage string) {
 		return
 	}
 	l.e.AddActiveUser(u)
+	if l.automation != nil {
+		l.automation.OnJoin(context.Background(), u)
+	}
 	l.shareUserInfo(u)
 	l.e.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.GetChannel())
 	log.Printf("User joined: %s", u.Name)
@@ -47,4 +57,9 @@ func (l *UserJoinedListener) shareUserInfo(joined *model.User) {
 	}
 }
 
-func NewUserJoinedListener(e common.Engine) *UserJoinedListener { return &UserJoinedListener{e: e} }
+func NewUserJoinedListener(e common.Engine) *UserJoinedListener {
+	return NewUserJoinedListenerWithAutomation(e, nil)
+}
+func NewUserJoinedListenerWithAutomation(e common.Engine, automation JoinAutomation) *UserJoinedListener {
+	return &UserJoinedListener{e: e, automation: automation}
+}

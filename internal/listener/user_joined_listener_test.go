@@ -15,6 +15,16 @@ type subscriptionQueryStub struct {
 	data  string
 	calls int
 }
+type recordingJoinAutomation struct {
+	engine       *core.EngineImpl
+	calls        int
+	activeAtCall bool
+}
+
+func (a *recordingJoinAutomation) OnJoin(_ context.Context, u *model.User) {
+	a.calls++
+	a.activeAtCall = a.engine.GetActiveUserByName(u.Name) != nil
+}
 
 func (s *subscriptionQueryStub) RegisteredUsers(context.Context) ([]repository.RegisteredUser, error) {
 	return nil, nil
@@ -25,6 +35,20 @@ func (s *subscriptionQueryStub) NicksByTrip(context.Context, string) ([]string, 
 func (s *subscriptionQueryStub) BasicUserData(context.Context, string, string) (string, error) {
 	s.calls++
 	return s.data, nil
+}
+
+func TestUserJoinedListenerInvokesTrustedAutomationAfterRegistrationAndIgnoresMalformed(t *testing.T) {
+	e := &core.EngineImpl{ActiveUsers: map[*model.User]struct{}{}, Repository: &repository.DummyImpl{}}
+	a := &recordingJoinAutomation{engine: e}
+	l := NewUserJoinedListenerWithAutomation(e, a)
+	l.Notify(`{"nick":"joined","trip":"trip","hash":"hash"}`)
+	if a.calls != 1 || !a.activeAtCall {
+		t.Fatalf("automation calls=%d active=%v", a.calls, a.activeAtCall)
+	}
+	l.Notify(`{`)
+	if a.calls != 1 {
+		t.Fatalf("malformed join invoked automation %d times", a.calls)
+	}
 }
 
 func TestUserJoinedListenerWhispersExactDataToAllCaseInsensitiveSubscribersOnly(t *testing.T) {

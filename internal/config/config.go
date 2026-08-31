@@ -8,18 +8,19 @@ import (
 )
 
 type Config struct {
-	WebsocketUrl                      string   `toml:"url"`
-	WsUrl                             string   `toml:"wsUrl"`
-	Nick                              string   `toml:"nick"`
-	CmdPrefix                         string   `toml:"cmdPrefix"`
-	Name                              string   `toml:"name"`
-	Password                          string   `toml:"password"`
-	Channel                           string   `toml:"channel"`
-	AdminTrips                        []string `toml:"adminTrips"`
-	AutoReconnect                     bool     `toml:"autoReconnect"`
-	ConnectionHeartbitIntervalMinutes int      `toml:"healthCheckInterval"`
-	AutorunCommands                   []string `toml:"autorunCommands"`
-	DbPath                            string   `toml:"dbPath"`
+	WebsocketUrl                      string      `toml:"url"`
+	WsUrl                             string      `toml:"wsUrl"`
+	Nick                              string      `toml:"nick"`
+	CmdPrefix                         string      `toml:"cmdPrefix"`
+	Name                              string      `toml:"name"`
+	Password                          string      `toml:"password"`
+	Channel                           string      `toml:"channel"`
+	AdminTrips                        []string    `toml:"adminTrips"`
+	AutoReconnect                     bool        `toml:"autoReconnect"`
+	ConnectionHeartbitIntervalMinutes int         `toml:"healthCheckInterval"`
+	AutorunCommands                   []string    `toml:"autorunCommands"`
+	DbPath                            string      `toml:"dbPath"`
+	Agent                             AgentConfig `toml:"agent"`
 }
 
 func SetupConfig() *Config {

@@ -15,6 +15,7 @@ type SaturnRegisteredUser struct {
 
 type SaturnLastMessage struct {
 	Name      string
+	Trip      string
 	Message   string
 	CreatedOn int64
 }

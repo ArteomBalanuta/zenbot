@@ -1,30 +1,17 @@
 package command
 
 import (
-	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
-	"zenbot/internal/repository/h2"
 	"zenbot/internal/service"
+	"zenbot/internal/testutil/h2fixture"
 )
 
 func TestUsersAndNicksDispatchAgainstRealH2(t *testing.T) {
-	jar := os.Getenv("H2_JAR")
-	if jar == "" {
-		jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
-	}
-	dir := t.TempDir()
-	db, err := h2.Open(context.Background(), h2.Config{BaseDir: dir, DatabaseStem: filepath.Join(dir, "dispatch.db"), H2Jar: jar, Port: 55437, StartupTimeout: 5 * time.Second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := h2fixture.Open(t, "dispatch")
 	for _, statement := range []string{
 		"INSERT INTO trips(type,trip,created_on) VALUES('USER','trip-a',1)",
 		"INSERT INTO names(name,created_on) VALUES('merc',1)",

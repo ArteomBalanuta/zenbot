@@ -2,6 +2,7 @@
 package h2
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	_ "embed"
@@ -13,17 +14,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+type h2OpenTestHooks struct {
+	// onStarted observes the exact successfully started owned server.
+	onStarted func(*processServer)
+	// h2Version replaces only Open's H2 identity reader in same-package tests.
+	h2Version func(context.Context, *sql.DB) (string, error)
+}
 
 // Config describes the externally managed H2 PostgreSQL server.
 type Config struct {
 	BaseDir, DatabaseStem, Host string
 	Port                        int
-	H2Jar, Java                 string
-	StartupTimeout              time.Duration
+	// AutoPort asks an owned processServer to let H2 select an ephemeral PG port.
+	// It is intended for isolated test fixtures. Existing Port == 0 behavior is unchanged.
+	AutoPort       bool
+	H2Jar, Java    string
+	StartupTimeout time.Duration
+
+	// testHooks is nil in production and cannot be set outside package h2.
+	testHooks *h2OpenTestHooks
 }
 type Server interface {
 	Start(context.Context) error
@@ -36,12 +52,24 @@ type Database struct {
 }
 
 type processServer struct {
-	cfg  Config
-	cmd  *exec.Cmd
-	addr string
+	cfg      Config
+	cmd      *exec.Cmd
+	addr     string
+	mu       sync.Mutex
+	waitDone chan struct{}
+	waitErr  error
+	stopOnce sync.Once
+	stopErr  error
 }
 
-func (s *processServer) Addr() string { return s.addr }
+func (s *processServer) Addr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.addr
+}
+
+var h2PGStartup = regexp.MustCompile(`^PG server running at pg://([^:\s]+):(\d+) \(only local connections\)$`)
+
 func (s *processServer) Start(ctx context.Context) error {
 	if s.cfg.Java == "" {
 		s.cfg.Java = "java"
@@ -70,6 +98,9 @@ func (s *processServer) Start(ctx context.Context) error {
 	if err := os.MkdirAll(s.cfg.BaseDir, 0755); err != nil {
 		return err
 	}
+	if s.cfg.AutoPort {
+		return s.startAutoPort(ctx)
+	}
 	s.addr = net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
 	if c, err := net.DialTimeout("tcp", s.addr, 200*time.Millisecond); err == nil {
 		c.Close()
@@ -79,6 +110,7 @@ func (s *processServer) Start(ctx context.Context) error {
 	if err := s.cmd.Start(); err != nil {
 		return fmt.Errorf("start H2 PostgreSQL server: %w", err)
 	}
+	s.watch()
 	deadline := time.Now().Add(s.cfg.StartupTimeout)
 	for time.Now().Before(deadline) {
 		c, err := net.DialTimeout("tcp", s.addr, 200*time.Millisecond)
@@ -88,23 +120,142 @@ func (s *processServer) Start(ctx context.Context) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	_ = s.cmd.Process.Kill()
+	_ = s.stopWithTimeout()
 	return fmt.Errorf("H2 PostgreSQL server did not become ready at %s", s.addr)
 }
+
+func (s *processServer) startAutoPort(ctx context.Context) error {
+	if ip := net.ParseIP(s.cfg.Host); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("H2 auto-port host must be a loopback IP, got %q", s.cfg.Host)
+	}
+	cmd := exec.CommandContext(ctx, s.cfg.Java, "-cp", s.cfg.H2Jar, "org.h2.tools.Server", "-pg", "-pgPort", "0", "-ifNotExists", "-baseDir", s.cfg.BaseDir)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("H2 auto-port startup output: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("H2 auto-port startup error output: %w", err)
+	}
+	s.cmd = cmd
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start H2 auto-port PostgreSQL server: %w", err)
+	}
+	s.watch()
+	endpoint := make(chan string, 1)
+	var found sync.Once
+	readOutput := func(r interface{ Read([]byte) (int, error) }) {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			match := h2PGStartup.FindStringSubmatch(strings.TrimSpace(scanner.Text()))
+			if len(match) != 3 {
+				continue
+			}
+			port, err := strconv.Atoi(match[2])
+			if err != nil || port <= 0 || port > 65535 {
+				continue
+			}
+			host := match[1]
+			if host != "localhost" && (net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback()) {
+				continue
+			}
+			found.Do(func() { endpoint <- net.JoinHostPort(host, strconv.Itoa(port)) })
+		}
+	}
+	go readOutput(stdout)
+	go readOutput(stderr)
+	timeout := time.NewTimer(s.cfg.StartupTimeout)
+	defer timeout.Stop()
+	select {
+	case addr := <-endpoint:
+		s.mu.Lock()
+		s.addr = addr
+		s.mu.Unlock()
+	case <-s.waitDone:
+		return fmt.Errorf("H2 auto-port endpoint discovery: process exited: %w", s.waitErr)
+	case <-ctx.Done():
+		_ = s.stopWithTimeout()
+		return fmt.Errorf("H2 auto-port endpoint discovery: %w", ctx.Err())
+	case <-timeout.C:
+		_ = s.stopWithTimeout()
+		return errors.New("H2 auto-port endpoint discovery timed out")
+	}
+	deadline := time.Now().Add(s.cfg.StartupTimeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", s.Addr(), 200*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		select {
+		case <-s.waitDone:
+			return fmt.Errorf("H2 auto-port readiness: process exited: %w", s.waitErr)
+		default:
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = s.stopWithTimeout()
+	return fmt.Errorf("H2 auto-port server did not become ready at %s", s.Addr())
+}
+
+func (s *processServer) watch() {
+	s.waitDone = make(chan struct{})
+	go func() {
+		err := s.cmd.Wait()
+		s.mu.Lock()
+		s.waitErr = err
+		s.mu.Unlock()
+		close(s.waitDone)
+	}()
+}
+
 func (s *processServer) Stop(ctx context.Context) error {
 	if s.cmd == nil || s.cmd.Process == nil {
 		return nil
 	}
-	_ = s.cmd.Process.Signal(os.Interrupt)
-	done := make(chan error, 1)
-	go func() { done <- s.cmd.Wait() }()
+	s.stopOnce.Do(func() {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+		}
+		s.stopErr = s.stopOwned(ctx)
+	})
+	return s.stopErr
+}
+
+func (s *processServer) stopWithTimeout() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.stopOwned(ctx)
+}
+
+func (s *processServer) stopOwned(ctx context.Context) error {
+	if s.cmd == nil || s.cmd.Process == nil || s.waitDone == nil {
+		return nil
+	}
+	signaled := s.cmd.Process.Signal(os.Interrupt) == nil
 	select {
-	case err := <-done:
-		return err
+	case <-s.waitDone:
+		if signaled {
+			return nil
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.waitErr
 	case <-ctx.Done():
-		_ = s.cmd.Process.Kill()
+		if err := s.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return fmt.Errorf("kill H2 PostgreSQL server: %w", err)
+		}
+		<-s.waitDone
 		return ctx.Err()
 	}
+}
+
+func readH2Version(ctx context.Context, db *sql.DB) (string, error) {
+	var version string
+	err := db.QueryRowContext(ctx, "SELECT H2VERSION()").Scan(&version)
+	return version, err
 }
 
 // Open starts/uses the configured H2 PG server, proves its identity, and bootstraps schema.
@@ -124,15 +275,10 @@ func Open(ctx context.Context, c Config) (*Database, error) {
 	if err := s.Start(ctx); err != nil {
 		return nil, err
 	}
-	host := c.Host
-	if host == "" {
-		host = "127.0.0.1"
+	if c.testHooks != nil && c.testHooks.onStarted != nil {
+		c.testHooks.onStarted(s)
 	}
-	port := c.Port
-	if port == 0 {
-		port = 5435
-	}
-	dsn := fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable", "sa", host, port, c.DatabaseStem)
+	dsn := fmt.Sprintf("postgres://%s@%s/%s?sslmode=disable", "sa", s.Addr(), c.DatabaseStem)
 	pgxConfig, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		_ = s.Stop(context.Background())
@@ -153,13 +299,19 @@ func Open(ctx context.Context, c Config) (*Database, error) {
 		_ = s.Stop(context.Background())
 		return nil, fmt.Errorf("H2 PostgreSQL connection unavailable: %w", err)
 	}
-	var version string
-	if err = db.QueryRowContext(ctx, "SELECT H2VERSION()").Scan(&version); err != nil {
+	readVersion := readH2Version
+	if c.testHooks != nil && c.testHooks.h2Version != nil {
+		readVersion = c.testHooks.h2Version
+	}
+	version, err := readVersion(ctx, db)
+	if err != nil {
 		db.Close()
 		_ = s.Stop(context.Background())
 		return nil, fmt.Errorf("H2 identity check failed: %w", err)
 	}
 	if version == "" {
+		db.Close()
+		_ = s.Stop(context.Background())
 		return nil, errors.New("H2 identity check returned empty version")
 	}
 	if err = bootstrap(ctx, db); err != nil {
@@ -194,6 +346,12 @@ func bootstrap(ctx context.Context, db *sql.DB) error {
 		created_on BIGINT NOT NULL, channel VARCHAR
 	)`); err != nil {
 		return fmt.Errorf("H2 presence schema bootstrap: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS banned_users (
+		id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+		trip VARCHAR, name VARCHAR, hash VARCHAR, reason VARCHAR, created_on BIGINT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("H2 shadow-ban schema bootstrap: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
 		return fmt.Errorf("H2 schema version bootstrap: %w", err)

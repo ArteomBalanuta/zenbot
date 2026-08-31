@@ -1,6 +1,11 @@
 package core
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"zenbot/internal/relay"
+)
 
 func TestSendWhisperMessageNormalizesNewlinesAndEnqueuesEscapedJSON(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
@@ -51,5 +56,16 @@ func TestSendAddressedMessageNormalizesAndFormatsWhisperOutput(t *testing.T) {
 	}
 	if got != "/whisper @alice first\nsecond" {
 		t.Fatalf("returned=%q", got)
+	}
+}
+
+func TestHostRelayEnqueuesOneJSONEscapedPublicPayload(t *testing.T) {
+	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
+	text := "first\nquote: \" backslash: \\ non-ASCII: Ž"
+	if err := relay.NewHost(e).RelayAgentMessage(context.Background(), "alice", text); err != nil {
+		t.Fatal(err)
+	}
+	if queued := <-e.OutMessageQueue; queued != `{ "cmd": "chat", "text": "alice: first\nquote: \" backslash: \\ non-ASCII: Ž"}` {
+		t.Fatalf("queued=%q", queued)
 	}
 }

@@ -3,7 +3,10 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"strings"
+	"zenbot/internal/agent/runtime"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -14,6 +17,77 @@ type commandBase struct {
 	role      model.Role
 	aliases   []string
 	canonical string
+}
+
+// DirectAgentInvoker is the narrow direct-command boundary supplied by application composition.
+type DirectAgentInvoker interface {
+	Invoke(context.Context, *model.ChatMessage, string) (string, error)
+}
+
+type directLCommand struct {
+	commandBase
+	invoker DirectAgentInvoker
+}
+
+func (c *directLCommand) Execute(ctx context.Context) (model.Status, error) {
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	prompt := strings.TrimSpace(strings.Join(args(c.message), " "))
+	if prompt == "" {
+		return model.FAILED, fmt.Errorf("l requires a prompt")
+	}
+	var text string
+	var completion runtime.DirectCompletion
+	var hasCompletion bool
+	var err error
+	if artifact, ok := c.invoker.(interface {
+		InvokeCompletion(context.Context, *model.ChatMessage, string) (runtime.DirectCompletion, error)
+	}); ok {
+		completion, err = artifact.InvokeCompletion(ctx, c.message, prompt)
+		text, hasCompletion = completion.Text(), true
+	} else {
+		text, err = c.invoker.Invoke(ctx, c.message, prompt)
+	}
+	if err != nil {
+		return model.FAILED, err
+	}
+	if strings.TrimSpace(text) == "" {
+		return model.SUCCESSFUL, nil
+	}
+	if _, err := c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
+	if hasCompletion {
+		if persistent, ok := c.invoker.(interface {
+			PersistDelivery(context.Context, *model.ChatMessage, string, runtime.DirectCompletion) error
+		}); ok {
+			if err := persistent.PersistDelivery(ctx, c.message, prompt, completion); err != nil {
+				log.Printf("agent tool evidence persistence failed")
+			}
+		}
+	} else if persistent, ok := c.invoker.(interface {
+		Persist(context.Context, *model.ChatMessage, string, string) error
+	}); ok {
+		if err := persistent.Persist(ctx, c.message, prompt, text); err != nil {
+			log.Printf("agent memory persistence failed")
+		}
+	}
+	return model.SUCCESSFUL, nil
+}
+
+func directLDefinition(invoker DirectAgentInvoker) (common.CommandDefinition, bool) {
+	if invoker == nil {
+		return common.CommandDefinition{}, false
+	}
+	definition, ok := commandDefinitionFor("l")
+	if !ok {
+		return common.CommandDefinition{}, false
+	}
+	definition.New = func(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
+		return &directLCommand{commandBase: commandBase{engine: e, message: m, role: definition.Role, aliases: definition.Aliases, canonical: definition.Canonical}, invoker: invoker}
+	}
+	return definition, true
 }
 
 func (c *commandBase) Role() model.Role  { return c.role }
@@ -293,6 +367,8 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 		return &lockCommand{b}
 	case "unlock":
 		return &unlockCommand{b}
+	case "memory":
+		return &memoryCommand{b}
 	default:
 		return &saturnCommand{engine: e, message: m, role: role, aliases: aliases, canonical: canonical}
 	}

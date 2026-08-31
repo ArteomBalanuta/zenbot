@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"zenbot/internal/agent/api"
 	"zenbot/internal/model"
 )
@@ -43,7 +44,9 @@ func (f *InvocationFactory) Create(s TrustedSnapshot, message model.ChatMessage,
 		caps = append(caps, api.PermanentBan, api.AdminCommands)
 	}
 	whisper := message.Whisper || message.IsWhisper
-	ctx, e := api.NewContextWithCapabilities(s.Room, message.Name, message.Trip, message.Hash, whisper, append([]string(nil), s.Users...), caps)
+	users := make([]string, len(s.Users))
+	copy(users, s.Users)
+	ctx, e := api.NewContextWithCapabilities(s.Room, message.Name, message.Trip, message.Hash, whisper, users, caps)
 	if e != nil {
 		return api.Invocation{}, e
 	}
@@ -75,13 +78,14 @@ const (
 )
 
 type Event struct {
-	Message             model.ChatMessage
-	Snapshot            TrustedSnapshot
-	BotNick             string
-	Prefix              string
+	Message  model.ChatMessage
+	Snapshot TrustedSnapshot
+	BotNick  string
+	Prefix   string
+	// AuthorIsBot is listener-resolved active-user metadata, not chat payload data.
+	AuthorIsBot         bool
 	AmbientEnabled      bool
 	AmbientEvery        uint64
-	EligibleCount       uint64
 	ModerationCandidate bool
 }
 type Pipeline struct {
@@ -91,7 +95,8 @@ type Pipeline struct {
 	Submit  Submitter
 	// Monitor observes eligible/ineligible events for moderation telemetry. It
 	// never claims the event and runs before the eligibility filter.
-	Monitor func(Event)
+	Monitor                 func(Event)
+	eligibleAmbientMessages atomic.Uint64
 }
 type Outcome struct {
 	Decision  Decision
@@ -105,7 +110,7 @@ func (p *Pipeline) Handle(e Event) Outcome {
 		p.Monitor(e)
 	}
 	text := strings.TrimSpace(e.Message.Text)
-	if text == "" || e.Message.Whisper || e.Message.IsWhisper || strings.EqualFold(e.Message.Name, e.BotNick) || isConventionalBot(e.Message.Name) || (e.Prefix != "" && strings.HasPrefix(text, e.Prefix)) {
+	if text == "" || e.Message.Whisper || e.Message.IsWhisper || strings.EqualFold(e.Message.Name, e.BotNick) || e.AuthorIsBot || isConventionalBot(e.Message.Name) || (e.Prefix != "" && strings.HasPrefix(text, e.Prefix)) {
 		return Outcome{Decision: Pass}
 	}
 	ctx, e1 := api.NewContext(e.Snapshot.Room, e.Message.Name, e.Message.Trip, e.Message.Hash, false, e.Snapshot.Users)
@@ -122,8 +127,10 @@ func (p *Pipeline) Handle(e Event) Outcome {
 	if e.ModerationCandidate {
 		return p.submit(e, e.Snapshot, text, api.MODERATION, false, Pass)
 	}
-	if e.AmbientEnabled && e.AmbientEvery > 0 && e.EligibleCount%e.AmbientEvery == 0 {
-		return p.submit(e, e.Snapshot, text, api.AMBIENT, false, Pass)
+	if e.AmbientEnabled && e.AmbientEvery > 0 && (p.Quiet == nil || !p.Quiet.IsQuiet(ctx)) {
+		if p.eligibleAmbientMessages.Add(1)%e.AmbientEvery == 0 {
+			return p.submit(e, e.Snapshot, text, api.AMBIENT, false, Pass)
+		}
 	}
 	return Outcome{Decision: Pass}
 }
