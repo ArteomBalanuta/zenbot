@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"zenbot/internal/model"
 	"zenbot/internal/repository"
 )
 
@@ -11,6 +13,28 @@ import (
 // by public moderation commands. It has no agent integration.
 type ShadowBanService struct {
 	Repo repository.ShadowBanCommandRepository
+}
+
+func (s *ShadowBanService) Matches(ctx context.Context, user *model.User) (bool, error) {
+	if user == nil {
+		return false, nil
+	}
+	records, err := s.List(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, record := range records {
+		if strings.TrimSpace(user.Trip) != "" && user.Trip == record.Trip {
+			return true, nil
+		}
+		if user.Name != "" && user.Name == record.Name {
+			return true, nil
+		}
+		if user.Hash != "" && user.Hash == record.Hash {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *ShadowBanService) repository() (repository.ShadowBanCommandRepository, error) {

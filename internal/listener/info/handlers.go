@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -28,8 +29,14 @@ type RenameAfkUsers struct{}
 
 func (RenameAfkUsers) Handle(_ context.Context, c *Context) (bool, error) {
 	parts := strings.SplitN(c.Message.Text, " is now ", 2)
-	if len(parts) == 2 && c.Engine.GetName() == parts[0] {
-		c.Engine.SetName(parts[1])
+	if len(parts) == 2 {
+		before, after := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		if strings.EqualFold(c.Engine.GetName(), before) {
+			c.Engine.SetName(after)
+		}
+		if renamer, ok := c.Engine.(common.AfkRenameController); ok {
+			renamer.RenameAfkUser(before, after)
+		}
 	}
 	return true, nil
 }
@@ -65,9 +72,21 @@ func (ConvertWhisperToChatMessage) Handle(_ context.Context, c *Context) (bool, 
 
 type AuditWhisperCommand struct{}
 
-func (AuditWhisperCommand) Handle(_ context.Context, c *Context) (bool, error) {
+func (AuditWhisperCommand) Handle(ctx context.Context, c *Context) (bool, error) {
 	if c.ChatMessage == nil {
 		return false, nil
+	}
+	if auditor, ok := c.Engine.(common.MessageRecordAuditor); ok {
+		_, err := auditor.LogMessageRecord(ctx, model.MessageRecord{
+			Trip:            c.ChatMessage.Trip,
+			Name:            c.ChatMessage.Name,
+			Hash:            c.ChatMessage.Hash,
+			Message:         c.ChatMessage.Text,
+			Channel:         c.Engine.GetChannel(),
+			Visibility:      "WHISPER",
+			CreatedOnMillis: time.Now().UnixMilli(),
+		})
+		return true, err
 	}
 	_, err := c.Engine.LogMessage(c.ChatMessage.Trip, c.ChatMessage.Name, c.ChatMessage.Hash, c.ChatMessage.Text, c.Engine.GetChannel())
 	return true, err
@@ -75,7 +94,7 @@ func (AuditWhisperCommand) Handle(_ context.Context, c *Context) (bool, error) {
 
 type DispatchWhisperCommand struct{}
 
-func (DispatchWhisperCommand) Handle(_ context.Context, c *Context) (bool, error) {
+func (DispatchWhisperCommand) Handle(ctx context.Context, c *Context) (bool, error) {
 	if c.ChatMessage == nil {
 		return false, nil
 	}
@@ -88,8 +107,12 @@ func (DispatchWhisperCommand) Handle(_ context.Context, c *Context) (bool, error
 		return false, nil
 	}
 	cmd := common.BuildCommand(f[0], c.Engine, c.ChatMessage)
-	if cmd != nil && c.Engine.IsUserAuthorized(c.ChatMessageUser(), cmd.GetRole()) {
-		cmd.Execute()
+	if cmd != nil && common.IsCommandAuthorized(c.Engine, cmd, c.ChatMessageUser()) {
+		if contextual, ok := cmd.(interface{ ExecuteContext(context.Context) }); ok {
+			contextual.ExecuteContext(ctx)
+		} else {
+			cmd.Execute()
+		}
 	}
 	return false, nil
 }

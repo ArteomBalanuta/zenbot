@@ -47,7 +47,7 @@ func TestAgentCommandGatewayRejectsUnauthorizedUnknownAndSendFailure(t *testing.
 		authorized    bool
 		sendErr       error
 	}{
-		{"unknown", "whois", true, nil}, {"denied", "ping", false, nil}, {"send", "ping", true, errors.New("send failed")},
+		{"unknown", "totally_unknown", true, nil}, {"denied", "captcha", false, nil}, {"send", "ping", true, errors.New("send failed")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}}, authorized: tc.authorized, sendErr: tc.sendErr}
@@ -56,7 +56,7 @@ func TestAgentCommandGatewayRejectsUnauthorizedUnknownAndSendFailure(t *testing.
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
 			if tc.command != "ping" && e.sends != 0 {
-				t.Fatalf("unknown command sent=%d", e.sends)
+				t.Fatalf("rejected command sent=%d", e.sends)
 			}
 		})
 	}
@@ -70,5 +70,17 @@ func TestAgentCommandGatewayDoesNotExecuteCancelledContext(t *testing.T) {
 	result, err := NewAgentCommandGateway(e).Execute(ctx, caller, "ping", "")
 	if err == nil || result.Executed || e.sends != 0 {
 		t.Fatalf("result=%#v err=%v sends=%d", result, err, e.sends)
+	}
+}
+
+func TestAgentCommandGatewayPreservesTypedModerationOperationsForSyntheticCaller(t *testing.T) {
+	e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{}}}
+	caller, err := api.NewContextWithCapabilities("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "captcha", "on")
+	if err != nil || !result.Executed || len(e.raws) != 1 || e.raws[0] != `{"cmd":"enablecaptcha"}` || len(result.Messages) != 1 {
+		t.Fatalf("result=%#v raws=%#v messages=%#v err=%v", result, e.raws, result.Messages, err)
 	}
 }

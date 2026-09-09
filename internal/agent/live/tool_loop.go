@@ -117,7 +117,7 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		return l.completeRequiredHistory(ctx, inv, agent, prepared, first, state)
 	}
 	if l.general {
-		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), first, l.allowed, l.Limits, state)
+		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state)
 		if loopErr != nil {
 			return Completion{}, loopErr
 		}
@@ -312,11 +312,11 @@ func NewBoundedToolLoop(assembler *assemble.Assembler, client llm.LlmClient, too
 	if len(tools) != 3 || len(allowed) != 3 || !containsExactly(allowed, userMessageHistoryTool, roomUsersTool, "run_command") || !frozenPublicTools(tools) {
 		return nil, errors.New("bounded tool loop requires fixed history, room users, and run command tools")
 	}
-	return newFrozenToolLoop(assembler, client, tools, allowed)
+	return newFrozenToolLoop(assembler, client, tools, allowed, true)
 }
 
 func NewRegistryToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tools []tool.Tool, allowed []string, limits turn.ExecutionLimits) (*ToolLoop, error) {
-	loop, err := newFrozenToolLoop(assembler, client, tools, allowed)
+	loop, err := newFrozenToolLoop(assembler, client, tools, allowed, false)
 	if err != nil {
 		return nil, err
 	}
@@ -358,10 +358,10 @@ func frozenPublicTools(tools []tool.Tool) bool {
 
 // NewHistoryToolLoop remains a compatibility wrapper for existing one-tool callers.
 func NewHistoryToolLoop(assembler *assemble.Assembler, client llm.LlmClient, history tool.UserMessageHistory) (*ToolLoop, error) {
-	return newFrozenToolLoop(assembler, client, []tool.Tool{history}, []string{userMessageHistoryTool})
+	return newFrozenToolLoop(assembler, client, []tool.Tool{history}, []string{userMessageHistoryTool}, true)
 }
 
-func newFrozenToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tools []tool.Tool, allowed []string) (*ToolLoop, error) {
+func newFrozenToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tools []tool.Tool, allowed []string, requirePublicDefinitions bool) (*ToolLoop, error) {
 	if assembler == nil || client == nil || len(tools) == 0 || len(tools) != len(allowed) {
 		return nil, errors.New("bounded tool loop is incomplete")
 	}
@@ -384,8 +384,17 @@ func newFrozenToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tool
 	if err != nil {
 		return nil, err
 	}
+	for _, registered := range tools {
+		descriptor, descriptorErr := registered.Descriptor(ctx)
+		if descriptorErr != nil {
+			return nil, fmt.Errorf("tool %q descriptor: %w", registered.Name(), descriptorErr)
+		}
+		if descriptor.Name() != registered.Name() {
+			return nil, fmt.Errorf("tool %q descriptor identity mismatch", registered.Name())
+		}
+	}
 	defs := registry.Definitions(ctx)
-	if len(defs) != len(allowed) {
+	if requirePublicDefinitions && len(defs) != len(allowed) {
 		return nil, errors.New("bounded tool definition is unavailable")
 	}
 	providerTools := make([]any, 0, len(defs))

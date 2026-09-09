@@ -2,10 +2,12 @@ package command
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"zenbot/internal/common"
+	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
 )
 
@@ -167,24 +169,47 @@ func (c *listCommand) Execute(ctx context.Context) (model.Status, error) {
 		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"list programming")
 		return model.FAILED, nil
 	}
-	if strings.TrimSpace(a[0]) != "" && strings.TrimSpace(a[0]) != c.engine.GetChannel() {
-		// Remote snapshot/listing is not available through the target Engine contract.
-		return model.FAILED, nil
+	channel := strings.TrimSpace(a[0])
+	if channel != "" && channel != c.engine.GetChannel() {
+		submitter, ok := c.engine.(common.CredentialedRoomSnapshotSubmitter)
+		if !ok {
+			return model.FAILED, fmt.Errorf("credentialed room snapshot submitter is not configured")
+		}
+		workflowID, err := listWorkflowID()
+		if err != nil {
+			return model.FAILED, err
+		}
+		if err := submitter.SubmitCredentialedRoomSnapshot(snapshot.RoomSnapshotRequest{
+			WorkflowID:    workflowID,
+			Author:        c.message.Name,
+			Whisper:       c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper",
+			SourceChannel: c.engine.GetChannel(),
+			TargetChannel: channel,
+			ReplyMessage:  "Unable to list users in the requested room.",
+			Operation:     snapshot.NewListRoomOperation(),
+		}); err != nil {
+			return model.FAILED, err
+		}
+		return model.SUCCESSFUL, nil
 	}
 	reply(&c.commandBase, formatSaturnUsers(*c.engine.GetActiveUsers()))
 	return model.SUCCESSFUL, nil
 }
 
 func formatSaturnUsers(users map[*model.User]struct{}) string {
-	out := ""
+	list := make([]*model.User, 0, len(users))
 	for u := range users {
-		trip := u.Trip
-		if trip == "" {
-			trip = "------"
-		}
-		out += "\n" + u.Hash + " | " + trip + " | " + u.Name + "\n"
+		list = append(list, u)
 	}
-	return out
+	return snapshot.FormatUsers(list)
+}
+
+var listWorkflowID = func() (string, error) {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", fmt.Errorf("generate list workflow ID: %w", err)
+	}
+	return fmt.Sprintf("list-%x", bytes), nil
 }
 
 type banCommand struct{ commandBase }

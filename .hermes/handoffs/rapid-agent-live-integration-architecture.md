@@ -68,7 +68,7 @@ QueueCapacity        int    `toml:"queueCapacity"`
 Use Saturn-derived defaults, with names preserved exactly:
 
 ```text
-creatorTrip = "595754"
+creatorTrip = "YOUR_CREATOR_TRIP_HERE"
 ambientEveryMessages = 8
 quietMinutes = 15
 contextMessageLimit = 60

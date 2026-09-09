@@ -67,7 +67,7 @@ This handoff therefore identifies the smallest evidence-backed prerequisite slic
 - `src/main/java/org/saturn/app/agent/room/AgentRoomMessagePipeline.java` filters blank/whisper/self/bot/command messages; parses mentions; submits `MENTION` and returns `CLAIMED`; submits ambient only on configured cadence and returns `PASS`.
 - That pipeline also owns quiet requests, moderation monitoring, semantic moderation, and bot detection. Those behaviors cannot be folded into a minimal mention slice without expanding scope.
 - `src/main/java/org/saturn/app/service/impl/AgentServiceImpl.java` runs requests asynchronously, delivers only `result.shouldReply()`, suppresses ambient failure replies, emits fixed failure replies for reply-required modes, bounds admission, coalesces ambient work, and closes its executor on shutdown.
-- `src/main/java/org/saturn/app/agent/api/AgentParticipationConfig.java` defines the missing participation configuration and defaults: creator trip `595754`, ambient disabled, cadence `8`, quiet duration `15m`, context limit `60`, and no-reply marker `[[SATURN_NO_REPLY]]`.
+- `src/main/java/org/saturn/app/agent/api/AgentParticipationConfig.java` defines participation configuration: an explicitly configured creator trip, ambient disabled, cadence `8`, quiet duration `15m`, context limit `60`, and no-reply marker `[[SATURN_NO_REPLY]]`.
 - `src/main/java/org/saturn/app/agent/routing/AgentRuntimeFactory.java` composes config, participation config, infrastructure/tools/router, `AgentServiceImpl`, and `AgentRoomAutomation`; when disabled it installs `AgentRoomAutomation.none()`.
 
 ## Concrete blockers

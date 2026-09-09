@@ -18,19 +18,20 @@ import (
 
 // Config controls an OpenAI-compatible endpoint. HTTP and timing hooks are injectable for tests.
 type Config struct {
-	Endpoint    string
-	Token       string
-	Model       string
-	MaxTokens   int
-	Temperature *float64
-	Options     map[string]any
-	HTTP        *http.Client
-	Retries     int
-	MaxRetries  int
-	Timeout     time.Duration
-	RetryDelay  time.Duration
-	Sleep       func(context.Context, time.Duration) error
-	Now         func() time.Time
+	Endpoint        string
+	Token           string
+	Model           string
+	MaxTokens       int
+	ThinkingEnabled bool
+	Temperature     *float64
+	Options         map[string]any
+	HTTP            *http.Client
+	Retries         int
+	MaxRetries      int
+	Timeout         time.Duration
+	RetryDelay      time.Duration
+	Sleep           func(context.Context, time.Duration) error
+	Now             func() time.Time
 }
 
 type Client struct {
@@ -192,6 +193,12 @@ func requestPayload(c Config, r llm.LlmRequest) (map[string]any, error) {
 	}
 	p["messages"] = messageJSON(r.Messages())
 	p["stream"] = false
+	thinkingOptions := map[string]any{}
+	if existing, ok := p["chat_template_kwargs"].(map[string]any); ok {
+		thinkingOptions = cloneMap(existing)
+	}
+	thinkingOptions["enable_thinking"] = c.ThinkingEnabled
+	p["chat_template_kwargs"] = thinkingOptions
 	if c.Model != "" {
 		p["model"] = c.Model
 	}

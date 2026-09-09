@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
+	"zenbot/internal/model"
 )
 
 type roomSnapshotSessionStub struct{ id string }
@@ -49,5 +51,30 @@ func TestEngineSubmitRoomSnapshotForwardsOneValidRequestToInstalledCoordinator(t
 	}
 	if created != 1 {
 		t.Fatalf("temporary sessions created = %d, want 1", created)
+	}
+}
+
+type captureRegistrationCommand struct {
+	captured *common.Engine
+	role     model.Role
+}
+
+func (c *captureRegistrationCommand) Execute()             {}
+func (c *captureRegistrationCommand) GetRole() *model.Role { return &c.role }
+func (c *captureRegistrationCommand) GetAliases() []string { return []string{"capture"} }
+func (c *captureRegistrationCommand) NewInstance(engine common.Engine, _ *model.ChatMessage) common.Command {
+	*c.captured = engine
+	return c
+}
+
+func TestCredentialedMasterPreservesWrapperCapabilitiesWhenRegisteringCommands(t *testing.T) {
+	engine := &EngineImpl{Type: model.MASTER, EnabledCommands: map[string]common.CommandMetadata{}}
+	bound := BindCredentialedRoomSnapshotMaster(engine)
+	var captured common.Engine
+	bound.RegisterCommand(&captureRegistrationCommand{captured: &captured})
+	(*bound.GetEnabledCommands())["capture"].Command(&model.ChatMessage{})
+
+	if _, ok := captured.(common.CredentialedRoomSnapshotSubmitter); !ok {
+		t.Fatalf("registered command engine %T lost credentialed snapshot capability", captured)
 	}
 }

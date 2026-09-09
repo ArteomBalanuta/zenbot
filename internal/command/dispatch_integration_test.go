@@ -50,7 +50,7 @@ func TestRegisterUserUtilitiesDispatchesEveryAliasThroughChatListener(t *testing
 	}
 }
 
-func TestRegisterUserUtilitiesDispatchesModerationAliasesAndLeavesLegacyCommandsUnknown(t *testing.T) {
+func TestRegisterUserUtilitiesDispatchesModerationAliases(t *testing.T) {
 	engine := &commandEngineStub{users: map[string]*model.User{
 		"alice": {Name: "alice", Hash: "hash"},
 	}}
@@ -84,7 +84,7 @@ func TestRegisterUserUtilitiesDispatchesModerationAliasesAndLeavesLegacyCommands
 		})
 	}
 
-	for _, alias := range []string{"kick", "unlock"} {
+	for _, alias := range []string{"unlock"} {
 		if _, ok := (*engine.GetEnabledCommands())[alias]; ok {
 			t.Fatalf("unexpectedly registered %q", alias)
 		}

@@ -20,6 +20,7 @@ type commandEngineStub struct {
 	commands           map[string]common.CommandMetadata
 	subs               map[string]struct{}
 	authorizationCalls int
+	audits             []model.CommandAuditRecord
 }
 
 func (s *commandEngineStub) ServiceBundle() *service.Bundle { return s.bundle }
@@ -156,8 +157,12 @@ func (s *commandEngineStub) IsUserAuthorized(_ *model.User, _ *model.Role) bool 
 	return true
 }
 func (s *commandEngineStub) LogMessage(_, _, _, _, _ string) (int64, error) { return 0, nil }
-func (s *commandEngineStub) RemoveIfAfk(_ *model.User)                      {}
-func (s *commandEngineStub) NotifyAfkIfMentioned(_ *model.ChatMessage)      {}
+func (s *commandEngineStub) LogCommand(_ context.Context, record model.CommandAuditRecord) (int64, error) {
+	s.audits = append(s.audits, record)
+	return int64(len(s.audits)), nil
+}
+func (s *commandEngineStub) RemoveIfAfk(_ *model.User)                 {}
+func (s *commandEngineStub) NotifyAfkIfMentioned(_ *model.ChatMessage) {}
 func (s *commandEngineStub) RegisterCommand(c common.Command) {
 	if s.commands == nil {
 		s.commands = map[string]common.CommandMetadata{}

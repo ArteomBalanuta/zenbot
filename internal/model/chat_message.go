@@ -60,5 +60,5 @@ func (m *ChatMessage) GetArguments() []string {
 
 {"cmd":"chat","nick":"sky","uType":"mod","userid":2264580605166,"channel":"programming",
 "text":" @gobot, has been seen online as: orangesun, gobot in last 15 minutes. ","level":999999,"flair":"⭐",
-"mod":true,"trip":"595754","color":"BF40BF","time":1748116525374}
+"mod":true,"trip":"example-trip","color":"BF40BF","time":1748116525374}
 */

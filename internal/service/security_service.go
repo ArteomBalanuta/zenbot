@@ -77,6 +77,22 @@ func (s *SecurityService) IsLifecycleAuthorized(u *model.User) bool {
 	return s.IsAuthorized(u, &admin)
 }
 
+// IsConfiguredUserTrip reports whether trip is explicitly allowed by the
+// source-compatible per-command userTrips whitelist.
+func (s *SecurityService) IsConfiguredUserTrip(trip string) bool {
+	trip = strings.TrimSpace(trip)
+	if trip == "" {
+		return false
+	}
+	for _, configured := range s.UserTrips {
+		configured = strings.TrimSpace(configured)
+		if strings.EqualFold(configured, "x") || strings.EqualFold(configured, trip) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *SecurityService) IsAuthorizedContext(ctx context.Context, u *model.User, required model.Role) (bool, error) {
 	if u == nil {
 		return false, nil

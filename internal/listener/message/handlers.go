@@ -131,7 +131,24 @@ func (UpdateAfkState) Handle(_ context.Context, c *Context) (bool, error) {
 
 type YoutubePreview struct{}
 
-func (YoutubePreview) Handle(_ context.Context, _ *Context) (bool, error) { return true, nil }
+func (YoutubePreview) Handle(ctx context.Context, c *Context) (bool, error) {
+	bundle := serviceBundle(c.Engine)
+	if bundle == nil || bundle.YouTube == nil {
+		return true, nil
+	}
+	preview, found, err := bundle.YouTube.Preview(ctx, c.Message.Text)
+	if err != nil {
+		log.Printf("could not generate YouTube preview: %v", err)
+		return true, nil
+	}
+	if found {
+		_, err = c.Engine.SendChatMessage(c.Message.Name, preview, false)
+		if err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
 
 type CernEasterEgg struct{}
 
@@ -191,10 +208,7 @@ func releaseLifecycleDispatch(engine common.Engine) func() {
 }
 
 func isCommandAuthorized(engine common.Engine, cmd common.Command, author *model.User) bool {
-	if authorizer, ok := cmd.(common.CommandAuthorizer); ok {
-		return authorizer.Authorize(author)
-	}
-	return engine.IsUserAuthorized(author, cmd.GetRole())
+	return common.IsCommandAuthorized(engine, cmd, author)
 }
 
 func (DispatchUserCommand) Handle(ctx context.Context, c *Context) (bool, error) {

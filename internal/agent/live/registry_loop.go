@@ -23,15 +23,18 @@ func executeRegistryBatch(ctx context.Context, executor *execution.Executor, age
 	if len(calls) > limits.MaxToolCalls || !state.ReserveToolCalls(len(calls)) {
 		return nil, nil, fmt.Errorf("agent tool call limit")
 	}
-	out := make([]toolBatchResult, 0, len(calls))
 	for _, call := range calls {
 		if strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.Name) == "" {
 			return nil, nil, fmt.Errorf("invalid agent tool call")
 		}
-		if err := state.MarkToolAttempted(1); err != nil {
-			return nil, nil, err
-		}
-		result := executor.Execute(ctx, agent, call)
+	}
+	if err := state.MarkToolAttempted(len(calls)); err != nil {
+		return nil, nil, err
+	}
+	results := execution.ExecuteAll(ctx, executor, agent, calls)
+	out := make([]toolBatchResult, 0, len(calls))
+	for index, call := range calls {
+		result := results[index]
 		if result.IsError {
 			_ = state.RecordToolFailure()
 		} else {
@@ -61,15 +64,23 @@ func appendRegistryProtocol(messages []llm.LlmMessage, response llm.LlmResponse,
 	return messages, nil
 }
 
-func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *tool.Registry, agent api.Context, messages []llm.LlmMessage, initial llm.LlmResponse, allowed []string, limits turn.ExecutionLimits, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
+func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *tool.Registry, agent api.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, allowed []string, limits turn.ExecutionLimits, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
 	if client == nil || registry == nil || state == nil {
 		return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent registry loop is incomplete")
 	}
 	budget := make(map[string]int, len(allowed))
-	for _, name := range allowed {
-		budget[name] = limits.MaxToolCalls
+	perToolLimit := limits.MaxCallsPerTool
+	if perToolLimit <= 0 {
+		perToolLimit = limits.MaxToolCalls
 	}
-	executor := &execution.Executor{Registry: registry, Ledger: execution.NewLedger(budget, 2)}
+	for _, name := range allowed {
+		budget[name] = perToolLimit
+	}
+	maxFailures := limits.MaxToolFailures
+	if maxFailures <= 0 {
+		maxFailures = 2
+	}
+	executor := &execution.Executor{Registry: registry, Ledger: execution.NewLedger(budget, maxFailures), DefaultTimeout: limits.ToolTimeout}
 	response := initial
 	all := []toolBatchResult{}
 	for {
@@ -96,7 +107,7 @@ func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *t
 		if !state.AdvanceStep() {
 			return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent execution step limit reached")
 		}
-		response, err = client.Complete(ctx, llm.NewLlmRequest(messages, nil, false, nil, nil))
+		response, err = client.Complete(ctx, llm.NewLlmRequest(messages, providerTools, false, nil, nil))
 		if err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}

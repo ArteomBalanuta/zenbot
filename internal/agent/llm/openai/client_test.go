@@ -46,6 +46,20 @@ func TestCompleteSuccessAndRequestOptions(t *testing.T) {
 	}
 }
 
+func TestRequestPayloadPropagatesThinkingModeWithoutDroppingProviderOptions(t *testing.T) {
+	cfg := Config{ThinkingEnabled: true, Options: map[string]any{
+		"chat_template_kwargs": map[string]any{"custom": "preserved"},
+	}}
+	payload, err := requestPayload(cfg, testRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kwargs, ok := payload["chat_template_kwargs"].(map[string]any)
+	if !ok || kwargs["enable_thinking"] != true || kwargs["custom"] != "preserved" {
+		t.Fatalf("chat_template_kwargs=%#v", payload["chat_template_kwargs"])
+	}
+}
+
 func TestNewClientClonesNestedOptions(t *testing.T) {
 	nested := map[string]string{"region": "west"}
 	options := map[string]any{"provider": nested}

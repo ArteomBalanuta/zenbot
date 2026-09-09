@@ -351,13 +351,8 @@ func filterTools(in []any, mode runtime.Mode, prompt string) []any {
 		if mode == runtime.MODERATION && name != "run_command" {
 			continue
 		}
-		if mode != runtime.MODERATION && strings.HasPrefix(name, "saturn_") {
-			a := strings.TrimPrefix(name, "saturn_")
-			toks := strings.Fields(prompt)
-			ok := len(toks) > 0 && toks[0] == a || len(toks) > 1 && (toks[0] == "run" || toks[0] == "execute") && toks[1] == a
-			if !ok {
-				continue
-			}
+		if mode == runtime.AMBIENT && strings.HasPrefix(name, "saturn_") {
+			continue
 		}
 		out = append(out, v)
 	}

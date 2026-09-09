@@ -10,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/util"
@@ -34,6 +36,7 @@ type Bundle struct {
 	Weather    *WeatherService
 	Time       *TimeService
 	Search     *SearchService
+	YouTube    *YouTubeService
 	SCP        *SCPService
 	DBZ        *DBZService
 	Activity   *ActivityService
@@ -139,6 +142,42 @@ func (s *UserService) RegisterTripByName(name, trip string) error {
 }
 func (s *UserService) LastMessages(name, trip string, count int) ([]model.Message, error) {
 	return s.Identity.LastMessages(name, trip, count)
+}
+
+func (s *UserService) SeenRecently(ctx context.Context, user *model.User) (string, error) {
+	if s == nil || user == nil || s.Queries == nil {
+		return "", nil
+	}
+	recent, ok := s.Queries.(repository.RecentPresenceRepository)
+	if !ok {
+		return "", nil
+	}
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	names, err := recent.RecentPresenceNames(ctx, user.Hash, user.Trip, now.Add(-15*time.Minute).UnixMilli(), 5)
+	if err != nil {
+		return "", err
+	}
+	aliases := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		key := strings.ToLower(name)
+		if name == "" || strings.EqualFold(name, user.Name) {
+			continue
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		aliases = append(aliases, name)
+	}
+	if len(aliases) == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("\\n @%s, has been seen as: _%s_ recently. \\n", user.Name, strings.Join(aliases, ", ")), nil
 }
 
 func (s *UserService) lastOnlineFromLastSeen(ctx context.Context, target string) (string, error) {
@@ -463,8 +502,8 @@ func (w weatherPayload) format(area string) string {
 		t, _ := time.ParseInLocation("2006-01-02T15:04", v, loc)
 		return t.Format("Mon, 02 Jan 2006 15-04-05 -0700")
 	}
-	lines := []string{fmt.Sprintf("Weather forecast for today: **%s**", area), fmt.Sprintf("Temperature: %s %s", w.Current.Temperature, w.CurrentUnits.Temperature), fmt.Sprintf("Feels temp: %s %s", pick(w.HourlyRaw.Apparent), w.HourlyUnitsRaw.Apparent), fmt.Sprintf("Air Humidity: %s %s", pick(w.HourlyRaw.Humidity), w.HourlyUnitsRaw.Humidity), "Precipitation: " + code, fmt.Sprintf("Wind speed: %s %s", w.Current.Windspeed, w.CurrentUnits.Windspeed), fmt.Sprintf("Pressure surface: %s %s", pick(w.HourlyRaw.Surface), w.HourlyUnitsRaw.Surface), fmt.Sprintf("Pressure sea level: %s %s", pick(w.HourlyRaw.Sea), w.HourlyUnitsRaw.Sea), "\u2009\u2009\u2009 ", fmt.Sprintf("UV day max index: %s %s", first(w.DailyRaw.UV), w.DailyUnitsRaw.UV), fmt.Sprintf("Short wave radiation day sum: %s %s", first(w.DailyRaw.Radiation), w.DailyUnitsRaw.Radiation), fmt.Sprintf("ShortWave rad: %s %s", pick(w.HourlyRaw.Shortwave), w.HourlyUnitsRaw.Shortwave), fmt.Sprintf("Diffuse rad: %s %s", pick(w.HourlyRaw.Diffuse), w.HourlyUnitsRaw.Diffuse), "\u2009\u2009\u2009 ", "Time: " + rfc(w.Current.Time), "Sun rise: " + rfc(first(w.DailyRaw.Sunrise)), "Sun set: " + rfc(first(w.DailyRaw.Sunset)), "\u2009\u2009\u2009 ", fmt.Sprintf("Soil temp 18cm: %s %s", pick(w.HourlyRaw.SoilTemp), w.HourlyUnitsRaw.SoilTemp), fmt.Sprintf("Soil moist 3-9cm: %s %s", pick(w.HourlyRaw.SoilMoist), w.HourlyUnitsRaw.SoilMoist)}
-	return strings.Join(lines, "\\n") + "\\n"
+	lines := []string{fmt.Sprintf("Weather forecast for today: **%s**", area), fmt.Sprintf("Temperature: %s %s", w.Current.Temperature, w.CurrentUnits.Temperature), fmt.Sprintf("Feels temp: %s %s", pick(w.HourlyRaw.Apparent), w.HourlyUnitsRaw.Apparent), fmt.Sprintf("Air Humidity: %s %s", pick(w.HourlyRaw.Humidity), w.HourlyUnitsRaw.Humidity), "Precipitation: " + code, fmt.Sprintf("Wind speed: %s %s", w.Current.Windspeed, w.CurrentUnits.Windspeed), fmt.Sprintf("Pressure surface: %s %s", pick(w.HourlyRaw.Surface), w.HourlyUnitsRaw.Surface), fmt.Sprintf("Pressure sea level: %s %s", pick(w.HourlyRaw.Sea), w.HourlyUnitsRaw.Sea), fmt.Sprintf("UV day max index: %s %s", first(w.DailyRaw.UV), w.DailyUnitsRaw.UV), fmt.Sprintf("Short wave radiation day sum: %s %s", first(w.DailyRaw.Radiation), w.DailyUnitsRaw.Radiation), fmt.Sprintf("ShortWave rad: %s %s", pick(w.HourlyRaw.Shortwave), w.HourlyUnitsRaw.Shortwave), fmt.Sprintf("Diffuse rad: %s %s", pick(w.HourlyRaw.Diffuse), w.HourlyUnitsRaw.Diffuse), "Time: " + rfc(w.Current.Time), "Sun rise: " + rfc(first(w.DailyRaw.Sunrise)), "Sun set: " + rfc(first(w.DailyRaw.Sunset)), fmt.Sprintf("Soil temp 18cm: %s %s", pick(w.HourlyRaw.SoilTemp), w.HourlyUnitsRaw.SoilTemp), fmt.Sprintf("Soil moist 3-9cm: %s %s", pick(w.HourlyRaw.SoilMoist), w.HourlyUnitsRaw.SoilMoist)}
+	return alignLiteralLines(lines, true)
 }
 func first(v []string) string {
 	if len(v) > 0 {
@@ -552,13 +591,136 @@ func (s *TimeService) Get(ctx context.Context, location string) (string, error) 
 	if sr.Results.UTCOffset > 0 {
 		offset = "+" + offset
 	}
-	payload := fmt.Sprintf("today: %s\\n\\ntime: %s\\n\\nzone: %s\\n\\nUTC offset: %s\\n\\nsun rise: %s\\n\\nsun set: %s\\n\\nfirst light: %s\\n\\nlast light: %s\\n\\ndawn: %s\\n\\ndusk: %s\\n\\nsolar noon: %s\\n\\ngolden hour: %s\\n\\nday length: %s\\n", sr.Results.Date, current, tr.TimeZone, offset, sr.Results.Sunrise, sr.Results.Sunset, sr.Results.First, sr.Results.Last, sr.Results.Dawn, sr.Results.Dusk, sr.Results.Noon, sr.Results.Golden, sr.Results.Length)
-	return fmt.Sprintf("\\n Time: **%s, %s** \\n ", location, r.Country) + strings.ReplaceAll(payload, ":", "\u2009:"), nil
+	lines := []string{
+		"today: " + sr.Results.Date,
+		"time: " + current,
+		"zone: " + tr.TimeZone,
+		"UTC offset: " + offset,
+		"sun rise: " + sr.Results.Sunrise,
+		"sun set: " + sr.Results.Sunset,
+		"first light: " + sr.Results.First,
+		"last light: " + sr.Results.Last,
+		"dawn: " + sr.Results.Dawn,
+		"dusk: " + sr.Results.Dusk,
+		"solar noon: " + sr.Results.Noon,
+		"golden hour: " + sr.Results.Golden,
+		"day length: " + sr.Results.Length,
+	}
+	return fmt.Sprintf("\\n Time: **%s, %s** \\n ", location, r.Country) + alignLiteralLines(lines, false), nil
+}
+
+func alignLiteralLines(lines []string, prepend bool) string {
+	maxWidth := 0
+	for _, line := range lines {
+		key, _, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		if width := utf8.RuneCountInString(key); width > maxWidth {
+			maxWidth = width
+		}
+	}
+	var output strings.Builder
+	for _, line := range lines {
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		padding := strings.Repeat("\u2009", maxWidth-utf8.RuneCountInString(key))
+		if prepend {
+			output.WriteString(padding)
+			output.WriteString(key)
+		} else {
+			output.WriteString(key)
+			output.WriteString(padding)
+		}
+		output.WriteByte(':')
+		output.WriteString(value)
+		output.WriteString(`\n`)
+	}
+	return output.String()
 }
 
 type SearchService struct {
 	HTTP     *http.Client
 	Endpoint string
+}
+
+type YouTubeService struct {
+	HTTP     *http.Client
+	Endpoint string
+}
+
+func (s *YouTubeService) Preview(ctx context.Context, message string) (string, bool, error) {
+	videoID := extractYouTubeID(message)
+	if videoID == "" {
+		return "", false, nil
+	}
+	client := s.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	endpoint := s.Endpoint
+	if endpoint == "" {
+		endpoint = "https://www.youtube.com/oembed"
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", true, err
+	}
+	query := u.Query()
+	query.Set("format", "json")
+	query.Set("url", "https://youtube.com/watch?v="+videoID)
+	u.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return "", true, err
+	}
+	request.Header.Set("User-Agent", "Firefox 59.9.0")
+	response, err := client.Do(request)
+	if err != nil {
+		return "", true, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", true, fmt.Errorf("YouTube metadata status %d", response.StatusCode)
+	}
+	var metadata struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&metadata); err != nil {
+		return "", true, err
+	}
+	if strings.TrimSpace(metadata.Title) == "" {
+		return "", true, fmt.Errorf("YouTube metadata title is blank")
+	}
+	preview := fmt.Sprintf("Title: %s\\n![%s](https://i.ytimg.com/vi/%s/hqdefault.jpg)", metadata.Title, metadata.Title, videoID)
+	return preview, true, nil
+}
+
+func extractYouTubeID(message string) string {
+	for _, field := range strings.Fields(message) {
+		candidate := strings.Trim(field, "<>()[]{}\"',.!;")
+		if !strings.Contains(candidate, "://") {
+			continue
+		}
+		u, err := url.Parse(candidate)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(strings.TrimPrefix(u.Hostname(), "www."))
+		switch host {
+		case "youtube.com", "m.youtube.com":
+			if id := strings.TrimSpace(u.Query().Get("v")); id != "" {
+				return id
+			}
+		case "youtu.be":
+			if id := strings.TrimSpace(path.Base(u.Path)); id != "" && id != "." && id != "/" {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 func (s *SearchService) Search(ctx context.Context, q string) (string, error) {

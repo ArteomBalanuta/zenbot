@@ -27,6 +27,10 @@ func (e *EngineImpl) SubmitRoomSnapshot(request snapshot.RoomSnapshotRequest) er
 // composition and deliberately not implemented by EngineImpl itself.
 type credentialedRoomSnapshotMaster struct{ *EngineImpl }
 
+func (e *credentialedRoomSnapshotMaster) RegisterCommand(command common.Command) {
+	e.EngineImpl.registerCommandFor(command, e)
+}
+
 // BindCredentialedRoomSnapshotMaster returns a command-facing engine view that
 // can supply a host password exclusively to a temporary snapshot join. Non-
 // masters retain their ordinary engine view and therefore cannot expose this

@@ -10,12 +10,16 @@ import (
 	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/agent/live"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/prompt"
 	"zenbot/internal/agent/tool"
+	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/command"
+	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/common"
 	"zenbot/internal/config"
 	"zenbot/internal/listener/message"
+	"zenbot/internal/model"
 	"zenbot/internal/repository"
 )
 
@@ -53,9 +57,50 @@ func TestOutputFinalizerUsesResolvedMarkerAndBound(t *testing.T) {
 
 type liveAgentTestEngine struct{ common.Engine }
 
+type trustedSnapshotEngine struct {
+	common.Engine
+	users    map[*model.User]struct{}
+	nilUsers bool
+}
+
+func (e trustedSnapshotEngine) GetChannel() string { return "programming" }
+func (e trustedSnapshotEngine) GetActiveUsers() *map[*model.User]struct{} {
+	if e.nilUsers {
+		return nil
+	}
+	return &e.users
+}
+func (e trustedSnapshotEngine) IsUserAuthorized(user *model.User, role *model.Role) bool {
+	if user == nil || role == nil {
+		return false
+	}
+	return user.Trip == "admin-trip" || user.Trip == "mod-trip" && *role >= model.MODERATOR
+}
+
+func TestTrustedAgentSnapshotPropagatesPersistedModeratorAndAdminRoles(t *testing.T) {
+	admin := &model.User{Name: "admin", Trip: "admin-trip"}
+	moderator := &model.User{Name: "moderator", Trip: "mod-trip"}
+	regular := &model.User{Name: "regular", Trip: "regular-trip"}
+	engine := trustedSnapshotEngine{users: map[*model.User]struct{}{admin: {}, moderator: {}, regular: {}}}
+	snapshot := trustedAgentSnapshot(engine, "creator", []string{"configured-admin"})
+	if snapshot.Room != "programming" || len(snapshot.Users) != 3 || snapshot.Roles["admin-trip"] != participation.RoleAdmin || snapshot.Roles["mod-trip"] != participation.RoleModerator {
+		t.Fatalf("snapshot=%#v", snapshot)
+	}
+	if _, ok := snapshot.Roles["regular-trip"]; ok {
+		t.Fatal("regular caller received a privileged role")
+	}
+}
+
+func TestTrustedAgentSnapshotToleratesUnavailableActiveUserSet(t *testing.T) {
+	snapshot := trustedAgentSnapshot(trustedSnapshotEngine{nilUsers: true}, "creator", []string{"admin"})
+	if snapshot.Room != "programming" || len(snapshot.Users) != 0 || snapshot.CreatorTrip != "creator" {
+		t.Fatalf("snapshot=%#v", snapshot)
+	}
+}
+
 func TestNewLiveAgentSharesRuntimeWithDirectSubmitter(t *testing.T) {
 	repository := &liveAgentRepositoryStub{}
-	enabled, err := newLiveAgent(&config.Config{Agent: config.AgentConfig{Enabled: true, Endpoint: "http://localhost:1", Model: "test"}}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
+	enabled, err := newLiveAgent(&config.Config{Agent: config.AgentConfig{Enabled: true, Endpoint: "http://localhost:1", Model: "test", CreatorTrip: "creator"}}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +165,7 @@ func (e *liveAgentRegistrationEngine) hasAlias(alias string) bool {
 
 func TestNewLiveAgentWiresAmbientParticipationFromResolvedConfig(t *testing.T) {
 	repository := &liveAgentRepositoryStub{}
-	agent, err := newLiveAgent(&config.Config{Agent: config.AgentConfig{Enabled: true, Endpoint: "http://localhost:1", Model: "test", Ambient: true}}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
+	agent, err := newLiveAgent(&config.Config{Agent: config.AgentConfig{Enabled: true, Endpoint: "http://localhost:1", Model: "test", CreatorTrip: "creator", Ambient: true}}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,10 +178,33 @@ func TestNewLiveAgentWiresAmbientParticipationFromResolvedConfig(t *testing.T) {
 		t.Fatalf("ambient participation was not fully wired: %#v", participation)
 	}
 	if participation.SemanticCandidate != nil || participation.Pipeline.SemanticModerationReady {
-		t.Fatalf("semantic ingress must stay uncomposed and fail-closed: %#v", participation)
+		t.Fatalf("disabled semantic ingress must stay uncomposed: %#v", participation)
 	}
 	if _, err := newLiveAgent(&config.Config{}, liveAgentTestEngine{}, nil, roomDirectoryForMainTest{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNewLiveAgentWiresSemanticModerationOnlyWhenConfigured(t *testing.T) {
+	repository := &liveAgentRepositoryStub{}
+	agentConfig := config.AgentConfig{
+		Enabled: true, Endpoint: "http://localhost:1", Model: "test", CreatorTrip: "creator", ModerationEnabled: true,
+		ModerationJoinBurstCount: 1, ModerationJoinWindowSeconds: 1,
+		ModerationSameHashCount: 1, ModerationSameHashWindowSeconds: 1,
+		ModerationNameClusterCount: 1, ModerationNameClusterWindowSeconds: 1,
+		ModerationPostKickWindowSeconds: 1, ModerationActionCooldownSeconds: 1,
+		ModerationMessageBurstCount: 1, ModerationMessageBurstWindowSeconds: 1,
+		ModerationRepeatedMessageCount: 1, ModerationRepeatedMessageWindowSeconds: 1,
+		ModerationSecondBreachWindowSeconds: 1,
+	}
+	agent, err := newLiveAgent(&config.Config{Agent: agentConfig}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	room, ok := agent.Participation.(live.RoomParticipation)
+	if !ok || room.SemanticCandidate == nil || room.Pipeline == nil || !room.Pipeline.SemanticModerationReady {
+		t.Fatalf("semantic moderation composition is incomplete: %#v", agent.Participation)
 	}
 }
 
@@ -167,7 +235,7 @@ func (mainTestGateway) Execute(context.Context, api.Context, string, string) (co
 	return commandgateway.Execution{}, nil
 }
 
-func TestNewAgentToolLoopFreezesHistoryAndRoomUsersAndRunCommand(t *testing.T) {
+func TestNewAgentToolLoopRegistersEveryAgentCommandWithContextualVisibility(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -177,13 +245,34 @@ func TestNewAgentToolLoopFreezesHistoryAndRoomUsersAndRunCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := roomDirectoryForMainTest{}
-	loop, err := newAgentToolLoop(config.ResolvedAgentConfig{AgentConfig: config.AgentConfig{ContextMessageLimit: 1}}, liveAgentRepositoryStub{}, assembler, mainTestClient{}, directory, mainTestGateway{})
+	loop, err := newAgentToolLoop(config.ResolvedAgentConfig{AgentConfig: config.AgentConfig{ContextMessageLimit: 1, MaxSteps: 5, MaxTools: 4}}, liveAgentRepositoryStub{}, assembler, mainTestClient{}, directory, mainTestGateway{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loop.Tools) != 3 {
-		t.Fatalf("tools=%#v", loop.Tools)
+	for _, definition := range commandcatalog.AgentEntries() {
+		if _, ok := loop.Registry.Lookup("saturn_" + definition.Canonical); !ok {
+			t.Fatalf("missing agent command tool for %q", definition.Canonical)
+		}
 	}
+	if loop.Limits.MaxSteps != 5 || loop.Limits.MaxToolCalls != 4 {
+		t.Fatalf("registry limits=%+v", loop.Limits)
+	}
+	public, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	if definitionNames(loop.Registry.Definitions(public))["saturn_prefix"] {
+		t.Fatal("admin command exposed to public caller")
+	}
+	creator, _ := api.NewContextWithCapabilities("room", "creator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands, api.PermanentBan, api.AdminCommands})
+	if !definitionNames(loop.Registry.Definitions(creator))["saturn_prefix"] || !definitionNames(loop.Registry.Definitions(creator))["saturn_ban"] {
+		t.Fatal("creator command inventory is incomplete")
+	}
+}
+
+func definitionNames(definitions []contract.Definition) map[string]bool {
+	names := make(map[string]bool, len(definitions))
+	for _, definition := range definitions {
+		names[definition.Name] = true
+	}
+	return names
 }
 
 type roomDirectoryForMainTest struct{}

@@ -44,7 +44,7 @@ func TestLastOnlineCommandUsesFirstNormalizedArgumentAndWhisper(t *testing.T) {
 	}}
 	engine := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}, bundle: &service.Bundle{Users: &service.UserService{Queries: queries, Now: func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }}}}
 	definition, ok := commandDefinitionFor("lastseen")
-	if !ok || definition.Role != model.USER {
+	if !ok || definition.Role != model.REGULAR {
 		t.Fatalf("definition=%+v present=%v", definition, ok)
 	}
 	status, err := definition.New(engine, &model.ChatMessage{Name: "alice", Text: "!lastseen  @merc ignored", IsWhisper: true}).Execute(context.Background())

@@ -3,6 +3,7 @@ package listener
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"zenbot/internal/core"
@@ -12,9 +13,10 @@ import (
 )
 
 type subscriptionQueryStub struct {
-	data   string
-	calls  int
-	events *[]string
+	data        string
+	calls       int
+	events      *[]string
+	recentNames []string
 }
 type recordingJoinAutomation struct {
 	engine       *core.EngineImpl
@@ -51,12 +53,84 @@ func (s *subscriptionQueryStub) BasicUserData(context.Context, string, string) (
 func (s *subscriptionQueryStub) LastOnline(context.Context, string) (repository.LastOnlineRecord, error) {
 	return repository.LastOnlineRecord{}, nil
 }
+func (s *subscriptionQueryStub) RecentPresenceNames(context.Context, string, string, int64, int) ([]string, error) {
+	return append([]string(nil), s.recentNames...), nil
+}
 func (r *recordingPresenceRepository) LogMessage(string, string, string, string, string) (int64, error) {
-	*r.events = append(*r.events, "log")
+	*r.events = append(*r.events, "wrong-message-log")
 	return 0, nil
 }
 func (r *recordingPresenceRepository) LogPresence(string, string, string, string, string) (int64, error) {
+	*r.events = append(*r.events, "log")
 	return 0, nil
+}
+
+func TestUserJoinedListenerNotifiesSubscribersAboutUnrelatedJoiningIdentity(t *testing.T) {
+	q := &subscriptionQueryStub{data: `Hashes: \nhash-joined \nNicks: \nnick-joined \n`}
+	e := &core.EngineImpl{
+		ActiveUsers:     map[*model.User]struct{}{},
+		OutMessageQueue: make(chan string, 2),
+		Repository:      &repository.DummyImpl{},
+		Services:        &service.Bundle{Users: &service.UserService{Queries: q}},
+	}
+	e.SubscribeTrip("subscriber-trip")
+	e.AddActiveUser(&model.User{Name: "subscriber", Trip: "subscriber-trip"})
+
+	NewUserJoinedListener(e).Notify(`{"nick":"joined","trip":"different-trip","hash":"hash-joined"}`)
+
+	if q.calls != 1 {
+		t.Fatalf("BasicUserData calls=%d, want 1", q.calls)
+	}
+	if payload := <-e.OutMessageQueue; !strings.Contains(payload, `/whisper @subscriber`) || !strings.Contains(payload, `hash-joined`) {
+		t.Fatalf("subscriber payload=%q", payload)
+	}
+}
+
+type shadowBanJoinRepository struct{ records []repository.ShadowBanRecord }
+
+func (r *shadowBanJoinRepository) PersistShadowBanRecord(context.Context, repository.ShadowBanRecord) error {
+	return nil
+}
+func (r *shadowBanJoinRepository) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
+	return append([]repository.ShadowBanRecord(nil), r.records...), nil
+}
+func (r *shadowBanJoinRepository) RemoveShadowBanBySourceTarget(context.Context, string) error {
+	return nil
+}
+func (r *shadowBanJoinRepository) RemoveAllShadowBans(context.Context) error { return nil }
+
+func TestUserJoinedListenerKicksMatchingShadowBannedIdentity(t *testing.T) {
+	e := &core.EngineImpl{
+		ActiveUsers:     map[*model.User]struct{}{},
+		OutMessageQueue: make(chan string, 1),
+		Repository:      &repository.DummyImpl{},
+		Services: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: &shadowBanJoinRepository{records: []repository.ShadowBanRecord{
+			{Name: "raider", Hash: "known-hash"},
+		}}}},
+	}
+
+	NewUserJoinedListener(e).Notify(`{"nick":"raider","hash":"known-hash","trip":"new-trip"}`)
+
+	if payload := <-e.OutMessageQueue; payload != `{"cmd":"kick","nick":"raider"}` {
+		t.Fatalf("kick payload=%q", payload)
+	}
+}
+
+func TestUserJoinedListenerReportsRecentAliasesForHumanUser(t *testing.T) {
+	q := &subscriptionQueryStub{recentNames: []string{"old-name", "joined", "Older-Name"}}
+	e := &core.EngineImpl{
+		Name:            "zenbot",
+		ActiveUsers:     map[*model.User]struct{}{},
+		OutMessageQueue: make(chan string, 1),
+		Repository:      &repository.DummyImpl{},
+		Services:        &service.Bundle{Users: &service.UserService{Queries: q}},
+	}
+
+	NewUserJoinedListener(e).Notify(`{"nick":"joined","hash":"hash","trip":"trip"}`)
+
+	if payload := <-e.OutMessageQueue; !strings.Contains(payload, `@joined, has been seen as: _old-name, Older-Name_ recently.`) {
+		t.Fatalf("recent-alias payload=%q", payload)
+	}
 }
 func (r *recordingPresenceRepository) LogCommand(context.Context, model.CommandAuditRecord) (int64, error) {
 	return 0, nil

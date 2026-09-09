@@ -33,6 +33,17 @@ FROM (
 ) recent
 ORDER BY created_on ASC, id ASC`
 
+const recentPublicMessagesForNickSQL = `SELECT name, trip, hash, message, created_on, channel
+FROM (
+  SELECT id, name, trip, hash, message, created_on, channel
+  FROM messages
+  WHERE LOWER(name) = LOWER($1)
+    AND visibility = 'PUBLIC'
+  ORDER BY created_on DESC, id DESC
+  LIMIT $2
+) recent
+ORDER BY created_on ASC, id ASC`
+
 // RecentPublicRoomMessages returns the newest bounded public messages for one room
 // in chronological order.
 func (d *Database) RecentPublicRoomMessages(ctx context.Context, room string, limit int) ([]repository.PublicRoomMessage, error) {
@@ -67,14 +78,11 @@ func (d *Database) RecentPublicRoomMessages(ctx context.Context, room string, li
 	return out, nil
 }
 
-// RecentPublicRoomMessagesForNick returns the newest bounded public messages
-// for one nick in one trusted room, ordered chronologically.
+// RecentPublicRoomMessagesForNick returns newest bounded public messages for a
+// nick across all rooms when room is blank, or within the exact optional room.
 func (d *Database) RecentPublicRoomMessagesForNick(ctx context.Context, room, nick string, limit int) ([]repository.PublicRoomMessage, error) {
 	if d == nil || d.DB == nil {
 		return nil, fmt.Errorf("recent public room messages for nick: database is not initialized")
-	}
-	if strings.TrimSpace(room) == "" {
-		return nil, fmt.Errorf("recent public room messages for nick: room is required")
 	}
 	if strings.TrimSpace(nick) == "" {
 		return nil, fmt.Errorf("recent public room messages for nick: nick is required")
@@ -82,7 +90,13 @@ func (d *Database) RecentPublicRoomMessagesForNick(ctx context.Context, room, ni
 	if limit <= 0 {
 		return nil, fmt.Errorf("recent public room messages for nick: limit must be positive")
 	}
-	rows, err := d.DB.QueryContext(ctx, recentPublicRoomMessagesForNickSQL, room, nick, strconv.Itoa(limit))
+	query := recentPublicMessagesForNickSQL
+	arguments := []any{nick, strconv.Itoa(limit)}
+	if room != "" {
+		query = recentPublicRoomMessagesForNickSQL
+		arguments = []any{room, nick, strconv.Itoa(limit)}
+	}
+	rows, err := d.DB.QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("recent public room messages for nick: %w", err)
 	}

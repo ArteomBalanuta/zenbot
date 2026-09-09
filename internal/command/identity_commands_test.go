@@ -240,7 +240,7 @@ func TestLastOnlineUsesSourceAliasesAndUsageInsteadOfCatalogPlaceholder(t *testi
 	e := newIdentityEngine(ids, &authFake{})
 	for _, alias := range []string{"lastonline", "seen", "last", "online", "lastseen"} {
 		d, ok := commandDefinitionFor(alias)
-		if !ok || d.Canonical != "lastonline" || d.Role != model.USER {
+		if !ok || d.Canonical != "lastonline" || d.Role != model.REGULAR {
 			t.Fatalf("%s definition=%+v ok=%v", alias, d, ok)
 		}
 		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!" + alias}).Execute(context.Background())

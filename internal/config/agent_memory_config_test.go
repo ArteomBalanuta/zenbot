@@ -7,7 +7,7 @@ func TestAgentMemoryConfigurationResolvesBoundedDefaultsAndOverrides(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if defaults.MemoryTurns != 6 || defaults.MemoryTtlMinutes != 1440 {
+	if defaults.MemoryTurns != 30 || defaults.MemoryTtlMinutes != 10080 {
 		t.Fatalf("defaults: %#v", defaults.AgentConfig)
 	}
 

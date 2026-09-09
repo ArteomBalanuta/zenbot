@@ -33,6 +33,21 @@ func TestSendWhisperMessageHasNoDotSeparator(t *testing.T) {
 	}
 }
 
+func TestSendChatMessageNormalizesLiteralAndPlatformNewlines(t *testing.T) {
+	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
+	got, err := e.SendChatMessage("alice", "first\\nsecond\r\nthird\rfourth", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "@alice first\nsecond\nthird\nfourth"
+	if got != want {
+		t.Fatalf("returned=%q, want %q", got, want)
+	}
+	if queued := <-e.OutMessageQueue; queued != `{ "cmd": "chat", "text": "@alice first\nsecond\nthird\nfourth"}` {
+		t.Fatalf("queued=%q", queued)
+	}
+}
+
 func TestSendAddressedMessageNormalizesAndFormatsPublicOutput(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
 	got, err := e.SendAddressedMessage("alice", "first\r\nsecond\\nthird", false)

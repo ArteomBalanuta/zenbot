@@ -6,7 +6,17 @@ import (
 )
 
 func TestAgentModerationRequiresMessageDetectionSettings(t *testing.T) {
-	c := AgentConfig{MemoryTurns: 1, MemoryTtlMinutes: 1, MaxOutputChars: 1, ModerationEnabled: true, ModerationJoinBurstCount: 1, ModerationJoinWindowSeconds: 1, ModerationSameHashCount: 1, ModerationSameHashWindowSeconds: 1, ModerationNameClusterCount: 1, ModerationNameClusterWindowSeconds: 1, ModerationPostKickWindowSeconds: 1, ModerationActionCooldownSeconds: 1}
+	resolved, err := (AgentConfig{}).Resolve(ValueReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := resolved.AgentConfig
+	c.ModerationEnabled = true
+	c.ModerationMessageBurstCount = 0
+	c.ModerationMessageBurstWindowSeconds = 0
+	c.ModerationRepeatedMessageCount = 0
+	c.ModerationRepeatedMessageWindowSeconds = 0
+	c.ModerationSecondBreachWindowSeconds = 0
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "moderation") {
 		t.Fatalf("missing message settings error=%v", err)
 	}

@@ -37,7 +37,7 @@ func historyContext(t *testing.T, room string) api.Context {
 
 func TestUserMessageHistoryDescriptorAndRestrictedJSONResult(t *testing.T) {
 	repo := &historyRepositoryStub{rows: []repository.PublicRoomMessage{{Name: "Alice", Trip: "secret-trip", Hash: "secret-hash", Message: `quoted " data`, CreatedOnMillis: 7, Channel: "Lounge"}}}
-	tool := agenttool.UserMessageHistory{Repository: repo, Limit: 3}
+	tool := agenttool.UserMessageHistory{Repository: repo, Limit: 500}
 	d, err := tool.Descriptor(historyContext(t, "Lounge"))
 	if err != nil {
 		t.Fatal(err)
@@ -54,21 +54,28 @@ func TestUserMessageHistoryDescriptorAndRestrictedJSONResult(t *testing.T) {
 		t.Fatalf("closed descriptor schema = %s err=%v", d.Parameters(), err)
 	}
 	nickSchema := schema.Properties["nick"]
-	if schema.Additional || len(schema.Required) != 1 || schema.Required[0] != "nick" || nickSchema["type"] != "string" || nickSchema["minLength"] != float64(1) || nickSchema["maxLength"] != float64(100) {
+	if schema.Additional || len(schema.Required) != 1 || schema.Required[0] != "nick" || nickSchema["type"] != "string" || nickSchema["minLength"] != float64(1) || nickSchema["maxLength"] != float64(100) || schema.Properties["room"]["type"] != "string" || schema.Properties["limit"]["maximum"] != float64(500) {
 		t.Fatalf("closed descriptor schema = %s", d.Parameters())
 	}
 	r, err := tool.Execute(context.Background(), historyContext(t, "Lounge"), json.RawMessage(`{"nick":" @ALICE "}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.room != "Lounge" || repo.nick != "ALICE" || repo.limit != 3 {
-		t.Fatalf("trusted scope = %#v", repo)
+	if repo.room != "" || repo.nick != "ALICE" || repo.limit != 500 {
+		t.Fatalf("default all-room scope = %#v", repo)
 	}
-	if strings.Contains(r.Content, "secret-trip") || strings.Contains(r.Content, "secret-hash") {
-		t.Fatalf("restricted JSON leaked identifiers: %s", r.Content)
+	for _, expected := range []string{`"trip":"secret-trip"`, `"hash":"secret-hash"`, `"returnedCount":1`, `"oldestCreatedOn":7`, `"newestCreatedOn":7`} {
+		if !strings.Contains(r.Content, expected) {
+			t.Fatalf("history result %s missing %s", r.Content, expected)
+		}
 	}
-	if r.IsError || !strings.Contains(r.Content, `"returnedCount":1`) {
+	if r.IsError {
 		t.Fatalf("result=%#v", r)
+	}
+
+	_, err = tool.Execute(context.Background(), historyContext(t, "Lounge"), json.RawMessage(`{"nick":"Alice","room":" other ","limit":2}`))
+	if err != nil || repo.room != "other" || repo.limit != 2 {
+		t.Fatalf("optional scope = %#v err=%v", repo, err)
 	}
 }
 

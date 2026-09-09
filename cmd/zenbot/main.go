@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/turn"
 	"zenbot/internal/command"
+	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/common"
 	"zenbot/internal/config"
 	"zenbot/internal/core"
@@ -85,31 +87,35 @@ func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUs
 	if db == nil || assembler == nil || client == nil || directory == nil || gateway == nil {
 		return nil, fmt.Errorf("agent tool composition is incomplete")
 	}
-	limit := resolved.ContextMessageLimit
-	if limit > 60 {
-		limit = 60
-	}
-	if limit < 1 {
-		limit = 1
-	}
 	baseTools := []tool.Tool{
-		tool.UserMessageHistory{Repository: db, Limit: limit},
+		tool.UserMessageHistory{Repository: db, Limit: tool.MaxUserMessageHistory},
 		tool.RoomUsers{Directory: directory},
 		tool.RunCommand{Gateway: gateway},
 	}
 	allowed := []string{"user_message_history", "room_users", "run_command"}
-	if !resolved.SQL.Enabled {
-		return live.NewBoundedToolLoop(assembler, client, baseTools, allowed)
+	tools := baseTools
+	for _, definition := range commandcatalog.AgentEntries() {
+		commandTool := tool.SaturnCommand{Definition: definition, Gateway: gateway}
+		tools = append(tools, commandTool)
+		allowed = append(allowed, commandTool.Name())
 	}
-	queries, okQueries := db.(repository.AgentNamedQueryRepository)
-	schema, okSchema := db.(repository.AgentSchemaRepository)
-	sqlRepo, okSQL := db.(repository.AgentSQLRepository)
-	if !okQueries || !okSchema || !okSQL {
-		return nil, fmt.Errorf("agent SQL repository composition is incomplete")
+	if resolved.SQL.Enabled {
+		queries, okQueries := db.(repository.AgentNamedQueryRepository)
+		schema, okSchema := db.(repository.AgentSchemaRepository)
+		sqlRepo, okSQL := db.(repository.AgentSQLRepository)
+		if !okQueries || !okSchema || !okSQL {
+			return nil, fmt.Errorf("agent SQL repository composition is incomplete")
+		}
+		tools = append(tools, tool.DatabaseQuery{Repository: queries}, tool.DatabaseSchema{Repository: schema, Enabled: true}, tool.DatabaseSQL{Schema: schema, Repository: sqlRepo, Config: resolved.SQL})
+		allowed = append(allowed, "database_query", "database_schema", "database_sql")
 	}
-	tools := append(baseTools, tool.DatabaseQuery{Repository: queries}, tool.DatabaseSchema{Repository: schema, Enabled: true}, tool.DatabaseSQL{Schema: schema, Repository: sqlRepo, Config: resolved.SQL})
-	allowed = append(allowed, "database_query", "database_schema", "database_sql")
-	return live.NewRegistryToolLoop(assembler, client, tools, allowed, turn.ExecutionLimits{MaxSteps: resolved.MaxSteps, MaxToolCalls: resolved.MaxTools})
+	return live.NewRegistryToolLoop(assembler, client, tools, allowed, turn.ExecutionLimits{
+		MaxSteps:        resolved.MaxSteps,
+		MaxToolCalls:    resolved.MaxTools,
+		MaxCallsPerTool: resolved.MaxCallsPerTool,
+		MaxToolFailures: resolved.MaxToolFailures,
+		ToolTimeout:     time.Duration(resolved.ToolTimeoutMillis) * time.Millisecond,
+	})
 }
 
 func (a *liveAgent) Close() {
@@ -129,6 +135,36 @@ func resolveCurrentEngine(source any) (func() common.Engine, error) {
 	default:
 		return nil, fmt.Errorf("live agent master resolver is incomplete")
 	}
+}
+
+func trustedAgentSnapshot(engine common.Engine, creatorTrip string, adminTrips []string) participation.TrustedSnapshot {
+	snapshot := participation.TrustedSnapshot{CreatorTrip: creatorTrip, AdminTrips: append([]string(nil), adminTrips...), Roles: map[string]participation.Role{}}
+	if engine == nil {
+		return snapshot
+	}
+	snapshot.Room = engine.GetChannel()
+	activeUsers := engine.GetActiveUsers()
+	if activeUsers == nil {
+		return snapshot
+	}
+	admin, moderator := model.ADMIN, model.MODERATOR
+	for user := range *activeUsers {
+		if user == nil {
+			continue
+		}
+		snapshot.Users = append(snapshot.Users, user.Name)
+		if strings.TrimSpace(user.Trip) == "" {
+			continue
+		}
+		switch {
+		case engine.IsUserAuthorized(user, &admin):
+			snapshot.Roles[user.Trip] = participation.RoleAdmin
+		case engine.IsUserAuthorized(user, &moderator):
+			snapshot.Roles[user.Trip] = participation.RoleModerator
+		}
+	}
+	sort.Strings(snapshot.Users)
+	return snapshot
 }
 
 func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepositories, directory tool.RoomUserDirectory) (*liveAgent, error) {
@@ -160,7 +196,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
 	}
-	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
+	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, ThinkingEnabled: resolved.ThinkingEnabled, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)
 	}
@@ -168,7 +204,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent prompts: %w", err)
 	}
-	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker}, catalog)
+	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker, MaxPromptChars: resolved.MaxPromptChars}, catalog)
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
@@ -210,20 +246,24 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	service := live.RuntimeService{Runtime: rt}
 	snapshot := func() participation.TrustedSnapshot {
 		current := resolveEngine()
-		if current == nil {
-			return participation.TrustedSnapshot{CreatorTrip: resolved.CreatorTrip, AdminTrips: append([]string(nil), c.AdminTrips...)}
-		}
-		users := []string{}
-		if safe, ok := current.(interface{ ActiveUserNames() []string }); ok {
-			users = safe.ActiveUserNames()
-		} else {
-			for u := range *current.GetActiveUsers() {
-				users = append(users, u.Name)
-			}
-		}
-		return participation.TrustedSnapshot{Room: current.GetChannel(), Users: append([]string(nil), users...), CreatorTrip: resolved.CreatorTrip, AdminTrips: append([]string(nil), c.AdminTrips...)}
+		return trustedAgentSnapshot(current, resolved.CreatorTrip, c.AdminTrips)
 	}
-	p := live.RoomParticipation{Pipeline: &participation.Pipeline{Factory: participation.NewInvocationFactory(nil), Quiet: participation.NewQuietRegistry(time.Duration(resolved.QuietMinutes) * time.Minute), Parser: participation.MentionParser{}, Submit: service, SemanticModerationReady: participation.SemanticModerationIngressReady()}, Snapshot: func(_ *message.Context) participation.TrustedSnapshot { return snapshot() }, AmbientEnabled: resolved.Ambient, AmbientEvery: uint64(resolved.AmbientEveryMessages)}
+	semanticModerationReady := resolved.ModerationEnabled && participation.SemanticModerationIngressReady()
+	p := live.RoomParticipation{
+		Pipeline: &participation.Pipeline{
+			Factory:                 participation.NewInvocationFactory(nil),
+			Quiet:                   participation.NewQuietRegistry(time.Duration(resolved.QuietMinutes) * time.Minute),
+			Parser:                  participation.MentionParser{},
+			Submit:                  service,
+			SemanticModerationReady: semanticModerationReady,
+		},
+		Snapshot:       func(_ *message.Context) participation.TrustedSnapshot { return snapshot() },
+		AmbientEnabled: resolved.Ambient,
+		AmbientEvery:   uint64(resolved.AmbientEveryMessages),
+	}
+	if semanticModerationReady {
+		p.SemanticCandidate = participation.SemanticModerationCandidate
+	}
 	if authoritative, ok := resolveEngine().(*core.EngineImpl); ok {
 		if automation := factory.ComposeMessageAutomation(authoritative, c); automation != nil {
 			p.Pipeline.Monitor = func(event participation.Event) { automation.Observe(context.Background(), event) }
@@ -272,7 +312,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
 	}
-	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
+	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, ThinkingEnabled: resolved.ThinkingEnabled, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)
 	}
@@ -280,7 +320,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent prompts: %w", err)
 	}
-	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker}, catalog)
+	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker, MaxPromptChars: resolved.MaxPromptChars}, catalog)
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
@@ -374,6 +414,7 @@ func main() {
 		}))
 		e.SetSupportReplicaRelay(core.NewSupportReplicaRelay(manager, c.AdminTrips))
 		e.SetHostLifecycleController(hostLifecycle)
+		e.OnlineSetListener = listener.NewOnlineSetListener(e, newAutorunCallback(c))
 		e.UserChatListener = listener.NewUserChatListenerWithChain(e, message.DefaultChainWithParticipation(roomAgent.Participation))
 		if err := command.RegisterUserUtilitiesWithDirectAgent(core.BindCredentialedRoomSnapshotMaster(e), roomAgent.DirectSubmitter); err != nil {
 			return nil, err
@@ -402,14 +443,15 @@ func main() {
 	})
 	hostLifecycle = newProductionHostLifecycle(supervisor)
 	defer hostLifecycle.Close()
-	go func() {
-		for err := range transportErrors {
-			log.Printf("transport: %v", err)
-		}
-	}()
 	if err := supervisor.StartInitial(ctx); err != nil {
 		log.Fatal(err)
 	}
+	go runHostRecovery(ctx, transportErrors, lifecyclePolicy(c), func() bool {
+		master, ok := supervisor.Master().(*core.EngineImpl)
+		return !ok || master == nil || master.Healthy()
+	}, hostLifecycle.RequestRestart, func(err error) {
+		log.Printf("transport: %v", err)
+	})
 	<-ctx.Done()
 	stopCtx, stop := context.WithTimeout(context.Background(), 15*time.Second)
 	defer stop()

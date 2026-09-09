@@ -10,8 +10,15 @@ func TestAgentConfigParticipationDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CreatorTrip != "595754" || got.AmbientEveryMessages != 8 || got.QuietMinutes != 15 || got.ContextMessageLimit != 60 || got.NoReplyMarker != "[[SATURN_NO_REPLY]]" || got.MaxOutputChars != 8000 || got.MaxConcurrentRequests != 1 || got.QueueCapacity != 0 {
+	if got.CreatorTrip != "" || got.AmbientEveryMessages != 8 || got.QuietMinutes != 15 || got.ContextMessageLimit != 60 || got.NoReplyMarker != "[[SATURN_NO_REPLY]]" || got.MaxOutputChars != 8000 || got.MaxConcurrentRequests != 2 || got.QueueCapacity != 0 {
 		t.Fatalf("participation defaults: %#v", got)
+	}
+}
+
+func TestEnabledAgentRequiresExplicitCreatorTrip(t *testing.T) {
+	_, err := (AgentConfig{Enabled: true, Model: "m"}).Resolve(ValueReader{})
+	if err == nil || !strings.Contains(err.Error(), "creatorTrip") {
+		t.Fatalf("missing creator trip error=%v", err)
 	}
 }
 
@@ -36,12 +43,12 @@ func TestAgentConfigOutputBoundRuntimeOverrideAndValidation(t *testing.T) {
 func TestAgentConfigParticipationValidation(t *testing.T) {
 	for name, c := range map[string]AgentConfig{
 		"creatorTrip":           {Enabled: true, Model: "m", CreatorTrip: " "},
-		"noReplyMarker":         {Enabled: true, Model: "m", NoReplyMarker: " "},
-		"ambientEveryMessages":  {Enabled: true, Model: "m", AmbientEveryMessages: -1},
-		"quietMinutes":          {Enabled: true, Model: "m", QuietMinutes: -1},
-		"contextMessageLimit":   {Enabled: true, Model: "m", ContextMessageLimit: -1},
-		"maxConcurrentRequests": {Enabled: true, Model: "m", MaxConcurrentRequests: -1},
-		"queueCapacity":         {Enabled: true, Model: "m", QueueCapacity: -1},
+		"noReplyMarker":         {Enabled: true, Model: "m", CreatorTrip: "creator", NoReplyMarker: " "},
+		"ambientEveryMessages":  {Enabled: true, Model: "m", CreatorTrip: "creator", AmbientEveryMessages: -1},
+		"quietMinutes":          {Enabled: true, Model: "m", CreatorTrip: "creator", QuietMinutes: -1},
+		"contextMessageLimit":   {Enabled: true, Model: "m", CreatorTrip: "creator", ContextMessageLimit: -1},
+		"maxConcurrentRequests": {Enabled: true, Model: "m", CreatorTrip: "creator", MaxConcurrentRequests: -1},
+		"queueCapacity":         {Enabled: true, Model: "m", CreatorTrip: "creator", QueueCapacity: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := c.Resolve(ValueReader{})
@@ -63,7 +70,7 @@ func TestAgentConfigParticipationRuntimeInvalidValuesAreNotDefaulted(t *testing.
 		"queueCapacity":         "-1",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := (AgentConfig{Enabled: true, Model: "m"}).Resolve(ValueReader{Runtime: map[string]string{name: value}})
+			_, err := (AgentConfig{Enabled: true, Model: "m", CreatorTrip: "creator"}).Resolve(ValueReader{Runtime: map[string]string{name: value}})
 			if err == nil || !strings.Contains(err.Error(), name) {
 				t.Fatalf("err=%v", err)
 			}

@@ -87,8 +87,9 @@ func (c Cancellation) Context() context.Context { return c.ctx }
 func (c Cancellation) Cancel()                  { c.cancel() }
 
 type Executor struct {
-	Registry *tool.Registry
-	Ledger   *Ledger
+	Registry       *tool.Registry
+	Ledger         *Ledger
+	DefaultTimeout time.Duration
 }
 
 var errNilResult = errors.New("nil tool result")
@@ -163,9 +164,13 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) contr
 			return contract.ErrorResult(c.ID, c.Name, code, "tool call rejected")
 		}
 	}
-	if d.Timeout() > 0 {
+	timeout := d.Timeout()
+	if timeout <= 0 {
+		timeout = e.DefaultTimeout
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, d.Timeout())
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	r, err := invoke(t, ctx, agent, c.Arguments)

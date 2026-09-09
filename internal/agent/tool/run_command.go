@@ -10,19 +10,31 @@ import (
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/agent/tool/contract"
+	commandcatalog "zenbot/internal/command/catalog"
 )
 
 const runCommandName = "run_command"
 
-// RunCommand exposes only fixed public informational aliases through the trusted command gateway.
+// RunCommand exposes a compact capability-aware command subset through the trusted command gateway.
 type RunCommand struct{ Gateway commandgateway.Gateway }
 
 func (t RunCommand) Name() string { return runCommandName }
 
-func (t RunCommand) Descriptor(api.Context) (contract.Descriptor, error) {
-	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"command":{"type":"string","enum":["h","help","info","list","p","ping","t","time","users","v","version","w","weather"]},"arguments":{"type":"string","maxLength":4000}},"required":["command"]}`)
+func (t RunCommand) Descriptor(caller api.Context) (contract.Descriptor, error) {
+	parameters, err := json.Marshal(map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"command":   map[string]any{"type": "string", "enum": runCommandAliases(caller)},
+			"arguments": map[string]any{"type": "string", "maxLength": 4000},
+		},
+		"required": []string{"command"},
+	})
+	if err != nil {
+		return contract.Descriptor{}, err
+	}
 	result := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"}},"required":["messages","deliveredCount"]}`)
-	return contract.NewDescriptor(runCommandName, "Run public command", "Run one fixed public informational command and return only its successfully delivered output.", "commands", contract.AccessUser, contract.Action, contract.RoomDelivery, parameters, nil, nil, false, 10*time.Second, result, nil, []string{"commands", "room_delivery"}, []string{"Do not use for moderation, private commands, or aliases outside the fixed public list."})
+	return contract.NewDescriptor(runCommandName, "Run Saturn command", "Run one capability-approved Saturn informational or moderation command and return its successfully delivered output. Commands always execute in provider order.", "commands", contract.AccessUser, contract.Action, contract.RoomDelivery, parameters, nil, nil, false, 10*time.Second, result, nil, []string{"commands", "room_delivery"}, []string{"Do not use for commands absent from the contextual enum or when no command execution is requested.", "Do not run this action concurrently with another command."})
 }
 
 func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.RawMessage) (contract.Result, error) {
@@ -40,12 +52,19 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 		return contract.Result{}, fmt.Errorf("invalid run command arguments")
 	}
 	name := strings.ToLower(strings.TrimSpace(input.Command))
-	if !runCommandAlias(name) {
+	if !containsCommandAlias(runCommandAliases(caller), name) {
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "command is not allowed"), nil
 	}
-	executed, err := t.Gateway.Execute(ctx, caller, name, strings.TrimSpace(input.Arguments))
+	arguments := strings.TrimSpace(input.Arguments)
+	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(name) && !sameModerationTarget(firstArgument(arguments), *target) {
+		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author"), nil
+	}
+	executed, err := t.Gateway.Execute(ctx, caller, name, arguments)
 	if err != nil {
-		return contract.Result{}, err
+		if ctx.Err() != nil {
+			return contract.Result{}, ctx.Err()
+		}
+		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn command could not run"), nil
 	}
 	if !executed.Executed {
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "command was rejected"), nil
@@ -57,13 +76,17 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 	return contract.SuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": len(executed.Messages)}), nil
 }
 
-func runCommandAlias(name string) bool {
-	switch name {
-	case "help", "h", "list", "users", "info", "ping", "p", "weather", "w", "time", "t", "version", "v":
-		return true
-	default:
-		return false
+func runCommandAliases(caller api.Context) []string {
+	return commandcatalog.RunCommandAliases(caller.HasCapability(api.ModerationCommands), caller.HasCapability(api.PermanentBan))
+}
+
+func containsCommandAlias(aliases []string, name string) bool {
+	for _, alias := range aliases {
+		if alias == name {
+			return true
+		}
 	}
+	return false
 }
 
 var _ Tool = RunCommand{}

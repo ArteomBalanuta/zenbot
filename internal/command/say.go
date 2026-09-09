@@ -23,7 +23,7 @@ func (u *Say) GetRole() *model.Role {
 
 func (u *Say) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) common.Command {
 	return &Say{
-		AccessLevel: model.USER,
+		AccessLevel: model.REGULAR,
 		engine:      engine,
 		chatMessage: chatMessage,
 	}

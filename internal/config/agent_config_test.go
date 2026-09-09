@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -30,17 +31,35 @@ func TestAgentSQLConfigurationPreservesSaturnBounds(t *testing.T) {
 	}
 }
 
+func TestAgentSQLConfigurationRejectsExplicitZeroBounds(t *testing.T) {
+	for _, name := range []string{
+		"dynamicSqlMaxSqlChars",
+		"dynamicSqlMaxRows",
+		"dynamicSqlMaxColumns",
+		"dynamicSqlMaxCellChars",
+		"dynamicSqlMaxResultChars",
+		"dynamicSqlTimeoutMillis",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := (AgentConfig{}).Resolve(ValueReader{Runtime: map[string]string{name: "0"}})
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("explicit zero %s error=%v", name, err)
+			}
+		})
+	}
+}
+
 func TestAgentConfigStrictScalarErrorsAndDefaultAPIKey(t *testing.T) {
 	for _, values := range []map[string]string{{"enabled": "sometimes"}, {"timeoutMillis": "12x"}, {"maxTokens": "999999999999999999999"}} {
 		if _, err := (AgentConfig{}).Resolve(ValueReader{Runtime: values}); err == nil {
 			t.Fatalf("expected parse error for %#v", values)
 		}
 	}
-	c, err := (AgentConfig{Enabled: true, Model: "m"}).Resolve(ValueReader{Environment: map[string]string{DefaultAPIKeyEnv: "default-secret"}})
+	c, err := (AgentConfig{Enabled: true, Model: "m", CreatorTrip: "creator"}).Resolve(ValueReader{Environment: map[string]string{DefaultAPIKeyEnv: "default-secret"}})
 	if err != nil || c.APIKey != "default-secret" || c.APIKeyEnv != DefaultAPIKeyEnv {
 		t.Fatalf("default key result=%#v err=%v", c, err)
 	}
-	c, err = (AgentConfig{APIKeyEnv: "CUSTOM", Enabled: true, Model: "m"}).Resolve(ValueReader{Environment: map[string]string{"CUSTOM": "custom-secret", DefaultAPIKeyEnv: "default-secret"}})
+	c, err = (AgentConfig{APIKeyEnv: "CUSTOM", Enabled: true, Model: "m", CreatorTrip: "creator"}).Resolve(ValueReader{Environment: map[string]string{"CUSTOM": "custom-secret", DefaultAPIKeyEnv: "default-secret"}})
 	if err != nil || c.APIKey != "custom-secret" {
 		t.Fatalf("override result=%#v err=%v", c, err)
 	}
@@ -54,7 +73,7 @@ func TestValueReaderPrecedenceAndExplicitSecretLookup(t *testing.T) {
 	if got := (ValueReader{Environment: map[string]string{"endpoint": "environment"}, File: map[string]string{"endpoint": "file"}}).String("endpoint", "default"); got != "environment" {
 		t.Fatal(got)
 	}
-	c, err := (AgentConfig{APIKeyEnv: "KEY", Endpoint: "http://localhost", Model: "m", Enabled: true}).Resolve(ValueReader{Environment: map[string]string{"KEY": "secret"}})
+	c, err := (AgentConfig{APIKeyEnv: "KEY", Endpoint: "http://localhost", Model: "m", Enabled: true, CreatorTrip: "creator"}).Resolve(ValueReader{Environment: map[string]string{"KEY": "secret"}})
 	if err != nil || c.APIKey != "secret" {
 		t.Fatalf("resolved=%#v err=%v", c, err)
 	}
@@ -97,5 +116,40 @@ func TestValueReaderRejectsMalformedScalarsAtEverySource(t *testing.T) {
 				t.Fatal("malformed int was accepted")
 			}
 		})
+	}
+}
+
+func TestAgentConfigRejectsExplicitZeroSafetyBounds(t *testing.T) {
+	for _, name := range []string{
+		"timeoutMillis",
+		"maxTokens",
+		"maxSteps",
+		"maxTools",
+		"maxToolCalls",
+		"maxCallsPerTool",
+		"maxToolFailures",
+		"maxPromptChars",
+		"maxConcurrentRequests",
+		"toolTimeoutMillis",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := (AgentConfig{Enabled: true, Model: "test", CreatorTrip: "creator"}).Resolve(ValueReader{Runtime: map[string]string{name: "0"}})
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("explicit zero %s error=%v", name, err)
+			}
+		})
+	}
+}
+
+func TestAgentConfigAllowsZeroRetryCountAndBackoff(t *testing.T) {
+	resolved, err := (AgentConfig{}).Resolve(ValueReader{Runtime: map[string]string{
+		"maxRetries":         "0",
+		"retryBackoffMillis": "0",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.MaxRetries != 0 || resolved.RetryBackoffMillis != 0 {
+		t.Fatalf("retry settings=%+v", resolved.AgentConfig)
 	}
 }

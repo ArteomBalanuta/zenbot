@@ -18,7 +18,7 @@ func TestUserUtilityClusterMetadataAndAliases(t *testing.T) {
 	}
 	for canonical, aliases := range want {
 		d, ok := commandDefinitionFor(canonical)
-		if !ok || d.Role != model.USER {
+		if !ok || d.Role != model.REGULAR {
 			t.Fatalf("%s definition=%+v found=%v", canonical, d, ok)
 		}
 		if strings.Join(d.Aliases, ",") != strings.Join(aliases, ",") {
@@ -40,7 +40,7 @@ func TestHowToUsesExactSaturnAddressedOutput(t *testing.T) {
 	} {
 		e := &commandEngineStub{}
 		d, ok := commandDefinitionFor(tc.alias)
-		if !ok || d.Role != model.USER {
+		if !ok || d.Role != model.REGULAR {
 			t.Fatalf("bad definition for %s: %+v", tc.alias, d)
 		}
 		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!" + tc.alias, IsWhisper: tc.whisper}).Execute(context.Background())

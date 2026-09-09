@@ -2,10 +2,14 @@ package turn
 
 import (
 	"errors"
+	"time"
 	"zenbot/internal/agent/tool/contract"
 )
 
-type ExecutionLimits struct{ MaxSteps, MaxToolCalls int }
+type ExecutionLimits struct {
+	MaxSteps, MaxToolCalls, MaxCallsPerTool, MaxToolFailures int
+	ToolTimeout                                              time.Duration
+}
 type Evidence struct {
 	Attempted                                    bool
 	AttemptedCount, SuccessfulCount, FailedCount int

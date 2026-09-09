@@ -60,6 +60,29 @@ func TestMsgChannelRemoteCapability(t *testing.T) {
 	})
 }
 
+func TestListRemoteCapabilitySubmitsCredentialedSnapshot(t *testing.T) {
+	original := listWorkflowID
+	listWorkflowID = func() (string, error) { return "list-0123456789abcdef", nil }
+	t.Cleanup(func() { listWorkflowID = original })
+
+	engine := &remoteMsgChannelEngine{commandEngineStub: &commandEngineStub{}}
+	definition, _ := commandDefinitionFor("list")
+	message := &model.ChatMessage{Name: "alice", Channel: "programming", IsWhisper: true, Text: "!list lounge"}
+
+	status, err := definition.New(engine, message).Execute(context.Background())
+
+	if err != nil || status != model.SUCCESSFUL {
+		t.Fatalf("status=%v err=%v", status, err)
+	}
+	if len(engine.requests) != 1 {
+		t.Fatalf("requests=%d, want 1", len(engine.requests))
+	}
+	request := engine.requests[0]
+	if request.WorkflowID != "list-0123456789abcdef" || request.Author != "alice" || request.SourceChannel != "programming" || request.TargetChannel != "lounge" || !request.Whisper || request.Operation == nil {
+		t.Fatalf("request=%+v", request)
+	}
+}
+
 func TestMsgChannelRemoteKeepsLocalPath(t *testing.T) {
 	engine := &remoteMsgChannelEngine{commandEngineStub: &commandEngineStub{}}
 	definition, _ := commandDefinitionFor("msgroom")
@@ -139,8 +162,8 @@ func TestMsgChannelRegistration(t *testing.T) {
 			t.Fatalf("%q was not registered", alias)
 		}
 		command := metadata.Command(&model.ChatMessage{Name: "alice", Text: "!" + alias + " programming hello"})
-		if command.GetRole() == nil || *command.GetRole() != model.USER {
-			t.Fatalf("%q role=%v, want USER", alias, command.GetRole())
+		if command.GetRole() == nil || *command.GetRole() != model.REGULAR {
+			t.Fatalf("%q role=%v, want REGULAR", alias, command.GetRole())
 		}
 		adapter, ok := command.(*legacyAdapter)
 		if !ok {

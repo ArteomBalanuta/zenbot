@@ -25,7 +25,7 @@ func (c *howToCommand) Execute(ctx context.Context) (model.Status, error) {
 	return model.SUCCESSFUL, nil
 }
 
-func (c *howToCommand) Role() model.Role { return model.USER }
+func (c *howToCommand) Role() model.Role { return model.REGULAR }
 func (c *howToCommand) Aliases() []string {
 	return []string{"crashcourse", "howto", "moderationcrashcourse", "hcguide"}
 }
@@ -36,7 +36,7 @@ func (c *howToCommand) NewInstance(e common.Engine, m *model.ChatMessage) common
 func howToDefinition() common.CommandDefinition {
 	aliases := []string{"crashcourse", "howto", "moderationcrashcourse", "hcguide"}
 	return common.CommandDefinition{
-		Canonical: "crashcourse", Aliases: aliases, Role: model.USER,
+		Canonical: "crashcourse", Aliases: aliases, Role: model.REGULAR,
 		New: func(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
 			return &howToCommand{engine: e, message: m}
 		},

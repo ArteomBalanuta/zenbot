@@ -94,9 +94,9 @@ func TestPipelineKeepsSemanticModerationFailClosedUntilReady(t *testing.T) {
 	}
 }
 
-func TestSemanticModerationIngressStaysDisabledUntilAllSourceAliasesHaveTypedOperations(t *testing.T) {
-	if SemanticModerationIngressReady() {
-		t.Fatal("semantic moderation ingress enabled without complete source command parity")
+func TestSemanticModerationIngressIsReadyWhenAllSourceAliasesHaveTypedOperations(t *testing.T) {
+	if !SemanticModerationIngressReady() {
+		t.Fatal("semantic moderation ingress remained disabled after complete typed command parity")
 	}
 	if got, want := SourceModerationAliases(), []string{"captcha", "mute", "unmute", "kick", "shadowban", "unshadowban"}; len(got) != len(want) {
 		t.Fatalf("source aliases = %#v", got)

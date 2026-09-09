@@ -24,21 +24,26 @@ func TestRecentPublicRoomMessagesForNickFiltersBoundsAndOrdersRealH2(t *testing.
 		t.Fatal(err)
 	}
 
-	rows, err := db.RecentPublicRoomMessagesForNick(context.Background(), "LOUNGE", "ALICE", 1)
+	rows, err := db.RecentPublicRoomMessagesForNick(context.Background(), "", "ALICE", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Name != "alice" || rows[0].Message != "new" || rows[0].Channel != "lounge" {
+	if len(rows) != 3 || rows[0].Message != "old" || rows[1].Message != "new" || rows[2].Message != "elsewhere" || rows[2].Channel != "other" {
 		t.Fatalf("rows = %#v", rows)
 	}
 	if rows[0].Trip != "trip" || rows[0].Hash != "hash" {
 		t.Fatalf("fixture unexpectedly changed: %#v", rows[0])
 	}
+
+	rows, err = db.RecentPublicRoomMessagesForNick(context.Background(), "LOUNGE", "ALICE", 1)
+	if err != nil || len(rows) != 1 || rows[0].Message != "new" {
+		t.Fatalf("room-scoped rows = %#v err=%v", rows, err)
+	}
 }
 
-func TestRecentPublicRoomMessagesForNickRejectsInvalidAndCannotBroadenRoom(t *testing.T) {
+func TestRecentPublicRoomMessagesForNickRejectsInvalidAndUsesExactOptionalRoom(t *testing.T) {
 	var nilDB *h2.Database
-	if _, err := nilDB.RecentPublicRoomMessagesForNick(context.Background(), "room", "nick", 1); err == nil {
+	if _, err := nilDB.RecentPublicRoomMessagesForNick(context.Background(), "", "nick", 1); err == nil {
 		t.Fatal("nil database accepted")
 	}
 	db := h2fixture.Open(t, "agent-user-history-invalid")
@@ -48,9 +53,9 @@ func TestRecentPublicRoomMessagesForNickRejectsInvalidAndCannotBroadenRoom(t *te
 	for _, tc := range []struct {
 		room, nick string
 		limit      int
-	}{{" ", "alice", 1}, {"lounge", " ", 1}, {"lounge", "alice", 0}, {" lounge ", "alice", 1}, {`lounge' OR '1'='1`, "alice", 1}} {
+	}{{"", " ", 1}, {"lounge", "alice", 0}, {" lounge ", "alice", 1}, {`lounge' OR '1'='1`, "alice", 1}} {
 		rows, err := db.RecentPublicRoomMessagesForNick(context.Background(), tc.room, tc.nick, tc.limit)
-		if tc.room == " " || tc.nick == " " || tc.limit == 0 {
+		if tc.nick == " " || tc.limit == 0 {
 			if err == nil {
 				t.Fatalf("accepted %#v", tc)
 			}

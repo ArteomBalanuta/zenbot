@@ -30,6 +30,12 @@ type UserQueryRepository interface {
 	LastOnline(context.Context, string) (LastOnlineRecord, error)
 }
 
+// RecentPresenceRepository resolves aliases observed during the recent-user
+// notification window across current presence events and legacy message rows.
+type RecentPresenceRepository interface {
+	RecentPresenceNames(context.Context, string, string, int64, int) ([]string, error)
+}
+
 // LastSeen preserves observations rendered by Saturn's last-online command.
 type LastSeen struct {
 	Message  string

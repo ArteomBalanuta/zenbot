@@ -14,7 +14,7 @@ func TestInfoUserCommandParity(t *testing.T) {
 		"merc": {Name: "merc", Trip: "trip-a", Hash: "hash-a"},
 	}}
 	d, ok := commandDefinitionFor("info")
-	if !ok || d.Role != model.USER {
+	if !ok || d.Role != model.REGULAR {
 		t.Fatalf("info definition=%+v found=%v", d, ok)
 	}
 	for _, alias := range []string{"info", "i", "whois", "who"} {

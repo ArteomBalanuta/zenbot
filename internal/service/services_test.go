@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestWeatherGetUsesSaturnEndpointsAndFormatsForecast(t *testing.T) {
@@ -24,8 +25,83 @@ func TestWeatherGetUsesSaturnEndpointsAndFormatsForecast(t *testing.T) {
 	}))
 	defer srv.Close()
 	got, e := (&WeatherService{HTTP: srv.Client(), GeoURL: srv.URL, ForecastURL: srv.URL, Now: func() time.Time { return time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC) }}).Get(context.Background(), "Paris")
-	if e != nil || !strings.HasPrefix(got, "Weather forecast for today: **Paris, France**\\nTemperature: 21 C") {
+	if e != nil {
 		t.Fatalf("got %q err %v", got, e)
+	}
+	lines := nonEmptyLiteralLines(got)
+	if len(lines) != 17 {
+		t.Fatalf("weather lines=%d: %q", len(lines), got)
+	}
+	assertAlignedSeparator(t, lines)
+	if !strings.Contains(got, "\u2009Temperature:") || !strings.Contains(got, "Weather forecast for today:") {
+		t.Fatalf("weather output is not thin-space aligned: %q", got)
+	}
+}
+
+func TestTimeGetUsesSingleSeparatorsAndThinSpaceAlignment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/geo":
+			_, _ = w.Write([]byte(`{"geonames":[{"countryName":"Japan","lat":"35.6","lng":"139.6"}]}`))
+		case "/sun":
+			_, _ = w.Write([]byte(`{"results":{"date":"2026-03-26","sunrise":"6:00 AM","sunset":"6:00 PM","first_light":"5:30 AM","last_light":"6:30 PM","dawn":"5:45 AM","dusk":"6:15 PM","solar_noon":"12:00 PM","golden_hour":"5:15 PM","day_length":"12:00:00","utc_offset":540}}`))
+		case "/time":
+			_, _ = w.Write([]byte(`{"dateTime":"2026-03-26T12:00:00+09:00","timeZone":"Asia/Tokyo"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := (&TimeService{
+		HTTP:        srv.Client(),
+		GeoURL:      srv.URL + "/geo",
+		SunriseURL:  srv.URL + "/sun?lat=%s&lng=%s",
+		TimezoneURL: srv.URL + "/time?latitude=%s&longitude=%s",
+	}).Get(context.Background(), "Tokyo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, `\n\n`) {
+		t.Fatalf("time output contains blank formatted rows: %q", got)
+	}
+	parts := strings.Split(got, `\n`)
+	if len(parts) != 16 || parts[0] != "" || !strings.HasPrefix(parts[2], " today") || parts[len(parts)-1] != "" {
+		t.Fatalf("time framing=%q", got)
+	}
+	aligned := append([]string{strings.TrimPrefix(parts[2], " ")}, parts[3:len(parts)-1]...)
+	assertAlignedSeparator(t, aligned)
+	if !strings.Contains(got, "today\u2009") {
+		t.Fatalf("time labels are not thin-space aligned: %q", got)
+	}
+}
+
+func nonEmptyLiteralLines(value string) []string {
+	parts := strings.Split(value, `\n`)
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			lines = append(lines, part)
+		}
+	}
+	return lines
+}
+
+func assertAlignedSeparator(t *testing.T, lines []string) {
+	t.Helper()
+	want := -1
+	for _, line := range lines {
+		index := strings.IndexRune(line, ':')
+		if index < 0 {
+			t.Fatalf("line has no separator: %q", line)
+		}
+		width := utf8.RuneCountInString(line[:index])
+		if want < 0 {
+			want = width
+		} else if width != want {
+			t.Fatalf("separator width=%d, want %d in line %q", width, want, line)
+		}
 	}
 }
 func TestSearchUsesDuckDuckGoCompatibleEndpoint(t *testing.T) {
@@ -37,6 +113,36 @@ func TestSearchUsesDuckDuckGoCompatibleEndpoint(t *testing.T) {
 	got, e := (&SearchService{HTTP: srv.Client(), Endpoint: srv.URL}).Search(context.Background(), "a b")
 	if e != nil || got != `{\\"AbstractText\\":\\"answer\\"}` {
 		t.Fatalf("got %q err %v", got, e)
+	}
+}
+
+func TestYouTubePreviewExtractsSupportedLinksAndFormatsMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("url") != "https://youtube.com/watch?v=abc123" {
+			t.Errorf("url=%q", r.URL.Query().Get("url"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"A title"}`))
+	}))
+	defer srv.Close()
+
+	service := &YouTubeService{HTTP: srv.Client(), Endpoint: srv.URL}
+	for _, message := range []string{
+		"watch https://www.youtube.com/watch?v=abc123&list=queue",
+		"watch https://youtu.be/abc123?list=queue",
+	} {
+		preview, found, err := service.Preview(context.Background(), message)
+		if err != nil || !found {
+			t.Fatalf("message=%q found=%v err=%v", message, found, err)
+		}
+		want := "Title: A title\\n![A title](https://i.ytimg.com/vi/abc123/hqdefault.jpg)"
+		if preview != want {
+			t.Fatalf("preview=%q, want %q", preview, want)
+		}
+	}
+
+	if preview, found, err := service.Preview(context.Background(), "ordinary text"); err != nil || found || preview != "" {
+		t.Fatalf("ordinary preview=%q found=%v err=%v", preview, found, err)
 	}
 }
 func TestPingHonorsCanceledContext(t *testing.T) {

@@ -55,7 +55,7 @@ PASS (no output)
 
 ## Configuration prerequisite
 
-For enabled room-agent operation, `agent.enabled=true` must resolve valid endpoint/model/provider credentials plus non-blank `creatorTrip` and `noReplyMarker`; positive `ambientEveryMessages`, `quietMinutes`, `contextMessageLimit`, and `maxConcurrentRequests`; and non-negative `queueCapacity`. Defaults are `595754`, `8`, `15`, `60`, `[[SATURN_NO_REPLY]]`, `1`, and `0`. Disabled configuration does not require provider credentials and passes all messages through.
+For enabled room-agent operation, `agent.enabled=true` must resolve valid endpoint/model/provider credentials plus an explicit non-blank `creatorTrip` and `noReplyMarker`; positive `ambientEveryMessages`, `quietMinutes`, `contextMessageLimit`, and `maxConcurrentRequests`; and non-negative `queueCapacity`. Non-identity defaults are `8`, `15`, `60`, `[[SATURN_NO_REPLY]]`, `1`, and `0`. Disabled configuration does not require provider credentials and passes all messages through.
 
 ## Deferred boundary
 

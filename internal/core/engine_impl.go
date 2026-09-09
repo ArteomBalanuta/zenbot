@@ -441,6 +441,9 @@ func (e *EngineImpl) SendRawMessage(message string) {
 }
 
 func (e *EngineImpl) SendChatMessage(author, message string, IsWhisper bool) (string, error) {
+	if author != "" {
+		message = normalizeChatText(message)
+	}
 	if author != "" && IsWhisper {
 		message = "/whisper @" + author + " .\n" + message
 	} else if author != "" {
@@ -451,6 +454,12 @@ func (e *EngineImpl) SendChatMessage(author, message string, IsWhisper bool) (st
 	return message, e.sendOutbound(chatPayload)
 }
 
+func normalizeChatText(message string) string {
+	message = strings.ReplaceAll(message, "\r\n", "\n")
+	message = strings.ReplaceAll(message, "\r", "\n")
+	return strings.ReplaceAll(message, `\n`, "\n")
+}
+
 func (e *EngineImpl) SendWhisperMessage(author, payload string) (string, error) {
 	message := "/whisper @" + author + " " + strings.ReplaceAll(payload, `\n`, "\n")
 	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
@@ -458,15 +467,22 @@ func (e *EngineImpl) SendWhisperMessage(author, payload string) (string, error) 
 }
 
 func (e *EngineImpl) SendAddressedMessage(author, payload string, whisper bool) (string, error) {
-	payload = strings.ReplaceAll(payload, "\r\n", "\n")
-	payload = strings.ReplaceAll(payload, "\r", "\n")
-	payload = strings.ReplaceAll(payload, `\n`, "\n")
+	payload = normalizeChatText(payload)
 	message := "@" + author + " " + payload
 	if whisper {
 		message = "/whisper @" + author + " " + payload
 	}
 	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
 	return message, e.sendOutbound(chatPayload)
+}
+
+// LogCommand persists a command outcome when the engine repository supports
+// Saturn's command-audit contract.
+func (e *EngineImpl) LogCommand(ctx context.Context, record model.CommandAuditRecord) (int64, error) {
+	if e.Repository == nil {
+		return 0, errors.New("command audit repository is not configured")
+	}
+	return e.Repository.LogCommand(ctx, record)
 }
 
 func (e *EngineImpl) startSharingMessages() {
@@ -556,8 +572,13 @@ func (e *EngineImpl) GetSubscribedTrips() []string {
 }
 
 func (e *EngineImpl) RemoveActiveUser(left *model.User) {
+	if left == nil {
+		return
+	}
+	e.usersMu.Lock()
+	defer e.usersMu.Unlock()
 	for u := range e.ActiveUsers {
-		if u.Name == left.Name {
+		if strings.EqualFold(u.Name, left.Name) {
 			delete(e.ActiveUsers, u)
 			break
 		}
@@ -571,6 +592,14 @@ func (e *EngineImpl) GetAfkUsers() *map[*model.User]string {
 func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
 	e.AfkUsers[u] = reason
 	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", u.Name, u.Trip, reason)
+}
+
+func (e *EngineImpl) RenameAfkUser(before, after string) {
+	for user := range e.AfkUsers {
+		if strings.EqualFold(user.Name, strings.TrimSpace(before)) {
+			user.Name = strings.TrimSpace(after)
+		}
+	}
 }
 
 func (e *EngineImpl) RemoveIfAfk(u *model.User) {
@@ -609,7 +638,30 @@ func (e *EngineImpl) LogMessage(trip, name, hash, message, channel string) (int6
 }
 
 func (e *EngineImpl) LogPresence(trip, name, hash, eventType, channel string) (int64, error) {
-	return e.Repository.LogMessage(trip, name, hash, eventType, channel)
+	return e.Repository.LogPresence(trip, name, hash, eventType, channel)
+}
+
+func (e *EngineImpl) LogMessageRecord(ctx context.Context, record model.MessageRecord) (int64, error) {
+	auditor, ok := e.Repository.(repository.AuditRepository)
+	if !ok {
+		return 0, errors.New("typed message audit repository is not configured")
+	}
+	return auditor.MessageAudit(ctx, record)
+}
+
+func (e *EngineImpl) IsManagedBotName(name string) bool {
+	if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(e.Name)) {
+		return true
+	}
+	if e.replicaController == nil || e.replicaController.manager == nil {
+		return false
+	}
+	for _, replica := range e.replicaController.manager.ManagedEngines() {
+		if replica != nil && strings.EqualFold(replica.GetName(), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *EngineImpl) GetActiveUsers() *map[*model.User]struct{} {
@@ -741,9 +793,13 @@ func (e *EngineImpl) Unlock() {
 }
 
 func (e *EngineImpl) RegisterCommand(c common.Command) {
+	e.registerCommandFor(c, e)
+}
+
+func (e *EngineImpl) registerCommandFor(c common.Command, commandEngine common.Engine) {
 	aliases := c.GetAliases()
 	var constructorFn = func(msg *model.ChatMessage) common.Command {
-		return c.NewInstance(e, msg)
+		return c.NewInstance(commandEngine, msg)
 	}
 
 	for _, alias := range aliases {

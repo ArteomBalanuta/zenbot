@@ -32,7 +32,11 @@ func (l *UserJoinedListener) Notify(jsonMessage string) {
 		l.automation.OnJoin(context.Background(), u)
 	}
 	l.shareUserInfo(u)
-	l.e.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.GetChannel())
+	l.kickIfShadowBanned(u)
+	if _, err := l.e.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.GetChannel()); err != nil {
+		log.Printf("could not audit joined user: %v", err)
+	}
+	l.notifySeenRecently(u)
 	if l.autoMove != nil {
 		l.autoMove.OnJoin(context.Background(), u)
 	}
@@ -53,11 +57,54 @@ func (l *UserJoinedListener) shareUserInfo(joined *model.User) {
 		return
 	}
 	for active := range *l.e.GetActiveUsers() {
-		// Subscription matching is intentionally case-insensitive, as in Saturn.
-		if !l.e.IsSubscribedTrip(active.Trip) || !strings.EqualFold(active.Trip, joined.Trip) {
+		if !l.e.IsSubscribedTrip(active.Trip) {
 			continue
 		}
 		_, _ = l.e.SendAddressedMessage(active.Name, " -\\n\\n"+data, true)
+	}
+}
+
+func (l *UserJoinedListener) kickIfShadowBanned(joined *model.User) {
+	provider, ok := l.e.(interface{ ServiceBundle() *service.Bundle })
+	if !ok || provider.ServiceBundle() == nil || provider.ServiceBundle().ShadowBans == nil {
+		return
+	}
+	banned, err := provider.ServiceBundle().ShadowBans.Matches(context.Background(), joined)
+	if err != nil {
+		log.Printf("could not check joined user shadow-ban: %v", err)
+		return
+	}
+	if !banned {
+		return
+	}
+	moderation, ok := l.e.(common.ModerationOperations)
+	if !ok {
+		log.Printf("cannot kick shadow-banned user %q: moderation capability unavailable", joined.Name)
+		return
+	}
+	if err := moderation.KickNick(context.Background(), common.NickTarget(joined.Name)); err != nil {
+		log.Printf("could not kick shadow-banned user %q: %v", joined.Name, err)
+	}
+}
+
+func (l *UserJoinedListener) notifySeenRecently(joined *model.User) {
+	if joined == nil || joined.Isme || strings.EqualFold(joined.Name, l.e.GetName()) {
+		return
+	}
+	if matcher, ok := l.e.(common.BotIdentityMatcher); ok && matcher.IsManagedBotName(joined.Name) {
+		return
+	}
+	provider, ok := l.e.(interface{ ServiceBundle() *service.Bundle })
+	if !ok || provider.ServiceBundle() == nil || provider.ServiceBundle().Users == nil {
+		return
+	}
+	message, err := provider.ServiceBundle().Users.SeenRecently(context.Background(), joined)
+	if err != nil {
+		log.Printf("could not query recent aliases: %v", err)
+		return
+	}
+	if message != "" {
+		_, _ = l.e.SendChatMessage("", message, false)
 	}
 }
 

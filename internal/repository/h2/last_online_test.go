@@ -32,6 +32,24 @@ func TestLastOnlineSelectsLatestNonPresenceMessageAndJoinedRow(t *testing.T) {
 	}
 }
 
+func TestLastOnlineUsesCurrentPresenceTableForSessionJoin(t *testing.T) {
+	d := openTestDB(t)
+	if _, err := d.DB.Exec("INSERT INTO messages(trip,name,message,created_on,visibility) VALUES('trip','alice','hello',2000,'PUBLIC')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DB.Exec("INSERT INTO user_presence_log(trip,name,event_type,created_on,channel) VALUES('trip','alice','joined',3000,'programming')"); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := d.LastOnline(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.JoinedMillis.Valid || record.JoinedMillis.Int64 != 3000 {
+		t.Fatalf("joined=%+v", record.JoinedMillis)
+	}
+}
+
 func TestLastOnlineMatchesNameOrTripWithSaturnCaseSemantics(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()

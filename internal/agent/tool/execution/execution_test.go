@@ -104,3 +104,20 @@ func TestExecutorTimeoutAndCancellation(t *testing.T) {
 		t.Fatal("cancel")
 	}
 }
+
+func TestExecutorUsesConfiguredDefaultTimeoutWhenDescriptorHasNone(t *testing.T) {
+	c := ctx(t)
+	d := desc(t, "x", contract.ReadOnly, []string{"r"}, nil, true, 0, nil)
+	f := &fake{name: "x", d: d, fn: func(c context.Context) (contract.Result, error) {
+		select {
+		case <-c.Done():
+			return contract.Result{}, c.Err()
+		case <-time.After(50 * time.Millisecond):
+			return contract.SuccessResult("", "x", "late"), nil
+		}
+	}}
+	e := &Executor{Registry: tool.NewRegistry([]tool.Tool{f}, []string{"x"}), DefaultTimeout: 5 * time.Millisecond}
+	if got := e.Execute(context.Background(), c, Call{"1", "x", json.RawMessage(`{}`)}); got.ErrorCode != "TOOL_TIMEOUT" {
+		t.Fatalf("result=%#v", got)
+	}
+}

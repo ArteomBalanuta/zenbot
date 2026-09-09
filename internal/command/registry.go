@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -198,15 +200,13 @@ func catalog() []common.CommandDefinition {
 	return r.Definitions()
 }
 
-// RegisterAll is intentionally explicit and deterministic; it is the reviewed Saturn catalog.
+// RegisterAll materializes handlers from the dependency-neutral reviewed catalog.
 func RegisterAll(r *common.SaturnCommandRegistry) error {
-	entries := []common.CommandDefinition{
-		def("access", []string{"grant", "access"}, model.ADMIN), def("memory", []string{"mem", "memory", "memstats"}, model.ADMIN), def("mine", []string{"mine"}, model.ADMIN), def("prefix", []string{"prefix"}, model.ADMIN), def("replica", []string{"replica", "bot", "agent"}, model.ADMIN), def("replicaoff", []string{"replicaoff", "offline", "botoff", "agentoff"}, model.ADMIN), def("replicastatus", []string{"replicastatus", "status"}, model.ADMIN), def("restart", []string{"restart", "reload", "re"}, model.ADMIN), def("shutdown", []string{"exit", "quit", "shutdown"}, model.ADMIN), def("sql", []string{"sql"}, model.ADMIN), def("whiskey", []string{"whiskey"}, model.ADMIN),
-		def("dbzstr", []string{"dbzstr", "dstr", "daddstr"}, model.REGULAR), def("dfight", []string{"dfight", "df"}, model.REGULAR), def("dbzhelp", []string{"dbzhelp", "dbz", "dhelp"}, model.REGULAR), def("dbzregister", []string{"dbzregister", "dreg", "dr"}, model.REGULAR), def("dspawn", []string{"dspawn"}, model.REGULAR), def("dbzstats", []string{"dbzstats", "dstats", "dstat", "ds"}, model.REGULAR),
-		def("active", []string{"active", "activity"}, model.MODERATOR), def("authorize", []string{"authorize", "auth"}, model.MODERATOR), def("automove", []string{"automove"}, model.MODERATOR), def("ban", []string{"ban"}, model.MODERATOR), def("captcha", []string{"captcha"}, model.MODERATOR), def("color", []string{"color"}, model.MODERATOR), def("deauthorize", []string{"deauthorize", "deauth"}, model.MODERATOR), def("flair", []string{"flair"}, model.MODERATOR), def("kick", []string{"kick", "k", "out"}, model.MODERATOR), def("messages", []string{"messages", "lastmessages"}, model.MODERATOR), def("lock", []string{"lock", "lockroom"}, model.MODERATOR), def("mute", []string{"mute", "dumb"}, model.MODERATOR), def("nuke", []string{"nuke"}, model.MODERATOR), def("overflow", []string{"overflow", "shoot", "love", "hug", "kiss"}, model.MODERATOR), def("register", []string{"reg", "register"}, model.MODERATOR), def("remove", []string{"del", "delete", "remove"}, model.MODERATOR), def("resurrect", []string{"move", "recover", "heal", "resurrect"}, model.MODERATOR), def("shadowbanlist", []string{"shadowbanlist", "banlist", "bannedusers"}, model.MODERATOR), def("shadowban", []string{"shadowban", "sban"}, model.MODERATOR), def("unbanall", []string{"unbanall", "pardonall"}, model.MODERATOR), def("unban", []string{"unban"}, model.MODERATOR), def("unmute", []string{"unmute", "undumb"}, model.MODERATOR), def("unshadowban", []string{"unshadowban", "shadowmercy", "unblock"}, model.MODERATOR),
-		def("afk", []string{"afk", "a"}, model.USER), def("ape", []string{"ape", "harambe"}, model.USER), def("coin", []string{"coin", "toss", "ct"}, model.USER), def("help", []string{"help", "h"}, model.USER), howToDefinition(), def("info", []string{"info", "i", "whois", "who"}, model.USER), def("l", []string{"l"}, model.USER), def("lastonline", []string{"lastonline", "seen", "last", "online", "lastseen"}, model.USER), def("nicks", []string{"nicks", "t2n"}, model.USER), def("list", []string{"list"}, model.USER), def("mail", []string{"mail", "msg", "send"}, model.USER), def("msgchannel", []string{"msgchannel", "msgroom"}, model.USER), def("note", []string{"note", "save"}, model.USER), def("notes", []string{"notes"}, model.USER), def("ping", []string{"ping", "p"}, model.USER), def("users", []string{"users", "whitelist", "blacklist", "offenders", "knownoffenders"}, model.USER), def("say", []string{"say", "echo"}, model.USER), def("sub", []string{"sub", "subscribe"}, model.USER), def("time", []string{"time", "t"}, model.USER), def("unsub", []string{"unsub", "unsubscribe"}, model.USER), def("version", []string{"version", "v"}, model.USER), def("weather", []string{"weather", "w", "today"}, model.USER), def("wsa", []string{"wsa", "wsayanon", "anonsay"}, model.USER), def("ws", []string{"ws", "wsay"}, model.USER),
-	}
-	for _, d := range entries {
+	for _, entry := range commandcatalog.Entries() {
+		d := def(entry.Canonical, entry.Aliases, entry.Role)
+		if entry.Canonical == "crashcourse" {
+			d = howToDefinition()
+		}
 		if err := r.Register(d); err != nil {
 			return err
 		}

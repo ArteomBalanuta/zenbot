@@ -15,7 +15,7 @@ Implemented Slice 1 only: configured public mention admission through `participa
 
 ## Configuration prerequisites
 
-`AgentConfig` now resolves `creatorTrip`, `ambientEveryMessages`, `quietMinutes`, `contextMessageLimit`, `noReplyMarker`, `maxConcurrentRequests`, and `queueCapacity` from `ValueReader`. Defaults: `595754`, `8`, `15`, `60`, `[[SATURN_NO_REPLY]]`, `1`, `0`. Required participation values validate only when `agent.enabled=true`; disabled agent resolution needs no provider credentials.
+`AgentConfig` now resolves `creatorTrip`, `ambientEveryMessages`, `quietMinutes`, `contextMessageLimit`, `noReplyMarker`, `maxConcurrentRequests`, and `queueCapacity` from `ValueReader`. The creator trip is explicit; other defaults are `8`, `15`, `60`, `[[SATURN_NO_REPLY]]`, `1`, and `0`. Required participation values validate only when `agent.enabled=true`; disabled agent resolution needs no provider credentials.
 
 ## Runtime/lifecycle semantics
 

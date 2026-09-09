@@ -3,3 +3,6 @@
 .vscode
 config.toml
 /database
+.env
+.env.*
+!.env.example

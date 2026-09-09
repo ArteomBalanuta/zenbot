@@ -28,7 +28,7 @@ func TestPingTimeWeatherUseConcreteRegistryCommands(t *testing.T) {
 		whisper     bool
 	}{{"ping", "!ping", model.SUCCESSFUL, false}, {"p", "!p", model.SUCCESSFUL, false}, {"time", "!time Tokyo", model.SUCCESSFUL, true}, {"t", "!t Tokyo", model.SUCCESSFUL, true}} {
 		d, ok := commandDefinitionFor(tc.alias)
-		if !ok || d.Role != model.USER {
+		if !ok || d.Role != model.REGULAR {
 			t.Fatalf("bad definition %s", tc.alias)
 		}
 		stub.chats = nil

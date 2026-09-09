@@ -29,7 +29,7 @@ func TestCommandProseGuardFindsOnlyAdvertisedSourceShapedCommands(t *testing.T) 
 		{"~~~\nweather Tokyo\n~~~", "weather", true},
 		{"weather Tokyo", "", false},
 		{"List.of() is ordinary prose", "", false},
-		{"`whois alice`", "", false},
+		{"`whois alice`", "whois", true},
 		{"`kick alice`", "", false},
 	} {
 		got, found := guard.FindCommand(tc.content)

@@ -14,7 +14,7 @@ func TestSubscriptionCatalogHasSaturnAliasesAndRoles(t *testing.T) {
 		alias string
 		role  model.Role
 	}{
-		{"sub", model.USER}, {"subscribe", model.USER}, {"unsub", model.USER}, {"unsubscribe", model.USER},
+		{"sub", model.REGULAR}, {"subscribe", model.REGULAR}, {"unsub", model.REGULAR}, {"unsubscribe", model.REGULAR},
 	} {
 		d, ok := commandDefinitionFor(tc.alias)
 		if !ok || d.Role != tc.role {

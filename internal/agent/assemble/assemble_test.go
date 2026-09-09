@@ -100,7 +100,7 @@ func TestSystemPromptSelectsModeAndDynamicSQLPoliciesAndCarriesMetadata(t *testi
 	}
 }
 
-func TestAssembleFiltersCommandsModerationAndInternalEvidence(t *testing.T) {
+func TestAssembleExposesAuthorizedCommandToolsForNaturalLanguageRequests(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -114,8 +114,8 @@ func TestAssembleFiltersCommandsModerationAndInternalEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Tools()) != 2 {
-		t.Fatalf("ordinary tools = %d, want 2", len(r.Tools()))
+	if len(r.Tools()) != 3 {
+		t.Fatalf("ordinary tools = %d, want 3", len(r.Tools()))
 	}
 	if strings.Contains(r.Messages()[1].Content(), "old") {
 		t.Fatal("internal evidence leaked into request")
@@ -127,12 +127,12 @@ func TestAssembleFiltersCommandsModerationAndInternalEvidence(t *testing.T) {
 	if len(moderation.Tools()) != 1 || toolName(moderation.Tools()[0]) != "run_command" {
 		t.Fatalf("moderation tools = %#v", moderation.Tools())
 	}
-	explicit, err := a.Assemble(context.Background(), invocation(runtime.DIRECT, "run dbzstr"), nil, "", tools, Talk)
+	ambient, err := a.Assemble(context.Background(), invocation(runtime.AMBIENT, "icecream"), nil, "", tools, Talk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(explicit.Tools()) != 3 {
-		t.Fatalf("explicit command filtering = %d, want 3", len(explicit.Tools()))
+	if len(ambient.Tools()) != 2 {
+		t.Fatalf("ambient command tools = %d, want 2", len(ambient.Tools()))
 	}
 }
 

@@ -65,8 +65,6 @@ func SourceModerationAliases() []string {
 	return []string{"captcha", "mute", "unmute", "kick", "shadowban", "unshadowban"}
 }
 
-// SemanticModerationIngressReady remains false until each SourceModerationAlias
-// has a reviewed typed Zenbot operation. Current EngineImpl operations cover
-// captcha, mute, kick, and shadowban only; unmute and unshadowban have no
-// source-backed typed operation and must not be invented.
-func SemanticModerationIngressReady() bool { return false }
+// SemanticModerationIngressReady documents that every source moderation alias
+// now reaches a reviewed typed EngineImpl operation through run_command.
+func SemanticModerationIngressReady() bool { return true }

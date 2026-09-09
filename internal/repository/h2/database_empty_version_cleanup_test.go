@@ -65,13 +65,13 @@ func TestOpenAutoPortEmptyH2VersionClosesOwnedChild(t *testing.T) {
 	if started.Addr() == "" {
 		t.Fatal("observed H2 server has no auto-port address")
 	}
-	if started.cmd.ProcessState == nil || !started.cmd.ProcessState.Exited() {
-		t.Fatal("owned H2 child has not exited after Open returned")
-	}
 	select {
 	case <-started.waitDone:
 	default:
 		t.Fatal("owned H2 child waitDone is not closed after Open returned")
+	}
+	if started.cmd.ProcessState == nil || !started.cmd.ProcessState.Exited() {
+		t.Fatal("owned H2 child has not exited after Open returned")
 	}
 	if err := started.Stop(context.Background()); err != nil {
 		t.Fatalf("idempotent H2 server stop: %v", err)
