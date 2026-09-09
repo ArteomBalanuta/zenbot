@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/assemble"
@@ -15,6 +16,17 @@ import (
 	"zenbot/internal/config"
 	"zenbot/internal/repository"
 )
+
+func TestLifecyclePolicyUsesSaturnReconnectAndHealthSettings(t *testing.T) {
+	enabled := lifecyclePolicy(&config.Config{AutoReconnect: true, ConnectionHeartbitIntervalMinutes: 5})
+	if enabled.HealthInterval != 5*time.Minute || enabled.MaxRetries != 0 {
+		t.Fatalf("enabled policy=%+v", enabled)
+	}
+	disabled := lifecyclePolicy(&config.Config{AutoReconnect: false, ConnectionHeartbitIntervalMinutes: 5})
+	if !disabled.DisableHealthChecks || disabled.MaxRetries != 1 {
+		t.Fatalf("disabled policy=%+v", disabled)
+	}
+}
 
 func TestDirectAgentInvokerDisabledDoesNotBlockStartup(t *testing.T) {
 	invoker, err := directAgentInvoker(&config.Config{}, nil, nil, roomDirectoryForMainTest{})

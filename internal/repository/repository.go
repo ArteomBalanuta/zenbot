@@ -25,6 +25,12 @@ type ShadowBanRepository interface {
 	PersistShadowBan(context.Context, model.User, string) error
 }
 
+type ShadowBanManagementRepository interface {
+	PersistShadowBanSelector(context.Context, string, string) error
+	ListShadowBans(context.Context) ([]model.BanRecord, error)
+	RemoveShadowBan(context.Context, string) error
+}
+
 type Repository interface {
 	LogMessage(trip, name, hash, message, channel string) (int64, error)
 	LogPresence(trip, name, hash, eventType, channel string) (int64, error)

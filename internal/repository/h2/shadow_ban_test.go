@@ -23,3 +23,21 @@ func TestPersistShadowBanStoresTrustedIdentityInRealH2(t *testing.T) {
 		t.Fatalf("persisted shadow-ban = trip=%q name=%q hash=%q reason=%q", trip, name, hash, reason)
 	}
 }
+
+func TestShadowBanRepositorySupportsOfflineSelectorAndRemoval(t *testing.T) {
+	db := h2fixture.Open(t, "shadow-ban-ops")
+	if err := db.PersistShadowBanSelector(context.Background(), "offline", "reason"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ListShadowBans(context.Background())
+	if err != nil || len(rows) != 1 || rows[0].Name != "offline" || rows[0].Trip != "" || rows[0].Hash != "" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+	if err := db.RemoveShadowBan(context.Background(), "offline"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = db.ListShadowBans(context.Background())
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}

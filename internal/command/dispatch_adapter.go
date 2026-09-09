@@ -54,7 +54,10 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, invoker DirectAgentIn
 	e.RegisterCommand(&UnbanAll{})
 	e.RegisterCommand(&Lock{})
 
-	canonicals := []string{"help", "crashcourse", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub", "memory"}
+	canonicals := []string{"help", "crashcourse", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub", "memory", "lastonline"}
+	if _, ok := e.(prefixSetter); ok {
+		canonicals = append(canonicals, "prefix")
+	}
 	if _, ok := e.(ReplicaController); ok {
 		canonicals = append(canonicals, "replica", "replicaoff", "replicastatus")
 	}
@@ -62,7 +65,7 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, invoker DirectAgentIn
 		canonicals = append(canonicals, "remove")
 	}
 	if b := bundle(e); b != nil && b.Users != nil && b.Users.GroupB != nil && b.Security != nil {
-		canonicals = append(canonicals, "register", "authorize", "access", "messages")
+		canonicals = append(canonicals, "register", "authorize", "deauthorize", "captcha", "mute", "unmute", "color", "flair", "overflow", "shadowban", "shadowbanlist", "unshadowban", "access", "messages")
 	}
 	if b := bundle(e); b != nil && b.DBZ != nil {
 		canonicals = append(canonicals, "dbzregister", "dbzstats", "dbzstr", "dfight", "dbzhelp", "dspawn")

@@ -28,6 +28,7 @@ type ToolLoop struct {
 	Registry  *tool.Registry
 	Tools     []any
 	allowed   []string
+	general   bool
 	Limits    turn.ExecutionLimits
 }
 
@@ -85,7 +86,14 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	}
 	definitions := []any(nil)
 	if !inv.Context().Whisper() {
-		definitions = append([]any(nil), l.Tools...)
+		if l.general {
+			definitions, err = providerToolDefinitions(l.Registry, agent)
+			if err != nil {
+				return Completion{}, err
+			}
+		} else {
+			definitions = append([]any(nil), l.Tools...)
+		}
 	}
 	prepared, err := l.Assembler.AssembleWithHistoricalEvidence(ctx, inv, memory, recent, definitions, assemble.Talk, historical)
 	if err != nil {
@@ -107,6 +115,28 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	}
 	if prepared.RequiredFreshTool() != "" {
 		return l.completeRequiredHistory(ctx, inv, agent, prepared, first, state)
+	}
+	if l.general {
+		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), first, l.allowed, l.Limits, state)
+		if loopErr != nil {
+			return Completion{}, loopErr
+		}
+		evidence := make([]turn.PersistableEvidence, 0, len(batch))
+		for _, item := range batch {
+			registered, ok := l.Registry.Lookup(item.Call.Name)
+			if !ok {
+				continue
+			}
+			descriptor, descriptorErr := registered.Descriptor(agent)
+			if descriptorErr != nil {
+				continue
+			}
+			candidate, candidateErr := turn.NewPersistableEvidence(descriptor, item.Result)
+			if candidateErr == nil {
+				evidence = append(evidence, candidate)
+			}
+		}
+		return Completion{Response: response, DurableEvidence: evidence}, nil
 	}
 	calls := first.ToolCalls()
 	if len(calls) == 0 {
@@ -285,6 +315,18 @@ func NewBoundedToolLoop(assembler *assemble.Assembler, client llm.LlmClient, too
 	return newFrozenToolLoop(assembler, client, tools, allowed)
 }
 
+func NewRegistryToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tools []tool.Tool, allowed []string, limits turn.ExecutionLimits) (*ToolLoop, error) {
+	loop, err := newFrozenToolLoop(assembler, client, tools, allowed)
+	if err != nil {
+		return nil, err
+	}
+	if limits.MaxSteps < 2 || limits.MaxToolCalls < 1 {
+		return nil, errors.New("registry tool loop limits are insufficient")
+	}
+	loop.Limits, loop.general = limits, true
+	return loop, nil
+}
+
 // frozenPublicTools prevents callers from replacing a public tool by reusing
 // one of its registry names. The composition is intentionally closed.
 func frozenPublicTools(tools []tool.Tool) bool {
@@ -355,6 +397,19 @@ func newFrozenToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tool
 		providerTools = append(providerTools, map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters}})
 	}
 	return &ToolLoop{Assembler: assembler, Client: client, Registry: registry, Tools: providerTools, allowed: append([]string(nil), allowed...), Limits: ToolLoopLimits()}, nil
+}
+
+func providerToolDefinitions(registry *tool.Registry, ctx api.Context) ([]any, error) {
+	defs := registry.Definitions(ctx)
+	providerTools := make([]any, 0, len(defs))
+	for _, definition := range defs {
+		var parameters any
+		if err := json.Unmarshal(definition.Parameters, &parameters); err != nil {
+			return nil, err
+		}
+		providerTools = append(providerTools, map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters}})
+	}
+	return providerTools, nil
 }
 
 func containsAllowed(values []string, want string) bool {

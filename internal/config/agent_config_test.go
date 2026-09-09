@@ -1,6 +1,34 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/BurntSushi/toml"
+)
+
+func TestConfigAcceptsSaturnWsUrlAndNickKeys(t *testing.T) {
+	var c Config
+	if _, err := toml.Decode(`wsUrl = "wss://hack.chat/chat-ws"
+nick = "alphaBot"
+channel = "programming"
+cmdPrefix = "*"`, &c); err != nil {
+		t.Fatal(err)
+	}
+	c.Normalize()
+	if c.WebsocketUrl != "wss://hack.chat/chat-ws" || c.Name != "alphaBot" {
+		t.Fatalf("config=%+v", c)
+	}
+}
+
+func TestAgentSQLConfigurationPreservesSaturnBounds(t *testing.T) {
+	resolved, err := (AgentConfig{}).Resolve(ValueReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.SQL.MaxSQLChars != 4000 || resolved.SQL.MaxRows != 50 || resolved.SQL.MaxColumns != 32 || resolved.SQL.MaxCellChars != 2000 || resolved.SQL.MaxResultChars != 32000 || resolved.SQL.TimeoutMillis != 1000 {
+		t.Fatalf("sql=%+v", resolved.SQL)
+	}
+}
 
 func TestAgentConfigStrictScalarErrorsAndDefaultAPIKey(t *testing.T) {
 	for _, values := range []map[string]string{{"enabled": "sometimes"}, {"timeoutMillis": "12x"}, {"maxTokens": "999999999999999999999"}} {

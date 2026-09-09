@@ -1,6 +1,7 @@
 package h2
 
 import (
+	"context"
 	"testing"
 
 	"zenbot/internal/model"
@@ -75,6 +76,22 @@ func TestLastMessagesExcludesWhispersAndUsesIDAsTieBreaker(t *testing.T) {
 	got, err := d.LastMessages("", "trip", 2)
 	if err != nil || len(got) != 2 || got[0].Message != "public-second" || got[1].Message != "public-first" {
 		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestLastSeenExcludesPresenceAndReturnsLatestMessageAndJoin(t *testing.T) {
+	d := openTestDB(t)
+	for _, row := range []struct {
+		message string
+		created int64
+	}{{"JOINED", 10}, {"old", 20}, {"LEFT", 30}, {"latest", 40}, {"JOINED", 50}} {
+		if _, err := d.DB.Exec("INSERT INTO messages(trip,name,message,created_on,visibility) VALUES('trip-a','Merc',$1,$2,'PUBLIC')", row.message, row.created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen, err := d.LastSeen(context.Background(), "Merc")
+	if err != nil || seen.SeenAt == nil || seen.JoinedAt == nil || *seen.SeenAt != 40 || *seen.JoinedAt != 50 || seen.Message != "latest" {
+		t.Fatalf("seen=%+v err=%v", seen, err)
 	}
 }
 

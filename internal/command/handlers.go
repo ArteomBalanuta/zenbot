@@ -355,6 +355,26 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 		return &registerCommand{b}
 	case "authorize":
 		return &authorizeCommand{b}
+	case "deauthorize":
+		return &deauthorizeCommand{b}
+	case "captcha":
+		return &captchaCommand{b}
+	case "mute":
+		return &muteCommand{b}
+	case "unmute":
+		return &unmuteCommand{b}
+	case "color":
+		return &profileCommand{commandBase: b}
+	case "flair":
+		return &profileCommand{commandBase: b, flair: true}
+	case "overflow":
+		return &overflowCommand{b}
+	case "shadowban":
+		return &shadowBanCommand{b}
+	case "shadowbanlist":
+		return &shadowBanListCommand{b}
+	case "unshadowban":
+		return &unshadowBanCommand{b}
 	case "access":
 		return &accessCommand{b}
 	case "messages":
@@ -369,6 +389,10 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 		return &unlockCommand{b}
 	case "memory":
 		return &memoryCommand{b}
+	case "prefix":
+		return &prefixCommand{b}
+	case "lastonline":
+		return &lastOnlineCommand{b}
 	default:
 		return &saturnCommand{engine: e, message: m, role: role, aliases: aliases, canonical: canonical}
 	}

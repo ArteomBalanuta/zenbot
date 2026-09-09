@@ -19,6 +19,17 @@ type UserQueryRepository interface {
 	BasicUserData(context.Context, string, string) (string, error)
 }
 
+// LastSeen preserves observations rendered by Saturn's last-online command.
+type LastSeen struct {
+	Message  string
+	SeenAt   *int64
+	JoinedAt *int64
+}
+
+type LastSeenRepository interface {
+	LastSeen(context.Context, string) (LastSeen, error)
+}
+
 // IdentityRepository is the persistence seam for registration and message
 // history. Implementations must make each mutating operation atomic.
 type IdentityRepository interface {

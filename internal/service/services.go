@@ -25,21 +25,23 @@ type CommandOutput interface {
 
 // Bundle contains the non-agent services attached to an engine.
 type Bundle struct {
-	Security *SecurityService
-	Mail     *MailService
-	Notes    *NoteService
-	Users    *UserService
-	Ping     *PingService
-	Weather  *WeatherService
-	Time     *TimeService
-	Search   *SearchService
-	SCP      *SCPService
-	DBZ      *DBZService
+	Security   *SecurityService
+	ShadowBans repository.ShadowBanManagementRepository
+	Mail       *MailService
+	Notes      *NoteService
+	Users      *UserService
+	Ping       *PingService
+	Weather    *WeatherService
+	Time       *TimeService
+	Search     *SearchService
+	SCP        *SCPService
+	DBZ        *DBZService
 }
 
 type UserService struct {
 	Queries  repository.UserQueryRepository
 	Identity repository.IdentityRepository
+	LastSeen repository.LastSeenRepository
 	GroupB   repository.SqlUtilGroupBRepository
 }
 
@@ -70,6 +72,29 @@ func (s *UserService) RegisterTripByName(name, trip string) error {
 }
 func (s *UserService) LastMessages(name, trip string, count int) ([]model.Message, error) {
 	return s.Identity.LastMessages(name, trip, count)
+}
+
+func (s *UserService) LastOnline(ctx context.Context, target string) (string, error) {
+	if s.LastSeen == nil {
+		return "", fmt.Errorf("last-online persistence unavailable")
+	}
+	record, err := s.LastSeen.LastSeen(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	format := func(timestamp *int64) string {
+		if timestamp == nil {
+			return " - "
+		}
+		return time.UnixMilli(*timestamp).In(time.FixedZone("GMT", 0)).Format(time.RFC1123)
+	}
+	message := record.Message
+	if message == "" {
+		message = " - "
+	}
+	message = strings.ReplaceAll(message, `\`, `\\`)
+	message = strings.ReplaceAll(message, `"`, `\"`)
+	return fmt.Sprintf("\\n Nick|Trip: %s\\n Joined: %s\\n Last seen: %s\\n Seen active: -  ago.\\n Session duration: -  \\n Last message: %s\\n", target, format(record.JoinedAt), format(record.SeenAt), message), nil
 }
 
 func (s *UserService) DeleteIdentity(ctx context.Context, nameOrTrip string) (repository.DeleteResult, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,9 +14,13 @@ import (
 func openTestDB(t *testing.T) *Database {
 	t.Helper()
 	dir := t.TempDir()
+	jar := os.Getenv("H2_JAR")
+	if jar == "" {
+		jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
+	}
 	d, err := Open(context.Background(), Config{
 		BaseDir: dir, DatabaseStem: filepath.Join(dir, "db"),
-		H2Jar: "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar",
+		H2Jar: jar,
 		Host:  "127.0.0.1", AutoPort: true, StartupTimeout: 5 * time.Second,
 	})
 	if err != nil {

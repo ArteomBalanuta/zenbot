@@ -1,12 +1,16 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"zenbot/internal/common"
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
+	"zenbot/internal/service"
 )
 
 func moderationMessage(text string, whisper bool) *model.ChatMessage {
@@ -86,6 +90,126 @@ func TestUnbanAllAndLockBoundaries(t *testing.T) {
 	(&Lock{}).NewInstance(e, moderationMessage("!lock", false)).(*Lock).Execute()
 	if len(e.raws) != 0 || len(e.chats) != 1 || e.chats[0] != "mod|!lock [on|off]|false" {
 		t.Fatalf("lock usage=%v/%v", e.raws, e.chats)
+	}
+}
+
+func TestDeauthorizeUsesSourceRawCommandAndUsage(t *testing.T) {
+	e := &commandEngineStub{}
+	d, _ := commandDefinitionFor("deauth")
+	status, err := d.New(e, moderationMessage("!deauth trip-x", true)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"deauthtrip","trip":"trip-x"}`}) || !equalStrings(e.chats, []string{"mod| deauthorized trip: trip-x|true"}) {
+		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
+	}
+}
+
+func TestCaptchaUsesSourceDefaultAndOnOffProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		text, raw, reply string
+		status           model.Status
+	}{
+		{"!captcha", `{"cmd":"enablecaptcha"}`, "mod| Captcha enabled!|false", model.SUCCESSFUL},
+		{"!captcha off", `{"cmd":"disablecaptcha"}`, "mod| Captcha disabled!|false", model.SUCCESSFUL},
+	} {
+		e := &commandEngineStub{}
+		d, _ := commandDefinitionFor("captcha")
+		status, err := d.New(e, moderationMessage(tc.text, false)).Execute(context.Background())
+		if status != tc.status || err != nil || !equalStrings(e.raws, []string{tc.raw}) || !equalStrings(e.chats, []string{tc.reply}) {
+			t.Fatalf("%s status=%v err=%v raw=%v chats=%v", tc.text, status, err, e.raws, e.chats)
+		}
+	}
+}
+
+func TestMuteRequiresActiveTargetAndRetainsRawProtocol(t *testing.T) {
+	e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc", Hash: "hash-x"}}}
+	d, _ := commandDefinitionFor("dumb")
+	status, err := d.New(e, moderationMessage("!dumb @merc", false)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"mute","nick":"merc"}`}) || !equalStrings(e.chats, []string{"mod|merc hash-x has been muted|false"}) {
+		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
+	}
+}
+
+func TestUnmuteUsesSourceHashProtocol(t *testing.T) {
+	e := &commandEngineStub{}
+	d, _ := commandDefinitionFor("undumb")
+	status, err := d.New(e, moderationMessage("!undumb hash-x", true)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"unmute","hash":"hash-x"}`}) || !equalStrings(e.chats, []string{"mod|hash-x has been unmuted|true"}) {
+		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
+	}
+}
+
+func TestColorAndFlairRequireActiveUserAndUseSourcePayloads(t *testing.T) {
+	for _, tc := range []struct{ text, raw, reply string }{
+		{"!color @Merc 00ff00", `{"cmd":"forcecolor","color":"00ff00","nick":"Merc"}`, ""},
+		{"!flair Merc trusted", `{"cmd":"forceflair","flair":"trusted","nick":"Merc"}`, "mod|\\n Flair set successfully!|false"},
+	} {
+		e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc"}}}
+		canonical := "color"
+		if strings.HasPrefix(tc.text, "!flair") {
+			canonical = "flair"
+		}
+		d, _ := commandDefinitionFor(canonical)
+		status, err := d.New(e, moderationMessage(tc.text, false)).Execute(context.Background())
+		if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{tc.raw}) {
+			t.Fatalf("%s status=%v err=%v raws=%v", tc.text, status, err, e.raws)
+		}
+		if tc.reply != "" && !equalStrings(e.chats, []string{tc.reply}) {
+			t.Fatalf("%s chats=%v", tc.text, e.chats)
+		}
+	}
+}
+
+func TestOverflowAliasesUseSourceRawAction(t *testing.T) {
+	e := &commandEngineStub{}
+	d, _ := commandDefinitionFor("hug")
+	status, err := d.New(e, moderationMessage("!hug @Merc", false)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"overflow","nick":"Merc"}`}) || len(e.chats) != 0 {
+		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
+	}
+}
+
+type shadowManagementFake struct {
+	selectors []string
+	rows      []model.BanRecord
+}
+
+func (f *shadowManagementFake) PersistShadowBanSelector(_ context.Context, name, _ string) error {
+	f.selectors = append(f.selectors, name)
+	return nil
+}
+func (f *shadowManagementFake) ListShadowBans(context.Context) ([]model.BanRecord, error) {
+	return f.rows, nil
+}
+func (f *shadowManagementFake) RemoveShadowBan(context.Context, string) error { return nil }
+
+var _ repository.ShadowBanManagementRepository = (*shadowManagementFake)(nil)
+
+func TestShadowBanOfflineSelectorUsesTypedPersistence(t *testing.T) {
+	fake := &shadowManagementFake{}
+	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: fake}}
+	d, _ := commandDefinitionFor("sban")
+	status, err := d.New(e, moderationMessage("!sban offline", false)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(fake.selectors, []string{"offline"}) || !equalStrings(e.chats, []string{"mod|banned: offline|false"}) {
+		t.Fatalf("status=%v err=%v selectors=%v chats=%v", status, err, fake.selectors, e.chats)
+	}
+}
+
+func TestShadowBanListRendersSourceShape(t *testing.T) {
+	fake := &shadowManagementFake{rows: []model.BanRecord{{Hash: "raw", Trip: "", Name: "offline"}}}
+	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: fake}}
+	d, _ := commandDefinitionFor("banlist")
+	status, err := d.New(e, moderationMessage("!banlist", true)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Banned hashes, trips, names: \\nraw - ------ - offline\\n|true"}) {
+		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
+	}
+}
+
+func TestUnshadowBanRemovesTypedSelector(t *testing.T) {
+	fake := &shadowManagementFake{}
+	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: fake}}
+	d, _ := commandDefinitionFor("unblock")
+	status, err := d.New(e, moderationMessage("!unblock target", false)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod| unbanned target|false"}) {
+		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
 }
 

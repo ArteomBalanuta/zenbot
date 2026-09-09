@@ -16,6 +16,8 @@ type AgentConfig struct {
 	MaxTokens                              int            `toml:"maxTokens"`
 	MaxSteps                               int            `toml:"maxSteps"`
 	MaxTools                               int            `toml:"maxTools"`
+	MaxRetries                             int            `toml:"maxRetries"`
+	RetryBackoffMillis                     int            `toml:"retryBackoffMillis"`
 	Ambient                                bool           `toml:"ambient"`
 	CreatorTrip                            string         `toml:"creatorTrip"`
 	AmbientEveryMessages                   int            `toml:"ambientEveryMessages"`
@@ -56,6 +58,8 @@ const (
 	defaultMaxTokens             = 1024
 	defaultMaxSteps              = 5
 	defaultMaxTools              = 4
+	defaultMaxRetries            = 2
+	defaultRetryBackoffMillis    = 250
 	defaultCreatorTrip           = "595754"
 	defaultAmbientEveryMessages  = 8
 	defaultQuietMinutes          = 15
@@ -81,7 +85,7 @@ func (c AgentConfig) Validate() error {
 	if c.TimeoutMillis < 0 {
 		return fmt.Errorf("agent.timeoutMillis must not be negative")
 	}
-	for name, v := range map[string]int{"maxTokens": c.MaxTokens, "maxSteps": c.MaxSteps, "maxTools": c.MaxTools} {
+	for name, v := range map[string]int{"maxTokens": c.MaxTokens, "maxSteps": c.MaxSteps, "maxTools": c.MaxTools, "maxRetries": c.MaxRetries, "retryBackoffMillis": c.RetryBackoffMillis} {
 		if v < 0 {
 			return fmt.Errorf("agent.%s must not be negative", name)
 		}
@@ -179,6 +183,12 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 	if v.MaxTools, err = r.Int("maxTools", v.MaxTools); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
+	if v.MaxRetries, err = r.Int("maxRetries", v.MaxRetries); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
+	if v.RetryBackoffMillis, err = r.Int("retryBackoffMillis", v.RetryBackoffMillis); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
 	if v.Ambient, err = r.Bool("ambient", v.Ambient); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
@@ -208,6 +218,24 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 	if v.QueueCapacity, err = r.Int("queueCapacity", v.QueueCapacity); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
+	if v.SQL.MaxSQLChars == 0 {
+		v.SQL.MaxSQLChars = 4000
+	}
+	if v.SQL.MaxRows == 0 {
+		v.SQL.MaxRows = 50
+	}
+	if v.SQL.MaxColumns == 0 {
+		v.SQL.MaxColumns = 32
+	}
+	if v.SQL.MaxCellChars == 0 {
+		v.SQL.MaxCellChars = 2000
+	}
+	if v.SQL.MaxResultChars == 0 {
+		v.SQL.MaxResultChars = 32000
+	}
+	if v.SQL.TimeoutMillis == 0 {
+		v.SQL.TimeoutMillis = 1000
+	}
 	if v.Endpoint == "" {
 		v.Endpoint = defaultEndpoint
 	}
@@ -223,6 +251,12 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 	}
 	if v.MaxTools == 0 {
 		v.MaxTools = defaultMaxTools
+	}
+	if v.MaxRetries == 0 {
+		v.MaxRetries = defaultMaxRetries
+	}
+	if v.RetryBackoffMillis == 0 {
+		v.RetryBackoffMillis = defaultRetryBackoffMillis
 	}
 	if err := v.Validate(); err != nil {
 		return ResolvedAgentConfig{}, err

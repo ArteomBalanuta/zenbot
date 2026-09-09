@@ -672,6 +672,13 @@ func (e *EngineImpl) SetName(name string) {
 	e.Name = name
 }
 
+func (e *EngineImpl) SetPrefix(prefix string) {
+	e.Prefix = prefix
+	if e.replicaController != nil {
+		e.replicaController.SetPrefix(prefix)
+	}
+}
+
 func (e *EngineImpl) GetPrefix() string {
 	return e.Prefix
 }

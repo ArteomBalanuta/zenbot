@@ -59,7 +59,16 @@ func (r *Registry) Definitions(ctx api.Context) []contract.Definition {
 			continue
 		}
 		if d, e := t.Descriptor(ctx); e == nil {
-			out = append(out, contract.NewDefinition(d))
+			available := true
+			for _, required := range d.RequiredCapabilities() {
+				if !ctx.HasCapability(api.Capability(required)) {
+					available = false
+					break
+				}
+			}
+			if available {
+				out = append(out, contract.NewDefinition(d))
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

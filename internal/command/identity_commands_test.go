@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"zenbot/internal/config"
@@ -209,5 +210,45 @@ func TestMessagesCommandClampsCountAndParsesEveryRole(t *testing.T) {
 		if _, ok := parseRole(name); !ok {
 			t.Fatalf("role %q rejected", name)
 		}
+	}
+}
+
+type lastSeenFake struct {
+	record repository.LastSeen
+}
+
+func (f *lastSeenFake) LastSeen(context.Context, string) (repository.LastSeen, error) {
+	return f.record, nil
+}
+
+func TestLastOnlineRendersPersistedLastSeen(t *testing.T) {
+	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}}
+	e := newIdentityEngine(ids, &authFake{})
+	seen, joined := int64(0), int64(0)
+	e.bundle.Users.LastSeen = &lastSeenFake{record: repository.LastSeen{Message: `hello "world"`, SeenAt: &seen, JoinedAt: &joined}}
+	d, _ := commandDefinitionFor("seen")
+	status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!seen @merc"}).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 {
+		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
+	}
+	if got := e.chats[0]; !strings.Contains(got, "Nick|Trip: merc") || !strings.Contains(got, "Last message: hello") || !strings.Contains(got, "world") || !strings.Contains(got, "Last seen: Thu, 01 Jan 1970 00:00:00 GMT") {
+		t.Fatalf("unexpected last-online response %q", got)
+	}
+}
+
+func TestLastOnlineUsesSourceAliasesAndUsageInsteadOfCatalogPlaceholder(t *testing.T) {
+	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}}
+	e := newIdentityEngine(ids, &authFake{})
+	for _, alias := range []string{"lastonline", "seen", "last", "online", "lastseen"} {
+		d, ok := commandDefinitionFor(alias)
+		if !ok || d.Canonical != "lastonline" || d.Role != model.USER {
+			t.Fatalf("%s definition=%+v ok=%v", alias, d, ok)
+		}
+		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!" + alias}).Execute(context.Background())
+		want := "alice|\\n Example: !lastseen merc|false"
+		if status != model.FAILED || err != nil || len(e.chats) != 1 || e.chats[0] != want {
+			t.Fatalf("%s status=%v err=%v chats=%v want=%q", alias, status, err, e.chats, want)
+		}
+		e.chats = nil
 	}
 }

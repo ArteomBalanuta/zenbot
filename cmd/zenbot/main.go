@@ -71,11 +71,24 @@ func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUs
 	if limit < 1 {
 		limit = 1
 	}
-	return live.NewBoundedToolLoop(assembler, client, []tool.Tool{
+	baseTools := []tool.Tool{
 		tool.UserMessageHistory{Repository: db, Limit: limit},
 		tool.RoomUsers{Directory: directory},
 		tool.RunCommand{Gateway: gateway},
-	}, []string{"user_message_history", "room_users", "run_command"})
+	}
+	allowed := []string{"user_message_history", "room_users", "run_command"}
+	if !resolved.SQL.Enabled {
+		return live.NewBoundedToolLoop(assembler, client, baseTools, allowed)
+	}
+	queries, okQueries := db.(repository.AgentNamedQueryRepository)
+	schema, okSchema := db.(repository.AgentSchemaRepository)
+	sqlRepo, okSQL := db.(repository.AgentSQLRepository)
+	if !okQueries || !okSchema || !okSQL {
+		return nil, fmt.Errorf("agent SQL repository composition is incomplete")
+	}
+	tools := append(baseTools, tool.DatabaseQuery{Repository: queries}, tool.DatabaseSchema{Repository: schema, Enabled: true}, tool.DatabaseSQL{Schema: schema, Repository: sqlRepo, Config: resolved.SQL})
+	allowed = append(allowed, "database_query", "database_schema", "database_sql")
+	return live.NewRegistryToolLoop(assembler, client, tools, allowed, turn.ExecutionLimits{MaxSteps: resolved.MaxSteps, MaxToolCalls: resolved.MaxTools})
 }
 
 func (a *liveAgent) Close() {
@@ -112,7 +125,7 @@ func newLiveAgent(c *config.Config, engine common.Engine, conversationRepository
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
 	}
-	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, Timeout: resolved.Timeout}, nil)
+	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)
 	}
@@ -207,7 +220,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
 	}
-	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, Timeout: resolved.Timeout}, nil)
+	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)
 	}
@@ -215,7 +228,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent prompts: %w", err)
 	}
-	assembler, err := assemble.New(assemble.Config{}, catalog)
+	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker}, catalog)
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
@@ -228,6 +241,21 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 		return nil, fmt.Errorf("agent verified quotes: %w", err)
 	}
 	return live.DirectInvoker{Assembler: assembler, Client: client, ConversationContext: conversationContext, ToolLoop: toolLoop, Finalizer: finalizer, Memory: memory}, nil
+}
+
+func lifecyclePolicy(c *config.Config) core.RetryPolicy {
+	p := core.RetryPolicy{Interval: time.Second, StopTimeout: 10 * time.Second}
+	if c == nil || !c.AutoReconnect {
+		p.DisableHealthChecks = true
+		p.MaxRetries = 1
+		return p
+	}
+	if c.ConnectionHeartbitIntervalMinutes > 0 {
+		p.HealthInterval = time.Duration(c.ConnectionHeartbitIntervalMinutes) * time.Minute
+	}
+	// Saturn's scheduler keeps recovering a disconnected host until shutdown.
+	p.MaxRetries = 0
+	return p
 }
 
 func main() {
@@ -275,7 +303,7 @@ func main() {
 		log.Fatal("Can't register Saturn utility commands: ", err)
 	}
 
-	lifecycle := core.NewLifecycle(func() core.LifecycleEngine { return lifecycleEngine{e} }, core.RetryPolicy{MaxRetries: 3, StopTimeout: 10 * time.Second})
+	lifecycle := core.NewLifecycle(func() core.LifecycleEngine { return lifecycleEngine{e} }, lifecyclePolicy(c))
 	go func() {
 		for err := range lifecycle.Errors() {
 			log.Printf("lifecycle: %v", err)

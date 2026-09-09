@@ -155,11 +155,10 @@ func (s *processServer) startAutoPort(ctx context.Context) error {
 			if err != nil || port <= 0 || port > 65535 {
 				continue
 			}
-			host := match[1]
-			if host != "localhost" && (net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback()) {
-				continue
-			}
-			found.Do(func() { endpoint <- net.JoinHostPort(host, strconv.Itoa(port)) })
+			// H2 may advertise a non-loopback host selected from a virtual adapter
+			// even when it is constrained to local connections. The configured host
+			// has already been validated as loopback and is the endpoint Zenbot owns.
+			found.Do(func() { endpoint <- net.JoinHostPort(s.cfg.Host, strconv.Itoa(port)) })
 		}
 	}
 	go readOutput(stdout)
@@ -213,6 +212,9 @@ func (s *processServer) Stop(ctx context.Context) error {
 	if s.cmd == nil || s.cmd.Process == nil {
 		return nil
 	}
+	if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		return nil
+	}
 	s.stopOnce.Do(func() {
 		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 			var cancel context.CancelFunc
@@ -234,6 +236,11 @@ func (s *processServer) stopOwned(ctx context.Context) error {
 	if s.cmd == nil || s.cmd.Process == nil || s.waitDone == nil {
 		return nil
 	}
+	select {
+	case <-s.waitDone:
+		return nil
+	default:
+	}
 	signaled := s.cmd.Process.Signal(os.Interrupt) == nil
 	select {
 	case <-s.waitDone:
@@ -248,7 +255,9 @@ func (s *processServer) stopOwned(ctx context.Context) error {
 			return fmt.Errorf("kill H2 PostgreSQL server: %w", err)
 		}
 		<-s.waitDone
-		return ctx.Err()
+		// Windows does not deliver os.Interrupt to the Java child reliably.
+		// A completed forced shutdown of this owned process is still successful.
+		return nil
 	}
 }
 

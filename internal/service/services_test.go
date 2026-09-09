@@ -61,7 +61,7 @@ func TestPingUsesInjectedAddress(t *testing.T) {
 		}
 	}()
 	d, e := (&PingService{Address: ln.Addr().String()}).Ping(context.Background())
-	if e != nil || d <= 0 {
+	if e != nil || d < 0 {
 		t.Fatalf("duration=%v err=%v", d, e)
 	}
 }

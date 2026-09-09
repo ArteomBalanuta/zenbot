@@ -1,8 +1,25 @@
+# Saturn-compatible runtime configuration
+# `wsUrl` and `nick` are the source-compatible keys. Legacy `url` and `name`
+# remain accepted by the loader for existing Zenbot deployments.
+dbPath = "database/database"
+wsUrl = "wss://hack.chat/chat-ws"
+cmdPrefix = "*"
+channel = "programming"
+nick = "alphaBot"
+password = ""
+adminTrips = []
+autoReconnect = true
+healthCheckInterval = 5
+autorunCommands = []
+
 # Agent configuration example
 [agent]
 enabled = false
 endpoint = "http://localhost:16261"
 model = "your-model"
+# OpenAI-compatible transient failure retry policy.
+maxRetries = 2
+retryBackoffMillis = 250
 # Number of completed exchanges included in prompts (1..60).
 memoryTurns = 6
 # Durable memory retention in minutes (1..525600).
@@ -26,3 +43,14 @@ moderationMessageBurstWindowSeconds = 5
 moderationRepeatedMessageCount = 4
 moderationRepeatedMessageWindowSeconds = 10
 moderationSecondBreachWindowSeconds = 30
+
+# Source-compatible dynamic-SQL limits. The runtime keeps this disabled until
+# the read-only H2 schema/query execution bridge is composed.
+[agent.sql]
+enabled = false
+maxSqlChars = 4000
+maxRows = 50
+maxColumns = 32
+maxCellChars = 2000
+maxResultChars = 32000
+timeoutMillis = 1000

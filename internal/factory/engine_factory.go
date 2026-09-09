@@ -72,8 +72,10 @@ func NewEngineWithOptions(etype model.EngineType, c *config.Config, repo reposit
 			q = x
 		}
 		identity, _ := repo.(repository.IdentityRepository)
+		lastSeen, _ := repo.(repository.LastSeenRepository)
 		groupB, _ := repo.(repository.SqlUtilGroupBRepository)
-		e.Services = &service.Bundle{Security: e.SecurityService, Mail: &service.MailService{DB: db, GroupB: groupB}, Notes: &service.NoteService{DB: db}, Users: &service.UserService{Queries: q, Identity: identity, GroupB: groupB}, Ping: &service.PingService{}, Weather: &service.WeatherService{}, Time: &service.TimeService{}, Search: &service.SearchService{}, SCP: &service.SCPService{}}
+		shadowBans, _ := repo.(repository.ShadowBanManagementRepository)
+		e.Services = &service.Bundle{Security: e.SecurityService, ShadowBans: shadowBans, Mail: &service.MailService{DB: db, GroupB: groupB}, Notes: &service.NoteService{DB: db}, Users: &service.UserService{Queries: q, Identity: identity, LastSeen: lastSeen, GroupB: groupB}, Ping: &service.PingService{}, Weather: &service.WeatherService{}, Time: &service.TimeService{}, Search: &service.SearchService{}, SCP: &service.SCPService{}}
 		if dbz, ok := repo.(repository.DBZRepository); ok {
 			e.Services.DBZ = &service.DBZService{Repo: dbz}
 		}

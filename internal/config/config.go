@@ -5,6 +5,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"log"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -23,6 +24,15 @@ type Config struct {
 	Agent                             AgentConfig `toml:"agent"`
 }
 
+func (c *Config) Normalize() {
+	if strings.TrimSpace(c.WebsocketUrl) == "" {
+		c.WebsocketUrl = strings.TrimSpace(c.WsUrl)
+	}
+	if strings.TrimSpace(c.Name) == "" {
+		c.Name = strings.TrimSpace(c.Nick)
+	}
+}
+
 func SetupConfig() *Config {
 	var config Config
 
@@ -31,6 +41,7 @@ func SetupConfig() *Config {
 		log.Println("Error reading config: ", err)
 		os.Exit(1)
 	}
+	config.Normalize()
 
 	fmt.Println("initialized Config - websocket URL: ", config.WebsocketUrl)
 	return &config

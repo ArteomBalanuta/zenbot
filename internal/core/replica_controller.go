@@ -70,6 +70,17 @@ func (c *ManagedReplicaController) RemoveReplica(ctx context.Context, channel st
 	_, err := c.manager.Remove(ctx, strings.TrimSpace(channel))
 	return err
 }
+func (c *ManagedReplicaController) SetPrefix(prefix string) {
+	if c == nil || c.manager == nil {
+		return
+	}
+	for _, replica := range c.manager.ManagedEngines() {
+		if setter, ok := replica.(interface{ SetPrefix(string) }); ok {
+			setter.SetPrefix(prefix)
+		}
+	}
+}
+
 func (c *ManagedReplicaController) ReplicaChannels() []string {
 	if c == nil || c.manager == nil {
 		return nil

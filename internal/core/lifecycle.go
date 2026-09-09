@@ -15,6 +15,7 @@ type LifecycleEngine interface {
 type RetryPolicy struct {
 	Interval, HealthInterval, StopTimeout time.Duration
 	MaxRetries                            int
+	DisableHealthChecks                   bool
 }
 type Lifecycle struct {
 	factory  func() LifecycleEngine
@@ -96,6 +97,10 @@ func (l *Lifecycle) run(ctx context.Context) error {
 		err := e.Start(ctx)
 		if err == nil {
 			attempts = 0
+			if l.policy.DisableHealthChecks {
+				<-ctx.Done()
+				return ctx.Err()
+			}
 			err = l.monitor(ctx, e)
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
