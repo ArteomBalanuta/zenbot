@@ -13,6 +13,11 @@ type Command interface {
 	NewInstance(e Engine, m *model.ChatMessage) Command
 }
 
+// CommandAuthorizer supplies a command-specific authorization predicate.
+type CommandAuthorizer interface {
+	Authorize(*model.User) bool
+}
+
 type CommandMetadata struct {
 	Alias   string
 	Command func(msg *model.ChatMessage) Command

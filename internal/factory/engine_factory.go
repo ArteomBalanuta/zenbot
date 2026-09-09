@@ -25,6 +25,7 @@ import (
 type EngineOptions struct {
 	Transport           transport.Config
 	ListenerProfile     core.ListenerProfile
+	AutoMoveState       *core.AutoMoveState
 	ReplicaManager      *core.ReplicaManager
 	LifecycleErrors     chan<- error
 	SnapshotCoordinator *snapshot.RoomSnapshotCoordinator
@@ -55,9 +56,13 @@ func NewEngineWithOptions(etype model.EngineType, c *config.Config, repo reposit
 	if opts.Transport.URL == "" {
 		opts.Transport.URL = c.WebsocketUrl
 	}
-	e := core.NewEngineImpl(core.EngineImpl{Type: etype, Prefix: c.CmdPrefix, Channel: c.Channel, Name: c.Name, Password: c.Password,
+	e := core.NewEngineImpl(&core.EngineImpl{Type: etype, Prefix: c.CmdPrefix, Channel: c.Channel, Name: c.Name, Password: c.Password,
 		EngineWg: new(sync.WaitGroup), EnabledCommands: make(map[string]common.CommandMetadata), OutMessageQueue: make(chan string, 256),
 		ActiveUsers: make(map[*model.User]struct{}), AfkUsers: make(map[*model.User]string), Transport: transport.NewConnection(opts.Transport), Profile: opts.ListenerProfile, LifecycleErrors: opts.LifecycleErrors}, opts.HostRelay)
+	e.InstallRoomSnapshotCoordinator(opts.SnapshotCoordinator)
+	if opts.ListenerProfile == core.Permanent {
+		e.SetAutoMoveState(opts.AutoMoveState)
+	}
 	e.CoreListener = listener.NewCoreListener(e)
 	e.Repository = repo
 	if auth, ok := repo.(repository.AuthorizationRepository); ok {
@@ -74,8 +79,16 @@ func NewEngineWithOptions(etype model.EngineType, c *config.Config, repo reposit
 		identity, _ := repo.(repository.IdentityRepository)
 		lastSeen, _ := repo.(repository.LastSeenRepository)
 		groupB, _ := repo.(repository.SqlUtilGroupBRepository)
-		shadowBans, _ := repo.(repository.ShadowBanManagementRepository)
-		e.Services = &service.Bundle{Security: e.SecurityService, ShadowBans: shadowBans, Mail: &service.MailService{DB: db, GroupB: groupB}, Notes: &service.NoteService{DB: db}, Users: &service.UserService{Queries: q, Identity: identity, LastSeen: lastSeen, GroupB: groupB}, Ping: &service.PingService{}, Weather: &service.WeatherService{}, Time: &service.TimeService{}, Search: &service.SearchService{}, SCP: &service.SCPService{}}
+		e.Services = &service.Bundle{Security: e.SecurityService, Mail: &service.MailService{DB: db, GroupB: groupB}, Notes: &service.NoteService{DB: db}, Users: &service.UserService{Queries: q, Identity: identity, LastSeen: lastSeen, GroupB: groupB}, Ping: &service.PingService{}, Weather: &service.WeatherService{}, Time: &service.TimeService{}, Search: &service.SearchService{}, SCP: &service.SCPService{}}
+		if db != nil {
+			e.Services.SQLCommand = &service.RawSQLService{DB: db}
+		}
+		if activity, ok := repo.(repository.ActivityRepository); ok {
+			e.Services.Activity = &service.ActivityService{Repo: activity}
+		}
+		if shadowBans, ok := repo.(repository.ShadowBanCommandRepository); ok {
+			e.Services.ShadowBans = &service.ShadowBanService{Repo: shadowBans}
+		}
 		if dbz, ok := repo.(repository.DBZRepository); ok {
 			e.Services.DBZ = &service.DBZService{Repo: dbz}
 		}
@@ -89,13 +102,27 @@ func NewEngineWithOptions(etype model.EngineType, c *config.Config, repo reposit
 		e.UserChatListener, e.UserInfoListener, e.UserJoinedListener, e.UserLeftListener = common.NewDummyListener(), common.NewDummyListener(), common.NewDummyListener(), common.NewDummyListener()
 	} else {
 		e.UserChatListener, e.UserInfoListener = listener.NewUserChatListener(e), listener.NewInfoChatListener(e)
-		e.UserJoinedListener, e.UserLeftListener = listener.NewUserJoinedListenerWithAutomation(e, composeJoinAutomation(e, c)), listener.NewUserLeftListener(e)
+		e.UserJoinedListener, e.UserLeftListener = listener.NewUserJoinedListenerWithAutomations(e, composeJoinAutomation(e, c), composeAutoMoveJoin(e, opts.AutoMoveState)), listener.NewUserLeftListener(e)
 	}
 	if etype == model.ZOMBIE {
 		e.Repository = &repository.DummyImpl{}
 		e.UserChatListener, e.UserJoinedListener, e.UserLeftListener = common.NewDummyListener(), common.NewDummyListener(), common.NewDummyListener()
 	}
 	return e, nil
+}
+
+func composeAutoMoveJoin(e *core.EngineImpl, state *core.AutoMoveState) listener.JoinAutomation {
+	if e == nil || state == nil {
+		return nil
+	}
+	trips, ok := e.Repository.(repository.AutoMoveTripRepository)
+	if !ok {
+		return nil
+	}
+	return &listener.AutoMoveJoinAutomation{
+		State: state, Trips: trips, Move: e, SendNotice: e.SendChatMessage,
+		Channel: e.GetChannel, IsReplica: func() bool { return e.EngineType() == model.REPLICA },
+	}
 }
 
 func composeJoinAutomation(e *core.EngineImpl, c *config.Config) listener.JoinAutomation {

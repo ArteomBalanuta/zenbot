@@ -104,7 +104,7 @@ func TestRegisterUserUtilitiesDoesNotExposeUnknownOrUnimplementedCommands(t *tes
 	if err := RegisterUserUtilities(engine); err != nil {
 		t.Fatal(err)
 	}
-	for _, alias := range []string{"access", "dbz", "search", "scp", "not-a-command"} {
+	for _, alias := range []string{"access", "search", "scp", "not-a-command"} {
 		if _, ok := (*engine.GetEnabledCommands())[alias]; ok {
 			t.Fatalf("unexpectedly registered %q", alias)
 		}

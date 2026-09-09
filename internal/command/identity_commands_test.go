@@ -128,8 +128,7 @@ func TestAuthorizeCommandPropagatesPersistenceFailure(t *testing.T) {
 	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}}
 	auth := &authFake{err: errWant}
 	e := newIdentityEngine(ids, auth)
-	d, _ := commandDefinitionFor("auth")
-	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!auth trip"}).Execute(context.Background())
+	status, err := (&authorizeCommand{commandBase: commandBase{engine: e, message: &model.ChatMessage{Name: "mod", Text: "!auth trip"}}}).Execute(context.Background())
 	if status != model.FAILED || !errors.Is(err, errWant) || len(e.chats) != 0 {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}

@@ -1,8 +1,7 @@
 package command
 
 import (
-	"fmt"
-	"strings"
+	"context"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -30,16 +29,5 @@ func (u *Ban) NewInstance(engine common.Engine, chatMessage *model.ChatMessage) 
 }
 
 func (u *Ban) Execute() {
-	arguments := u.chatMessage.GetArguments()
-	if len(arguments) < 2 || strings.TrimSpace(arguments[1]) == "" {
-		u.engine.SendChatMessage(u.chatMessage.Name, "Example: "+u.engine.GetPrefix()+"ban merc", u.chatMessage.IsWhisper)
-		return
-	}
-	target := strings.TrimPrefix(strings.TrimSpace(arguments[1]), "@")
-	if target == "" {
-		return
-	}
-
-	u.engine.Ban(target)
-	u.engine.SendChatMessage(u.chatMessage.Name, fmt.Sprintf("%s has been banned", target), u.chatMessage.IsWhisper)
+	_, _ = (&simpleBanCommand{commandBase: commandBase{engine: u.engine, message: u.chatMessage}}).Execute(context.Background())
 }

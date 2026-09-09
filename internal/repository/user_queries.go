@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+
 	"zenbot/internal/model"
 )
 
@@ -11,12 +13,21 @@ type RegisteredUser struct {
 	Name string
 }
 
+// LastOnlineRecord is the raw message-history state needed to render Saturn's
+// last-online reply. Invalid fields mean the corresponding query found no row.
+type LastOnlineRecord struct {
+	LastMessage    sql.NullString
+	LastSeenMillis sql.NullInt64
+	JoinedMillis   sql.NullInt64
+}
+
 // UserQueryRepository is the deliberately narrow persistence seam for the
 // Saturn users and nicks commands.
 type UserQueryRepository interface {
 	RegisteredUsers(context.Context) ([]RegisteredUser, error)
 	NicksByTrip(context.Context, string) ([]string, error)
 	BasicUserData(context.Context, string, string) (string, error)
+	LastOnline(context.Context, string) (LastOnlineRecord, error)
 }
 
 // LastSeen preserves observations rendered by Saturn's last-online command.

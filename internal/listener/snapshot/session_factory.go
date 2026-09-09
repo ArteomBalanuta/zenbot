@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -95,7 +96,12 @@ func (f *CoordinatedSessionFactory) Create(req RoomSnapshotRequest, sink Snapsho
 	if f.NewTransport != nil {
 		t, e := f.NewTransport(ctx, req)
 		if e == nil {
-			s = &transportSession{id: id, ctx: ctx, transport: t, sink: sink, onError: f.OnTransportError, onClosed: f.OnClosed, join: req.SourceChannel, done: make(chan struct{})}
+			join, nick := req.SourceChannel, ""
+			if req.TemporaryJoin != nil {
+				join = req.TemporaryJoin.Channel
+				nick = req.TemporaryJoin.Nick + "#" + req.TemporaryJoin.Password
+			}
+			s = &transportSession{id: id, ctx: ctx, transport: t, sink: sink, onError: f.OnTransportError, onClosed: f.OnClosed, join: join, nick: nick, done: make(chan struct{})}
 			err = e
 		} else {
 			err = e
@@ -141,6 +147,7 @@ type transportSession struct {
 	onError   func(string, error)
 	onClosed  func(string, int, string)
 	join      string
+	nick      string
 	errorOnce sync.Once
 	closeOnce sync.Once
 	done      chan struct{}
@@ -152,8 +159,15 @@ func (s *transportSession) Start() error {
 		return err
 	}
 	if s.join != "" {
-		join := fmt.Sprintf(`{"cmd":"join","channel":%q}`, s.join)
-		if err := s.transport.SendRaw(s.ctx, []byte(join)); err != nil {
+		join, err := json.Marshal(struct {
+			Cmd     string `json:"cmd"`
+			Channel string `json:"channel"`
+			Nick    string `json:"nick,omitempty"`
+		}{Cmd: "join", Channel: s.join, Nick: s.nick})
+		if err != nil {
+			return err
+		}
+		if err := s.transport.SendRaw(s.ctx, join); err != nil {
 			return err
 		}
 	}

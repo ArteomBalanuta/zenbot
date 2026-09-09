@@ -12,8 +12,10 @@ import (
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/prompt"
 	"zenbot/internal/agent/tool"
+	"zenbot/internal/command"
 	"zenbot/internal/common"
 	"zenbot/internal/config"
+	"zenbot/internal/listener/message"
 	"zenbot/internal/repository"
 )
 
@@ -51,6 +53,71 @@ func TestOutputFinalizerUsesResolvedMarkerAndBound(t *testing.T) {
 
 type liveAgentTestEngine struct{ common.Engine }
 
+func TestNewLiveAgentSharesRuntimeWithDirectSubmitter(t *testing.T) {
+	repository := &liveAgentRepositoryStub{}
+	enabled, err := newLiveAgent(&config.Config{Agent: config.AgentConfig{Enabled: true, Endpoint: "http://localhost:1", Model: "test"}}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer enabled.Close()
+	if enabled.Service == nil || enabled.DirectSubmitter == nil {
+		t.Fatalf("enabled composition is incomplete: %#v", enabled)
+	}
+	service, ok := enabled.Service.(live.RuntimeService)
+	if !ok || service.Runtime == nil {
+		t.Fatalf("service must own the composed runtime: %#v", enabled.Service)
+	}
+	direct, ok := enabled.DirectSubmitter.(live.DirectSubmissionAdapter)
+	if !ok || direct.Service != enabled.Service {
+		t.Fatalf("direct submitter must use the composed service: %#v", enabled.DirectSubmitter)
+	}
+	enabledRegistration := &liveAgentRegistrationEngine{}
+	if err := command.RegisterUserUtilitiesWithDirectAgent(enabledRegistration, enabled.DirectSubmitter); err != nil {
+		t.Fatal(err)
+	}
+	if !enabledRegistration.hasAlias("l") {
+		t.Fatal("enabled direct submitter did not register l")
+	}
+
+	disabled, err := newLiveAgent(&config.Config{}, liveAgentTestEngine{}, nil, roomDirectoryForMainTest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Service != nil || disabled.DirectSubmitter != nil {
+		t.Fatalf("disabled composition constructed live components: %#v", disabled)
+	}
+	if _, ok := disabled.Participation.(message.PassParticipation); !ok {
+		t.Fatalf("disabled participation = %T, want pass-through", disabled.Participation)
+	}
+	disabledRegistration := &liveAgentRegistrationEngine{}
+	if err := command.RegisterUserUtilitiesWithDirectAgent(disabledRegistration, disabled.DirectSubmitter); err != nil {
+		t.Fatal(err)
+	}
+	if disabledRegistration.hasAlias("l") {
+		t.Fatal("disabled composition registered l")
+	}
+}
+
+type liveAgentRegistrationEngine struct {
+	common.Engine
+	commands []common.Command
+}
+
+func (e *liveAgentRegistrationEngine) RegisterCommand(command common.Command) {
+	e.commands = append(e.commands, command)
+}
+
+func (e *liveAgentRegistrationEngine) hasAlias(alias string) bool {
+	for _, command := range e.commands {
+		for _, candidate := range command.GetAliases() {
+			if candidate == alias {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestNewLiveAgentWiresAmbientParticipationFromResolvedConfig(t *testing.T) {
 	repository := &liveAgentRepositoryStub{}
 	agent, err := newLiveAgent(&config.Config{Agent: config.AgentConfig{Enabled: true, Endpoint: "http://localhost:1", Model: "test", Ambient: true}}, liveAgentTestEngine{}, repository, roomDirectoryForMainTest{})
@@ -64,6 +131,9 @@ func TestNewLiveAgentWiresAmbientParticipationFromResolvedConfig(t *testing.T) {
 	}
 	if !participation.AmbientEnabled || participation.AmbientEvery == 0 || participation.Pipeline == nil || participation.Pipeline.Quiet == nil {
 		t.Fatalf("ambient participation was not fully wired: %#v", participation)
+	}
+	if participation.SemanticCandidate != nil || participation.Pipeline.SemanticModerationReady {
+		t.Fatalf("semantic ingress must stay uncomposed and fail-closed: %#v", participation)
 	}
 	if _, err := newLiveAgent(&config.Config{}, liveAgentTestEngine{}, nil, roomDirectoryForMainTest{}); err != nil {
 		t.Fatal(err)

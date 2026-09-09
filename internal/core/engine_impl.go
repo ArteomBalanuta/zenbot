@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 	"zenbot/internal/common"
+	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
 	"zenbot/internal/relay"
 	"zenbot/internal/repository"
@@ -47,6 +48,7 @@ const (
 type EngineImpl struct {
 	Type     model.EngineType
 	Prefix   string
+	prefixMu sync.RWMutex
 	Channel  string
 	Name     string
 	Password string
@@ -85,16 +87,24 @@ type EngineImpl struct {
 	Profile              ListenerProfile
 	hostRelay            relay.HostRelay
 	replicaController    *ManagedReplicaController
+	supportRelay         common.SupportReplicaRelay
+	autoMove             *AutoMoveState
+	autoMoveMu           sync.Mutex
+	snapshotCoordinator  *snapshot.RoomSnapshotCoordinator
 	LifecycleErrors      chan<- error
+	HostLifecycle        common.HostLifecycleController
 	runtimeFailure       func(error)
 	transportErrReported atomic.Bool
 }
 
 // NewEngineImpl installs the construction-time relay dependency. The
 // dependency remains private to EngineImpl after construction.
-func NewEngineImpl(e EngineImpl, host relay.HostRelay) *EngineImpl {
+func NewEngineImpl(e *EngineImpl, host relay.HostRelay) *EngineImpl {
+	if e == nil {
+		return nil
+	}
 	e.hostRelay = host
-	return &e
+	return e
 }
 
 func (e *EngineImpl) Start() {
@@ -200,7 +210,7 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 				return
 			case msg := <-e.Transport.Messages():
 				if msg != nil {
-					e.DispatchMessage(string(msg))
+					e.DispatchMessageContext(ctx, string(msg))
 				}
 			case err := <-e.Transport.Errors():
 				if err != nil {
@@ -240,6 +250,12 @@ func (e *EngineImpl) StopContext(ctx context.Context) error {
 func (e *EngineImpl) Healthy() bool                { return e.Transport != nil && e.Transport.Connected() }
 func (e *EngineImpl) EngineType() model.EngineType { return e.Type }
 
+// SetAutoMoveState installs the process-shared state during permanent engine composition.
+func (e *EngineImpl) SetAutoMoveState(state *AutoMoveState) { e.autoMove = state }
+
+// AutoMoveState exposes the installed composition dependency for construction tests.
+func (e *EngineImpl) AutoMoveState() *AutoMoveState { return e.autoMove }
+
 // HostRelay returns the relay dependency installed at AGENT construction.
 func (e *EngineImpl) HostRelay() relay.HostRelay { return e.hostRelay }
 
@@ -249,8 +265,19 @@ func (e *EngineImpl) ReplicaChannels() []string {
 	}
 	return e.replicaController.ReplicaChannels()
 }
-func (e *EngineImpl) SetReplicaController(c *ManagedReplicaController) { e.replicaController = c }
-func (e *EngineImpl) SetRuntimeFailureHandler(fn func(error))          { e.runtimeFailure = fn }
+func (e *EngineImpl) SetReplicaController(c *ManagedReplicaController)        { e.replicaController = c }
+func (e *EngineImpl) SetSupportReplicaRelay(relay common.SupportReplicaRelay) { e.supportRelay = relay }
+func (e *EngineImpl) SetHostLifecycleController(controller common.HostLifecycleController) {
+	e.HostLifecycle = controller
+}
+func (e *EngineImpl) HostLifecycleController() common.HostLifecycleController { return e.HostLifecycle }
+func (e *EngineImpl) RelayToSupport(ctx context.Context, request common.SupportRelayRequest) error {
+	if e.supportRelay == nil {
+		return fmt.Errorf("support replica relay is not configured")
+	}
+	return e.supportRelay.RelayToSupport(ctx, request)
+}
+func (e *EngineImpl) SetRuntimeFailureHandler(fn func(error)) { e.runtimeFailure = fn }
 func (e *EngineImpl) AddReplica(ctx context.Context, channel string) error {
 	if e.replicaController == nil {
 		return fmt.Errorf("replica controller is not configured")
@@ -264,7 +291,91 @@ func (e *EngineImpl) RemoveReplica(ctx context.Context, channel string) error {
 	return e.replicaController.RemoveReplica(ctx, channel)
 }
 
+func (e *EngineImpl) AutoMoveSnapshot() common.AutoMoveSnapshot {
+	if e.autoMove == nil {
+		return common.AutoMoveSnapshot{}
+	}
+	return e.autoMove.Snapshot()
+}
+
+func (e *EngineImpl) ConfigureAutoMove(source, destination string) (common.AutoMoveSnapshot, error) {
+	if e.autoMove == nil {
+		return common.AutoMoveSnapshot{}, fmt.Errorf("automove state is not configured")
+	}
+	return e.autoMove.Configure(source, destination)
+}
+
+func (e *EngineImpl) EnableAutoMove(ctx context.Context) (common.AutoMoveSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return e.AutoMoveSnapshot(), err
+	}
+	e.autoMoveMu.Lock()
+	defer e.autoMoveMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return e.AutoMoveSnapshot(), err
+	}
+	if e.autoMove == nil {
+		return common.AutoMoveSnapshot{}, fmt.Errorf("automove state is not configured")
+	}
+	snapshot := e.autoMove.SetEnabled(true)
+	present := make(map[string]struct{}, len(e.ReplicaChannels()))
+	for _, channel := range e.ReplicaChannels() {
+		present[channel] = struct{}{}
+	}
+	for _, source := range snapshot.Sources {
+		if _, ok := present[source]; ok {
+			continue
+		}
+		if err := e.AddReplica(ctx, source); err != nil {
+			return e.AutoMoveSnapshot(), err
+		}
+	}
+	return e.AutoMoveSnapshot(), nil
+}
+
+func (e *EngineImpl) DisableAutoMove(ctx context.Context) (common.AutoMoveSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return e.AutoMoveSnapshot(), err
+	}
+	e.autoMoveMu.Lock()
+	defer e.autoMoveMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return e.AutoMoveSnapshot(), err
+	}
+	if e.autoMove == nil {
+		return common.AutoMoveSnapshot{}, fmt.Errorf("automove state is not configured")
+	}
+	snapshot := e.autoMove.SetEnabled(false)
+	present := make(map[string]struct{}, len(e.ReplicaChannels()))
+	for _, channel := range e.ReplicaChannels() {
+		present[channel] = struct{}{}
+	}
+	var first error
+	for _, source := range snapshot.Sources {
+		if _, ok := present[source]; !ok {
+			continue
+		}
+		if err := e.RemoveReplica(ctx, source); err != nil && first == nil {
+			first = err
+		}
+	}
+	return e.AutoMoveSnapshot(), first
+}
+
 func (e *EngineImpl) DispatchMessage(jsonMessage string) {
+	e.DispatchMessageContext(context.Background(), jsonMessage)
+}
+
+func (e *EngineImpl) DispatchMessageContext(ctx context.Context, jsonMessage string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Parse into a map
 	var data map[string]interface{}
 	err := json.Unmarshal([]byte(jsonMessage), &data)
@@ -289,7 +400,13 @@ func (e *EngineImpl) DispatchMessage(jsonMessage string) {
 	case "onlineRemove":
 		e.UserLeftListener.Notify(jsonMessage)
 	case "chat":
-		e.UserChatListener.Notify(jsonMessage)
+		if listener, ok := e.UserChatListener.(interface {
+			NotifyContext(context.Context, string)
+		}); ok {
+			listener.NotifyContext(ctx, jsonMessage)
+		} else {
+			e.UserChatListener.Notify(jsonMessage)
+		}
 	case "info":
 		e.UserInfoListener.Notify(jsonMessage)
 	case "session":
@@ -520,17 +637,6 @@ func (e *EngineImpl) GetName() string {
 	return e.Name
 }
 
-func (e *EngineImpl) EnableCaptcha(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	// Saturn ModServiceImpl.enableCaptcha is the authoritative room protocol.
-	return e.sendOutboundContext(ctx, `{ "cmd": "enablecaptcha"}`)
-}
-
 func (e *EngineImpl) ShadowBan(ctx context.Context, principal string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -586,6 +692,8 @@ func (e *EngineImpl) activePrincipal(principal string) (string, error) {
 	return user.Name, nil
 }
 
+// sendModerationCommand remains for the QA-approved reversal operation. New
+// manual moderation operations use the closed typed payload boundary instead.
 func (e *EngineImpl) sendModerationCommand(ctx context.Context, command string, values map[string]string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -680,6 +788,8 @@ func (e *EngineImpl) SetPrefix(prefix string) {
 }
 
 func (e *EngineImpl) GetPrefix() string {
+	e.prefixMu.RLock()
+	defer e.prefixMu.RUnlock()
 	return e.Prefix
 }
 

@@ -123,7 +123,7 @@ func TestMuteRequiresActiveTargetAndRetainsRawProtocol(t *testing.T) {
 	e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc", Hash: "hash-x"}}}
 	d, _ := commandDefinitionFor("dumb")
 	status, err := d.New(e, moderationMessage("!dumb @merc", false)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"mute","nick":"merc"}`}) || !equalStrings(e.chats, []string{"mod|merc hash-x has been muted|false"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"mute","nick":"Merc"}`}) || !equalStrings(e.chats, []string{"mod|Merc hash-x has been muted|false"}) {
 		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
 	}
 }
@@ -149,13 +149,29 @@ func TestColorAndFlairRequireActiveUserAndUseSourcePayloads(t *testing.T) {
 		}
 		d, _ := commandDefinitionFor(canonical)
 		status, err := d.New(e, moderationMessage(tc.text, false)).Execute(context.Background())
-		if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{tc.raw}) {
+		if status != model.SUCCESSFUL || err != nil || len(e.raws) != 1 || !sameJSONObject(e.raws[0], tc.raw) {
 			t.Fatalf("%s status=%v err=%v raws=%v", tc.text, status, err, e.raws)
 		}
 		if tc.reply != "" && !equalStrings(e.chats, []string{tc.reply}) {
 			t.Fatalf("%s chats=%v", tc.text, e.chats)
 		}
 	}
+}
+
+func sameJSONObject(left, right string) bool {
+	var leftObject, rightObject map[string]any
+	if json.Unmarshal([]byte(left), &leftObject) != nil || json.Unmarshal([]byte(right), &rightObject) != nil {
+		return false
+	}
+	if len(leftObject) != len(rightObject) {
+		return false
+	}
+	for key, value := range leftObject {
+		if rightObject[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func TestOverflowAliasesUseSourceRawAction(t *testing.T) {
@@ -169,23 +185,26 @@ func TestOverflowAliasesUseSourceRawAction(t *testing.T) {
 
 type shadowManagementFake struct {
 	selectors []string
-	rows      []model.BanRecord
+	rows      []repository.ShadowBanRecord
 }
 
-func (f *shadowManagementFake) PersistShadowBanSelector(_ context.Context, name, _ string) error {
-	f.selectors = append(f.selectors, name)
+func (f *shadowManagementFake) PersistShadowBanRecord(_ context.Context, record repository.ShadowBanRecord) error {
+	f.selectors = append(f.selectors, record.Name)
 	return nil
 }
-func (f *shadowManagementFake) ListShadowBans(context.Context) ([]model.BanRecord, error) {
+func (f *shadowManagementFake) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
 	return f.rows, nil
 }
-func (f *shadowManagementFake) RemoveShadowBan(context.Context, string) error { return nil }
+func (f *shadowManagementFake) RemoveShadowBanBySourceTarget(context.Context, string) error {
+	return nil
+}
+func (f *shadowManagementFake) RemoveAllShadowBans(context.Context) error { return nil }
 
-var _ repository.ShadowBanManagementRepository = (*shadowManagementFake)(nil)
+var _ repository.ShadowBanCommandRepository = (*shadowManagementFake)(nil)
 
 func TestShadowBanOfflineSelectorUsesTypedPersistence(t *testing.T) {
 	fake := &shadowManagementFake{}
-	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: fake}}
+	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("sban")
 	status, err := d.New(e, moderationMessage("!sban offline", false)).Execute(context.Background())
 	if status != model.SUCCESSFUL || err != nil || !equalStrings(fake.selectors, []string{"offline"}) || !equalStrings(e.chats, []string{"mod|banned: offline|false"}) {
@@ -194,8 +213,8 @@ func TestShadowBanOfflineSelectorUsesTypedPersistence(t *testing.T) {
 }
 
 func TestShadowBanListRendersSourceShape(t *testing.T) {
-	fake := &shadowManagementFake{rows: []model.BanRecord{{Hash: "raw", Trip: "", Name: "offline"}}}
-	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: fake}}
+	fake := &shadowManagementFake{rows: []repository.ShadowBanRecord{{Hash: "raw", Trip: "", Name: "offline"}}}
+	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("banlist")
 	status, err := d.New(e, moderationMessage("!banlist", true)).Execute(context.Background())
 	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Banned hashes, trips, names: \\nraw - ------ - offline\\n|true"}) {
@@ -205,7 +224,7 @@ func TestShadowBanListRendersSourceShape(t *testing.T) {
 
 func TestUnshadowBanRemovesTypedSelector(t *testing.T) {
 	fake := &shadowManagementFake{}
-	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: fake}}
+	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("unblock")
 	status, err := d.New(e, moderationMessage("!unblock target", false)).Execute(context.Background())
 	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod| unbanned target|false"}) {

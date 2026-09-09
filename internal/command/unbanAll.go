@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -28,6 +29,5 @@ func (u *UnbanAll) NewInstance(engine common.Engine, chatMessage *model.ChatMess
 }
 
 func (u *UnbanAll) Execute() {
-	u.engine.UnbanAll()
-	u.engine.SendChatMessage(u.chatMessage.Name, "mercy.", u.chatMessage.IsWhisper)
+	_, _ = (&simpleUnbanAllCommand{commandBase: commandBase{engine: u.engine, message: u.chatMessage}}).Execute(context.Background())
 }

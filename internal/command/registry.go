@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
@@ -14,6 +15,115 @@ type saturnCommand struct {
 	role      model.Role
 	aliases   []string
 	canonical string
+}
+
+type replicaCommand struct{ commandBase }
+type replicaOffCommand struct{ commandBase }
+type replicaStatusCommand struct{ commandBase }
+
+func (c *replicaCommand) Execute(ctx context.Context) (model.Status, error) {
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	controller, ok := c.engine.(ReplicaController)
+	if !ok {
+		return model.FAILED, fmt.Errorf("replica controller is not configured")
+	}
+	channel, err := ParseReplicaChannel(c.message.GetArguments())
+	if err != nil {
+		if hasBlankReplicaChannel(c.message.Text, c.message.GetArguments()) {
+			reply(&c.commandBase, "I'm the host bot serving current channel. Example: "+c.engine.GetPrefix()+"replica lounge")
+		} else {
+			reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"replica lounge")
+		}
+		return model.FAILED, nil
+	}
+	if channel == c.engine.GetChannel() {
+		reply(&c.commandBase, "I'm the host bot serving current channel. Example: "+c.engine.GetPrefix()+"replica lounge")
+		return model.FAILED, nil
+	}
+	for _, existing := range controller.ReplicaChannels() {
+		if existing == channel {
+			reply(&c.commandBase, "Channel "+channel+" already has a replica running.")
+			return model.FAILED, nil
+		}
+	}
+	if err := controller.AddReplica(ctx, channel); err != nil {
+		return model.FAILED, err
+	}
+	reply(&c.commandBase, fmt.Sprintf("started replica in channel: %s successfully. Number of replicas: %d", channel, len(controller.ReplicaChannels())))
+	return model.SUCCESSFUL, nil
+}
+func (c *replicaOffCommand) Execute(ctx context.Context) (model.Status, error) {
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	controller, ok := c.engine.(ReplicaController)
+	if !ok {
+		return model.FAILED, fmt.Errorf("replica controller is not configured")
+	}
+	channel, err := ParseReplicaChannel(c.message.GetArguments())
+	if err != nil {
+		if hasBlankReplicaChannel(c.message.Text, c.message.GetArguments()) {
+			reply(&c.commandBase, "I'm the host bot serving current channel, not a replica.")
+		} else {
+			reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"replicaoff lounge")
+		}
+		return model.FAILED, nil
+	}
+	if channel == c.engine.GetChannel() {
+		reply(&c.commandBase, "I'm the host bot serving current channel, not a replica.")
+		return model.FAILED, nil
+	}
+	found := false
+	for _, existing := range controller.ReplicaChannels() {
+		if existing == channel {
+			found = true
+			break
+		}
+	}
+	if !found {
+		reply(&c.commandBase, "No replica in channel: "+channel)
+		return model.FAILED, nil
+	}
+	if err := controller.RemoveReplica(ctx, channel); err != nil {
+		return model.FAILED, err
+	}
+	reply(&c.commandBase, "Successfully shut down replica in channel: "+channel)
+	return model.SUCCESSFUL, nil
+}
+func (c *replicaStatusCommand) Execute(ctx context.Context) (model.Status, error) {
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	controller, ok := c.engine.(ReplicaController)
+	if !ok {
+		return model.FAILED, fmt.Errorf("replica controller is not configured")
+	}
+	channels := append([]string(nil), controller.ReplicaChannels()...)
+	sort.Strings(channels)
+	serving := strings.Join(channels, ", ")
+	if serving == "" {
+		serving = "none"
+	}
+	reply(&c.commandBase, fmt.Sprintf("Host room:%s, replicas active: %d \\nServing channels: %s", c.engine.GetChannel(), len(channels), serving))
+	return model.SUCCESSFUL, nil
+}
+
+func (c *replicaCommand) Role() model.Role        { return c.role }
+func (c *replicaOffCommand) Role() model.Role     { return c.role }
+func (c *replicaStatusCommand) Role() model.Role  { return c.role }
+func (c *replicaCommand) Aliases() []string       { return append([]string(nil), c.aliases...) }
+func (c *replicaOffCommand) Aliases() []string    { return append([]string(nil), c.aliases...) }
+func (c *replicaStatusCommand) Aliases() []string { return append([]string(nil), c.aliases...) }
+func (c *replicaCommand) NewInstance(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
+	return newCommand(c.canonical, c.aliases, c.role, e, m)
+}
+func (c *replicaOffCommand) NewInstance(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
+	return newCommand(c.canonical, c.aliases, c.role, e, m)
+}
+func (c *replicaStatusCommand) NewInstance(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
+	return newCommand(c.canonical, c.aliases, c.role, e, m)
 }
 
 func (c *saturnCommand) Execute(context.Context) (model.Status, error) {
@@ -50,43 +160,6 @@ func (c *saturnCommand) Execute(context.Context) (model.Status, error) {
 		} else {
 			reply(&commandBase{engine: c.engine, message: c.message}, " "+args[0])
 		}
-	case "msgchannel", "ws", "wsa":
-		room, text, err := ParseMsgChannel(c.message.GetArguments())
-		if err != nil {
-			return model.FAILED, err
-		}
-		if room == strings.TrimSpace(c.engine.GetChannel()) {
-			_, err = c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper)
-			return model.SUCCESSFUL, err
-		}
-		return model.FAILED, fmt.Errorf("remote room delivery is not configured")
-	case "replica":
-		controller, ok := c.engine.(ReplicaController)
-		if !ok {
-			return model.FAILED, fmt.Errorf("replica controller is not configured")
-		}
-		channel, err := ParseReplicaChannel(c.message.GetArguments())
-		if err != nil {
-			return model.FAILED, err
-		}
-		if err = controller.AddReplica(context.Background(), channel); err != nil {
-			return model.FAILED, err
-		}
-		reply(&commandBase{engine: c.engine, message: c.message}, ReplicaReply(len(controller.ReplicaChannels())))
-	case "replicaoff":
-		controller, ok := c.engine.(ReplicaController)
-		if !ok {
-			return model.FAILED, fmt.Errorf("replica controller is not configured")
-		}
-		if err := ReplicaOff(context.Background(), controller, c.message.GetArguments()); err != nil {
-			return model.FAILED, err
-		}
-	case "replicastatus":
-		controller, ok := c.engine.(ReplicaController)
-		if !ok {
-			return model.FAILED, fmt.Errorf("replica controller is not configured")
-		}
-		reply(&commandBase{engine: c.engine, message: c.message}, ReplicaStatusReply(c.engine.GetChannel(), controller.ReplicaChannels()))
 	case "whiskey":
 		return model.FAILED, fmt.Errorf("whiskey proxy configuration is unavailable")
 	case "access", "memory", "mine", "prefix", "restart", "shutdown", "sql":

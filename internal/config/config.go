@@ -17,6 +17,7 @@ type Config struct {
 	Password                          string      `toml:"password"`
 	Channel                           string      `toml:"channel"`
 	AdminTrips                        []string    `toml:"adminTrips"`
+	UserTrips                         []string    `toml:"userTrips"`
 	AutoReconnect                     bool        `toml:"autoReconnect"`
 	ConnectionHeartbitIntervalMinutes int         `toml:"healthCheckInterval"`
 	AutorunCommands                   []string    `toml:"autorunCommands"`

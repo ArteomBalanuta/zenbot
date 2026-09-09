@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
-	"zenbot/internal/agent/runtime"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -19,14 +17,21 @@ type commandBase struct {
 	canonical string
 }
 
-// DirectAgentInvoker is the narrow direct-command boundary supplied by application composition.
+// DirectAgentSubmitter is the narrow command-to-live-runtime boundary.
+type DirectAgentSubmitter interface {
+	Submit(context.Context, *model.ChatMessage, string) error
+}
+
+// DirectAgentInvoker preserves the original synchronous composition contract.
+// New command registration uses DirectAgentSubmitter so direct and ambient
+// requests share one process-owned runtime.
 type DirectAgentInvoker interface {
 	Invoke(context.Context, *model.ChatMessage, string) (string, error)
 }
 
 type directLCommand struct {
 	commandBase
-	invoker DirectAgentInvoker
+	submitter DirectAgentSubmitter
 }
 
 func (c *directLCommand) Execute(ctx context.Context) (model.Status, error) {
@@ -37,47 +42,14 @@ func (c *directLCommand) Execute(ctx context.Context) (model.Status, error) {
 	if prompt == "" {
 		return model.FAILED, fmt.Errorf("l requires a prompt")
 	}
-	var text string
-	var completion runtime.DirectCompletion
-	var hasCompletion bool
-	var err error
-	if artifact, ok := c.invoker.(interface {
-		InvokeCompletion(context.Context, *model.ChatMessage, string) (runtime.DirectCompletion, error)
-	}); ok {
-		completion, err = artifact.InvokeCompletion(ctx, c.message, prompt)
-		text, hasCompletion = completion.Text(), true
-	} else {
-		text, err = c.invoker.Invoke(ctx, c.message, prompt)
-	}
-	if err != nil {
+	if err := c.submitter.Submit(ctx, c.message, prompt); err != nil {
 		return model.FAILED, err
-	}
-	if strings.TrimSpace(text) == "" {
-		return model.SUCCESSFUL, nil
-	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
-		return model.FAILED, err
-	}
-	if hasCompletion {
-		if persistent, ok := c.invoker.(interface {
-			PersistDelivery(context.Context, *model.ChatMessage, string, runtime.DirectCompletion) error
-		}); ok {
-			if err := persistent.PersistDelivery(ctx, c.message, prompt, completion); err != nil {
-				log.Printf("agent tool evidence persistence failed")
-			}
-		}
-	} else if persistent, ok := c.invoker.(interface {
-		Persist(context.Context, *model.ChatMessage, string, string) error
-	}); ok {
-		if err := persistent.Persist(ctx, c.message, prompt, text); err != nil {
-			log.Printf("agent memory persistence failed")
-		}
 	}
 	return model.SUCCESSFUL, nil
 }
 
-func directLDefinition(invoker DirectAgentInvoker) (common.CommandDefinition, bool) {
-	if invoker == nil {
+func directLDefinition(submitter DirectAgentSubmitter) (common.CommandDefinition, bool) {
+	if submitter == nil {
 		return common.CommandDefinition{}, false
 	}
 	definition, ok := commandDefinitionFor("l")
@@ -85,7 +57,7 @@ func directLDefinition(invoker DirectAgentInvoker) (common.CommandDefinition, bo
 		return common.CommandDefinition{}, false
 	}
 	definition.New = func(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
-		return &directLCommand{commandBase: commandBase{engine: e, message: m, role: definition.Role, aliases: definition.Aliases, canonical: definition.Canonical}, invoker: invoker}
+		return &directLCommand{commandBase: commandBase{engine: e, message: m, role: definition.Role, aliases: definition.Aliases, canonical: definition.Canonical}, submitter: submitter}
 	}
 	return definition, true
 }
@@ -337,44 +309,48 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 		return &listCommand{b}
 	case "info":
 		return &infoUserCommand{b}
-	case "users":
-		return &usersCommand{b}
-	case "nicks":
-		return &nicksCommand{b}
-	case "help":
-		return &helpCommand{b}
-	case "ban":
-		return &banCommand{b}
-	case "kick":
-		return &kickCommand{b}
-	case "unban":
-		return &unbanCommand{b}
-	case "unbanall":
-		return &unbanAllCommand{b}
-	case "register":
-		return &registerCommand{b}
-	case "authorize":
-		return &authorizeCommand{b}
-	case "deauthorize":
-		return &deauthorizeCommand{b}
-	case "captcha":
-		return &captchaCommand{b}
+	case "lastonline":
+		return &lastonlineCommand{b}
+	case "active":
+		return &activityCommand{b}
+	case "shadowbanlist":
+		return &shadowBanListCommand{b}
+	case "shadowban":
+		return &shadowBanCommand{b}
+	case "unshadowban":
+		return &unshadowBanCommand{b}
 	case "mute":
 		return &muteCommand{b}
 	case "unmute":
 		return &unmuteCommand{b}
 	case "color":
-		return &profileCommand{commandBase: b}
+		return &colorCommand{b}
 	case "flair":
-		return &profileCommand{commandBase: b, flair: true}
-	case "overflow":
-		return &overflowCommand{b}
-	case "shadowban":
-		return &shadowBanCommand{b}
-	case "shadowbanlist":
-		return &shadowBanListCommand{b}
-	case "unshadowban":
-		return &unshadowBanCommand{b}
+		return &flairCommand{b}
+	case "users":
+		return &usersCommand{b}
+	case "nicks":
+		return &nicksCommand{b}
+	case "nuke":
+		return &nukeCommand{b}
+	case "resurrect":
+		return &resurrectCommand{b}
+	case "help":
+		return &helpCommand{b}
+	case "ban":
+		return &simpleBanCommand{b}
+	case "kick":
+		return &kickCommand{b}
+	case "unban":
+		return &simpleUnbanCommand{b}
+	case "unbanall":
+		return &simpleUnbanAllCommand{b}
+	case "register":
+		return &registerCommand{b}
+	case "authorize":
+		return &moderationIdentityCommand{commandBase: b}
+	case "deauthorize":
+		return &deauthorizeCommand{commandBase: b}
 	case "access":
 		return &accessCommand{b}
 	case "messages":
@@ -384,15 +360,37 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 	case "dbzregister", "dbzstats", "dbzstr", "dfight", "dbzhelp", "dspawn":
 		return &dbzCommand{b}
 	case "lock":
-		return &lockCommand{b}
+		return &simpleLockCommand{b}
+	case "captcha":
+		return &captchaCommand{b}
+	case "overflow":
+		return &overflowCommand{b}
 	case "unlock":
 		return &unlockCommand{b}
 	case "memory":
 		return &memoryCommand{b}
 	case "prefix":
 		return &prefixCommand{b}
-	case "lastonline":
-		return &lastOnlineCommand{b}
+	case "automove":
+		return &automoveCommand{b}
+	case "replica":
+		return &replicaCommand{b}
+	case "replicaoff":
+		return &replicaOffCommand{b}
+	case "replicastatus":
+		return &replicaStatusCommand{b}
+	case "ws":
+		return &supportRelayCommand{commandBase: b}
+	case "wsa":
+		return &supportRelayCommand{commandBase: b, anonymous: true}
+	case "msgchannel":
+		return &msgChannelCommand{commandBase: b}
+	case "restart":
+		return &restartCommand{commandBase: b}
+	case "shutdown":
+		return &shutdownCommand{commandBase: b}
+	case "sql":
+		return &sqlCommand{commandBase: b}
 	default:
 		return &saturnCommand{engine: e, message: m, role: role, aliases: aliases, canonical: canonical}
 	}

@@ -8,9 +8,9 @@ import (
 	"zenbot/internal/model"
 )
 
-type lastOnlineCommand struct{ commandBase }
+type lastonlineCommand struct{ commandBase }
 
-func (c *lastOnlineCommand) Execute(ctx context.Context) (model.Status, error) {
+func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
@@ -20,16 +20,18 @@ func (c *lastOnlineCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, nil
 	}
 	target := strings.TrimSpace(arguments[0])
-	target = strings.TrimSpace(strings.TrimPrefix(target, "@"))
+	if strings.HasPrefix(target, "@") {
+		target = strings.TrimSpace(strings.TrimPrefix(target, "@"))
+	}
 	if target == "" {
 		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc")
 		return model.FAILED, nil
 	}
-	s := userService(c.engine)
-	if s == nil {
-		return model.FAILED, fmt.Errorf("user service unavailable")
+	services := bundle(c.engine)
+	if services == nil || services.Users == nil || (services.Users.Queries == nil && services.Users.LastSeen == nil) {
+		return model.FAILED, fmt.Errorf("last-online user queries unavailable")
 	}
-	text, err := s.LastOnline(ctx, target)
+	text, err := services.Users.LastOnline(ctx, target)
 	if err != nil {
 		return model.FAILED, err
 	}

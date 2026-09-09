@@ -2,8 +2,6 @@ package command
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 
 	"zenbot/internal/model"
 )
@@ -14,20 +12,28 @@ func (c *captchaCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	mode := "on"
-	if a := args(c.message); len(a) > 0 {
-		mode = strings.TrimSpace(a[0])
+	argument, present := firstModerationArgument(c.message)
+	operations, err := moderationOperations(c.engine)
+	if err != nil {
+		return model.FAILED, err
 	}
-	cmd, replyText := "enablecaptcha", " Captcha enabled!"
-	if mode == "off" {
-		cmd, replyText = "disablecaptcha", " Captcha disabled!"
-	}
-	if mode != "on" && mode != "off" {
+	switch {
+	case !present || argument == "on":
+		err = operations.EnableCaptcha(ctx)
+		if err == nil {
+			reply(&c.commandBase, " Captcha enabled!")
+		}
+	case argument == "off":
+		err = operations.DisableCaptcha(ctx)
+		if err == nil {
+			reply(&c.commandBase, " Captcha disabled!")
+		}
+	default:
 		reply(&c.commandBase, c.engine.GetPrefix()+"captcha [on|off]")
 		return model.FAILED, nil
 	}
-	payload, _ := json.Marshal(map[string]string{"cmd": cmd})
-	c.engine.SendRawMessage(string(payload))
-	reply(&c.commandBase, replyText)
+	if err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

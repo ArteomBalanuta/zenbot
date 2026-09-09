@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
 )
 
 type shadowBanListCommand struct{ commandBase }
@@ -14,26 +15,33 @@ func (c *shadowBanListCommand) Execute(ctx context.Context) (model.Status, error
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	b := bundle(c.engine)
-	if b == nil || b.ShadowBans == nil {
-		return model.FAILED, fmt.Errorf("shadow-ban persistence unavailable")
-	}
-	rows, err := b.ShadowBans.ListShadowBans(ctx)
+	service, err := shadowBanService(c.engine)
 	if err != nil {
 		return model.FAILED, err
 	}
-	if len(rows) == 0 {
+	records, err := service.List(ctx)
+	if err != nil {
+		return model.FAILED, err
+	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	if len(records) == 0 {
 		reply(&c.commandBase, "No users has been banned.")
 		return model.SUCCESSFUL, nil
 	}
+	reply(&c.commandBase, "Banned hashes, trips, names: \\n"+formatShadowBanRecords(records))
+	return model.SUCCESSFUL, nil
+}
+
+func formatShadowBanRecords(records []repository.ShadowBanRecord) string {
 	var out strings.Builder
-	for _, r := range rows {
-		trip := r.Trip
+	for _, record := range records {
+		trip := record.Trip
 		if trip == "" {
 			trip = "------"
 		}
-		out.WriteString(r.Hash + " - " + trip + " - " + r.Name + "\\n")
+		fmt.Fprintf(&out, "%s - %s - %s\\n", record.Hash, trip, record.Name)
 	}
-	reply(&c.commandBase, "Banned hashes, trips, names: \\n"+out.String())
-	return model.SUCCESSFUL, nil
+	return out.String()
 }

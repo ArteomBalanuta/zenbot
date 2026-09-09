@@ -16,6 +16,21 @@ func roomDirectoryEngine(room string, names ...string) *EngineImpl {
 	return &EngineImpl{Channel: room, ActiveUsers: users}
 }
 
+func TestEngineRoomUserDirectoryRebindsHostWithoutReplacingPersistentDirectory(t *testing.T) {
+	old := roomDirectoryEngine("old", "old-user")
+	next := roomDirectoryEngine("new", "new-user")
+	directory := NewEngineRoomUserDirectory(old, NewReplicaManager(old.Channel))
+
+	directory.RebindHost(next)
+	snapshot, ok := directory.FindRoomUsers("new")
+	if !ok || snapshot.Room != "new" || len(snapshot.Users) != 1 || snapshot.Users[0] != "new-user" {
+		t.Fatalf("rebound snapshot=%#v ok=%v", snapshot, ok)
+	}
+	if _, ok := directory.FindRoomUsers("old"); ok {
+		t.Fatal("persistent directory retained the retired host")
+	}
+}
+
 func TestEngineRoomUserDirectoryFindsManagedHostAndReplicaSnapshots(t *testing.T) {
 	host := roomDirectoryEngine("Lounge", "host")
 	replica := roomDirectoryEngine("Games", "replica")

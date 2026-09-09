@@ -2,10 +2,10 @@ package command
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 
+	"zenbot/internal/common"
 	"zenbot/internal/model"
+	"zenbot/internal/util"
 )
 
 type profileCommand struct {
@@ -14,39 +14,61 @@ type profileCommand struct {
 }
 
 func (c *profileCommand) Execute(ctx context.Context) (model.Status, error) {
+	kind, example := "color", "00ff00"
+	apply := func(operations common.ModerationOperations, target common.NickTarget, value string) error {
+		return operations.ForceColor(ctx, target, common.Color(value))
+	}
+	if c.flair {
+		kind, example = "flair", "trusted"
+		apply = func(operations common.ModerationOperations, target common.NickTarget, value string) error {
+			return operations.ForceFlair(ctx, target, common.Flair(value))
+		}
+	}
+	return executeAppearance(ctx, &c.commandBase, kind, example, apply)
+}
+
+type colorCommand struct{ commandBase }
+type flairCommand struct{ commandBase }
+
+func (c *colorCommand) Execute(ctx context.Context) (model.Status, error) {
+	return (&profileCommand{commandBase: c.commandBase}).Execute(ctx)
+}
+
+func (c *flairCommand) Execute(ctx context.Context) (model.Status, error) {
+	return (&profileCommand{commandBase: c.commandBase, flair: true}).Execute(ctx)
+}
+
+func executeAppearance(ctx context.Context, base *commandBase, kind, example string, apply func(common.ModerationOperations, common.NickTarget, string) error) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	a := args(c.message)
-	kind, example := "color", "color merc 00ff00"
-	if c.flair {
-		kind, example = "flair", "flair merc trusted"
-	}
-	if len(a) < 2 {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+example)
+	arguments := args(base.message)
+	if len(arguments) < 2 {
+		reply(base, "\\n Example: "+base.engine.GetPrefix()+kind+" merc "+example)
 		return model.FAILED, nil
 	}
-	target := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(a[0]), "@"))
-	if target == "" {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+example)
+	target, err := activeModerationTarget(base.engine, arguments[0])
+	if err != nil {
+		reply(base, base.engine.GetPrefix()+kind+" merc "+example)
 		return model.FAILED, nil
 	}
-	active := false
-	for u := range *c.engine.GetActiveUsers() {
-		if u != nil && strings.EqualFold(u.Name, target) {
-			active = true
-			break
-		}
-	}
-	if !active {
-		reply(&c.commandBase, "User "+target+" is not in the room, "+kind+" was not applied.")
+	nick, _ := util.NormalizeNickTarget(&arguments[0])
+	if target == nil {
+		reply(base, "User "+nick+" is not in the room, "+kind+" was not applied.")
 		return model.FAILED, nil
 	}
-	payload := map[string]string{"cmd": "force" + kind, "nick": target, kind: strings.TrimSpace(a[1])}
-	body, _ := json.Marshal(payload)
-	c.engine.SendRawMessage(string(body))
-	if c.flair {
-		reply(&c.commandBase, "\\n Flair set successfully!")
+	operations, err := moderationOperations(base.engine)
+	if err != nil {
+		return model.FAILED, err
+	}
+	if err := apply(operations, common.NickTarget(target.Name), arguments[1]); err != nil {
+		return model.FAILED, err
+	}
+	if kind == "flair" {
+		reply(base, "\\n Flair set successfully!")
 	}
 	return model.SUCCESSFUL, nil
 }
+
+var _ common.SaturnCommand = (*colorCommand)(nil)
+var _ common.SaturnCommand = (*flairCommand)(nil)

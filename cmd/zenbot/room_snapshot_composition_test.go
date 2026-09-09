@@ -1,0 +1,79 @@
+package main
+
+import (
+	"testing"
+
+	"zenbot/internal/common"
+	"zenbot/internal/config"
+	"zenbot/internal/core"
+	"zenbot/internal/factory"
+	"zenbot/internal/listener/snapshot"
+	"zenbot/internal/model"
+)
+
+func TestMasterBindingSnapshotReplyUsesReboundMaster(t *testing.T) {
+	old := &core.EngineImpl{OutMessageQueue: make(chan string, 1)}
+	next := &core.EngineImpl{OutMessageQueue: make(chan string, 1)}
+	binding := newMasterBinding(old)
+	sink := roomSnapshotReplySink(masterReplySender(binding))
+
+	binding.Rebind(next)
+	sink(snapshot.RoomSnapshotRequest{Author: "alice"}, "reply")
+
+	select {
+	case <-old.OutMessageQueue:
+		t.Fatal("snapshot reply was sent through the retired master")
+	default:
+	}
+	select {
+	case <-next.OutMessageQueue:
+	default:
+		t.Fatal("snapshot reply was not sent through the rebound master")
+	}
+}
+
+func TestRoomSnapshotReplySinkPreservesRequestWhisperMode(t *testing.T) {
+	type delivery struct {
+		author  string
+		reply   string
+		whisper bool
+	}
+	var deliveries []delivery
+	sink := roomSnapshotReplySink(func(author, reply string, whisper bool) (string, error) {
+		deliveries = append(deliveries, delivery{author: author, reply: reply, whisper: whisper})
+		return "", nil
+	})
+
+	sink(snapshot.RoomSnapshotRequest{Author: "whisper-author", Whisper: true}, "private")
+	sink(snapshot.RoomSnapshotRequest{Author: "public-author", Whisper: false}, "public")
+
+	if len(deliveries) != 2 || deliveries[0] != (delivery{"whisper-author", "private", true}) || deliveries[1] != (delivery{"public-author", "public", false}) {
+		t.Fatalf("deliveries = %#v, want exact author/reply/whisper delivery", deliveries)
+	}
+}
+
+func TestRoomSnapshotEngineOptionsInstallsCoordinatorOnMaster(t *testing.T) {
+	cfg := &config.Config{Channel: "source", Name: "bot", WebsocketUrl: "ws://example.test"}
+	opts := newRoomSnapshotEngineOptions(cfg, nil, func(snapshot.RoomSnapshotRequest, string) {})
+	if opts.SessionRegistry == nil || opts.SnapshotCoordinator == nil {
+		t.Fatalf("snapshot options = %#v, want registry and coordinator", opts)
+	}
+
+	engine, err := factory.NewEngineWithOptions(model.MASTER, cfg, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := any(engine).(common.RoomSnapshotSubmitter); !ok {
+		t.Fatal("master is missing room snapshot submitter")
+	}
+	if _, ok := any(engine).(common.LiveRoomMover); !ok {
+		t.Fatal("master is missing live room mover")
+	}
+	request := snapshot.RoomSnapshotRequest{WorkflowID: "workflow", Author: "author", SourceChannel: "source", TargetChannel: "target"}
+	if err := engine.SubmitRoomSnapshot(request); err == nil || err.Error() != "operation cannot be nil" {
+		t.Fatalf("SubmitRoomSnapshot() error = %v, want coordinator validation error", err)
+	}
+	if got := opts.SessionRegistry.Len(); got != 0 {
+		t.Fatalf("temporary registry length = %d, want 0", got)
+	}
+}

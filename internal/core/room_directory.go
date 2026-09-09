@@ -2,6 +2,7 @@ package core
 
 import (
 	"strings"
+	"sync"
 
 	"zenbot/internal/agent/tool/contract"
 )
@@ -17,17 +18,52 @@ type RoomUserDirectory interface {
 // EngineRoomUserDirectory reads the host and currently registered managed engines.
 // It does not own engine or replica lifecycle.
 type EngineRoomUserDirectory struct {
+	// Host is retained for compatibility with statically composed directories.
+	// New production composition uses binding so a persistent directory follows
+	// each fresh master generation.
 	Host     *EngineImpl
 	Replicas *ReplicaManager
+	binding  *roomDirectoryHostBinding
+}
+
+type roomDirectoryHostBinding struct {
+	mu   sync.RWMutex
+	host *EngineImpl
+}
+
+func NewEngineRoomUserDirectory(host *EngineImpl, replicas *ReplicaManager) *EngineRoomUserDirectory {
+	return &EngineRoomUserDirectory{Host: host, Replicas: replicas, binding: &roomDirectoryHostBinding{host: host}}
+}
+
+func (d *EngineRoomUserDirectory) RebindHost(next *EngineImpl) {
+	if d == nil || next == nil {
+		return
+	}
+	if d.binding == nil {
+		d.binding = &roomDirectoryHostBinding{host: d.Host}
+	}
+	d.binding.mu.Lock()
+	d.binding.host = next
+	d.binding.mu.Unlock()
+}
+
+func (d EngineRoomUserDirectory) currentHost() *EngineImpl {
+	if d.binding == nil {
+		return d.Host
+	}
+	d.binding.mu.RLock()
+	defer d.binding.mu.RUnlock()
+	return d.binding.host
 }
 
 func (d EngineRoomUserDirectory) FindRoomUsers(room string) (RoomUserSnapshot, bool) {
 	lookup := strings.TrimSpace(room)
-	if lookup == "" || d.Host == nil {
+	host := d.currentHost()
+	if lookup == "" || host == nil {
 		return RoomUserSnapshot{}, false
 	}
-	if strings.EqualFold(lookup, d.Host.GetChannel()) {
-		return roomUserSnapshot(d.Host), true
+	if strings.EqualFold(lookup, host.GetChannel()) {
+		return roomUserSnapshot(host), true
 	}
 	if d.Replicas == nil {
 		return RoomUserSnapshot{}, false
