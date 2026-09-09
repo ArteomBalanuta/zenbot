@@ -2,6 +2,7 @@ package h2
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"zenbot/internal/repository"
@@ -44,5 +45,52 @@ func TestUserQueriesPreserveSaturnRowsAndTripNormalization(t *testing.T) {
 	}
 	if len(nicks) != 2 || !seen["zeta"] || !seen["alpha"] {
 		t.Fatalf("nicks=%v, want distinct zeta and alpha", nicks)
+	}
+}
+
+func TestUserTripsUsesSaturnLoungeTripQuery(t *testing.T) {
+	const want = "SELECT trip FROM trips WHERE type = 'USER';"
+	if selectUserTrips != want {
+		t.Fatalf("selectUserTrips = %q, want source-exact %q", selectUserTrips, want)
+	}
+}
+
+func TestUserTripsReturnsOnlyUserTripsWithOriginalCase(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	for _, statement := range []string{
+		"INSERT INTO trips(type,trip,created_on) VALUES('USER','Trip-Alpha',1)",
+		"INSERT INTO trips(type,trip,created_on) VALUES('MODERATOR','Trip-Moderator',2)",
+		"INSERT INTO trips(type,trip,created_on) VALUES('USER','trip-beta',3)",
+		"INSERT INTO trips(type,trip,created_on) VALUES('PEST','trip-pest',4)",
+	} {
+		if _, err := d.DB.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	trips, err := d.UserTrips(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Trip-Alpha", "trip-beta"}
+	if len(trips) != len(want) {
+		t.Fatalf("trips=%v, want %v", trips, want)
+	}
+	for i := range want {
+		if trips[i] != want[i] {
+			t.Fatalf("trips=%v, want %v", trips, want)
+		}
+	}
+}
+
+func TestUserTripsPropagatesCanceledContext(t *testing.T) {
+	d := openTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := d.UserTrips(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("UserTrips error = %v, want context.Canceled", err)
 	}
 }

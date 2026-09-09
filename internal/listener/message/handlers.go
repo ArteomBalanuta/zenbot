@@ -166,7 +166,38 @@ func (h AgentParticipation) Handle(ctx context.Context, c *Context) (bool, error
 
 type DispatchUserCommand struct{}
 
-func (DispatchUserCommand) Handle(_ context.Context, c *Context) (bool, error) {
+type contextCommand interface {
+	ExecuteContext(context.Context)
+}
+
+type lifecycleDispatchController interface {
+	BeginDispatch() func()
+}
+
+type lifecycleControllerProvider interface {
+	HostLifecycleController() common.HostLifecycleController
+}
+
+func releaseLifecycleDispatch(engine common.Engine) func() {
+	provider, ok := engine.(lifecycleControllerProvider)
+	if !ok || provider.HostLifecycleController() == nil {
+		return func() {}
+	}
+	controller, ok := provider.HostLifecycleController().(lifecycleDispatchController)
+	if !ok {
+		return func() {}
+	}
+	return controller.BeginDispatch()
+}
+
+func isCommandAuthorized(engine common.Engine, cmd common.Command, author *model.User) bool {
+	if authorizer, ok := cmd.(common.CommandAuthorizer); ok {
+		return authorizer.Authorize(author)
+	}
+	return engine.IsUserAuthorized(author, cmd.GetRole())
+}
+
+func (DispatchUserCommand) Handle(ctx context.Context, c *Context) (bool, error) {
 	text := strings.TrimSpace(c.Message.Text)
 	if !strings.HasPrefix(text, c.Engine.GetPrefix()) {
 		return false, nil
@@ -179,13 +210,19 @@ func (DispatchUserCommand) Handle(_ context.Context, c *Context) (bool, error) {
 	if cmd == nil {
 		return false, nil
 	}
-	if c.Author == nil || !c.Engine.IsUserAuthorized(c.Author, cmd.GetRole()) {
+	if c.Author == nil || !isCommandAuthorized(c.Engine, cmd, c.Author) {
 		if c.Author != nil {
 			_, _ = c.Engine.SendChatMessage(c.Author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", fields[0]), c.Message.IsWhisper)
 		}
 		return false, nil
 	}
-	cmd.Execute()
+	releaseDispatch := releaseLifecycleDispatch(c.Engine)
+	defer releaseDispatch()
+	if contextual, ok := cmd.(contextCommand); ok {
+		contextual.ExecuteContext(ctx)
+	} else {
+		cmd.Execute()
+	}
 	return false, nil
 }
 func DefaultChain() *Chain {

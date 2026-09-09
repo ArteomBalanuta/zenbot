@@ -25,6 +25,32 @@ type ShadowBanRepository interface {
 	PersistShadowBan(context.Context, model.User, string) error
 }
 
+// ShadowBanRecord is Saturn's local banned_users identity tuple. Hash is raw
+// UTF-8 at this boundary; H2 encodes it for storage and decodes it on reads.
+// Empty fields represent the source's nullable identity fields.
+type ShadowBanRecord struct {
+	Trip   string
+	Name   string
+	Hash   string
+	Reason string
+}
+
+// ShadowBanCommandRepository is the typed persistence boundary used only by
+// the public shadow-ban command family. It deliberately contains no agent
+// policy or transport operation.
+type ShadowBanCommandRepository interface {
+	PersistShadowBanRecord(context.Context, ShadowBanRecord) error
+	ListShadowBans(context.Context) ([]ShadowBanRecord, error)
+	RemoveShadowBanBySourceTarget(context.Context, string) error
+	RemoveAllShadowBans(context.Context) error
+}
+
+// ShadowBanReversalRepository removes source-compatible shadow-ban identity
+// records for a captured authoritative target.
+type ShadowBanReversalRepository interface {
+	RemoveShadowBanBySourceTarget(context.Context, string) error
+}
+
 type Repository interface {
 	LogMessage(trip, name, hash, message, channel string) (int64, error)
 	LogPresence(trip, name, hash, eventType, channel string) (int64, error)

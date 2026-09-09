@@ -53,7 +53,7 @@ func (s *DBZService) StatsText(ctx context.Context, name string) (string, error)
 func (s *DBZService) FreeStats(ctx context.Context, name string) (int, error) {
 	n, ok, err := s.Repo.FreeStats(ctx, name)
 	if err != nil {
-		return -1, err
+		return -1, nil
 	}
 	if !ok {
 		return -1, nil

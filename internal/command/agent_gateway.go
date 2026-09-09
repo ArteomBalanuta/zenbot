@@ -21,6 +21,25 @@ func NewAgentCommandGateway(engine common.Engine) AgentCommandGateway {
 	return agentCommandGateway{engine: engine}
 }
 
+// NewResolvingAgentCommandGateway resolves the current master once for each
+// request so a persistent agent runtime never retains a retired host.
+func NewResolvingAgentCommandGateway(resolve func() common.Engine) AgentCommandGateway {
+	return resolvingAgentCommandGateway{resolve: resolve}
+}
+
+type resolvingAgentCommandGateway struct{ resolve func() common.Engine }
+
+func (g resolvingAgentCommandGateway) Execute(ctx context.Context, caller api.Context, command, arguments string) (CommandExecution, error) {
+	if g.resolve == nil {
+		return CommandExecution{}, fmt.Errorf("command gateway is unavailable")
+	}
+	engine := g.resolve()
+	if engine == nil {
+		return CommandExecution{}, fmt.Errorf("command gateway is unavailable")
+	}
+	return NewAgentCommandGateway(engine).Execute(ctx, caller, command, arguments)
+}
+
 var publicAgentCommandAliases = map[string]struct{}{
 	"help": {}, "h": {}, "list": {}, "users": {}, "info": {}, "ping": {}, "p": {},
 	"weather": {}, "w": {}, "time": {}, "t": {}, "version": {}, "v": {},

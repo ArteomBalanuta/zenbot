@@ -18,6 +18,7 @@ type JoinAutomation interface {
 type UserJoinedListener struct {
 	e          common.Engine
 	automation JoinAutomation
+	autoMove   JoinAutomation
 }
 
 func (l *UserJoinedListener) Notify(jsonMessage string) {
@@ -32,6 +33,9 @@ func (l *UserJoinedListener) Notify(jsonMessage string) {
 	}
 	l.shareUserInfo(u)
 	l.e.LogPresence(u.Trip, u.Name, u.Hash, "joined", l.e.GetChannel())
+	if l.autoMove != nil {
+		l.autoMove.OnJoin(context.Background(), u)
+	}
 	log.Printf("User joined: %s", u.Name)
 }
 
@@ -61,5 +65,9 @@ func NewUserJoinedListener(e common.Engine) *UserJoinedListener {
 	return NewUserJoinedListenerWithAutomation(e, nil)
 }
 func NewUserJoinedListenerWithAutomation(e common.Engine, automation JoinAutomation) *UserJoinedListener {
-	return &UserJoinedListener{e: e, automation: automation}
+	return NewUserJoinedListenerWithAutomations(e, automation, nil)
+}
+
+func NewUserJoinedListenerWithAutomations(e common.Engine, automation, autoMove JoinAutomation) *UserJoinedListener {
+	return &UserJoinedListener{e: e, automation: automation, autoMove: autoMove}
 }

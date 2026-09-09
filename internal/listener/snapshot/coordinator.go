@@ -7,13 +7,22 @@ import (
 	"time"
 )
 
+type TemporaryJoin struct {
+	Channel  string
+	Nick     string
+	Password string
+}
+
 type RoomSnapshotRequest struct {
 	WorkflowID         string
 	Author             string
+	Whisper            bool
 	SourceChannel      string
 	TargetChannel      string
 	DestinationChannel string
 	ReplyMessage       string
+	RemoteMessage      string
+	TemporaryJoin      *TemporaryJoin
 	Operation          RoomSnapshotOperation
 }
 
@@ -164,7 +173,9 @@ func (c *RoomSnapshotCoordinator) Submit(request RoomSnapshotRequest) error {
 	if err == nil {
 		w.session = session
 		w.setState(StateRunning)
+		w.mu.Lock()
 		w.timer = time.AfterFunc(c.timeout, func() { w.fail(StateTimedOut, errors.New("snapshot workflow timed out")) })
+		w.mu.Unlock()
 		err = session.Start()
 	}
 	if err != nil {
@@ -241,9 +252,7 @@ func (w *workflow) receive(payload string) bool {
 	w.coordinator.states[w.request.WorkflowID] = StateCompleted
 	delete(w.coordinator.active, w.request.WorkflowID)
 	w.coordinator.mu.Unlock()
-	if w.timer != nil {
-		w.timer.Stop()
-	}
+	w.stopTimer()
 	ctx := RoomSnapshotContext{WorkflowID: w.request.WorkflowID, Author: w.request.Author, SourceChannel: w.request.SourceChannel, TargetChannel: w.request.TargetChannel, DestinationChannel: w.request.DestinationChannel, Reply: func(s string) {
 		if w.coordinator.reply != nil {
 			w.coordinator.reply(w.request, s)
@@ -281,9 +290,7 @@ func (w *workflow) fail(state WorkflowState, err error) bool {
 	w.coordinator.states[w.request.WorkflowID] = state
 	delete(w.coordinator.active, w.request.WorkflowID)
 	w.coordinator.mu.Unlock()
-	if w.timer != nil {
-		w.timer.Stop()
-	}
+	w.stopTimer()
 	if w.coordinator.reply != nil && w.request.ReplyMessage != "" {
 		w.coordinator.reply(w.request, "Unable to complete room operation.")
 	}
@@ -295,6 +302,16 @@ func (w *workflow) fail(state WorkflowState, err error) bool {
 	}
 	return true
 }
+
+func (w *workflow) stopTimer() {
+	w.mu.Lock()
+	timer := w.timer
+	w.mu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
+}
+
 func (w *workflow) publish(result OperationResult) {
 	if w.coordinator.outcome != nil {
 		w.coordinator.outcome(w.request, result)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"zenbot/internal/agent/participation"
 	"zenbot/internal/listener/message"
+	"zenbot/internal/model"
 )
 
 type RoomParticipation struct {
@@ -12,12 +13,23 @@ type RoomParticipation struct {
 	Snapshot       func(*message.Context) participation.TrustedSnapshot
 	AmbientEnabled bool
 	AmbientEvery   uint64
+	// SemanticCandidate is composed only after the complete typed moderation
+	// action prerequisite is available. The adapter owns canonical target use.
+	SemanticCandidate func(model.ChatMessage) bool
 }
 
 func (p RoomParticipation) Handle(ctx context.Context, c *message.Context) (bool, error) {
 	if c == nil || c.Message == nil || c.Engine == nil || p.Pipeline == nil || p.Snapshot == nil {
 		return false, fmt.Errorf("agent room participation is not initialized")
 	}
-	out := p.Pipeline.Handle(participation.Event{Message: *c.Message, Snapshot: p.Snapshot(c), BotNick: c.Engine.GetName(), Prefix: c.Engine.GetPrefix(), AuthorIsBot: c.Author != nil && c.Author.IsBot, AmbientEnabled: p.AmbientEnabled, AmbientEvery: p.AmbientEvery, ModerationCandidate: false})
+	candidate := false
+	var target string
+	if p.SemanticCandidate != nil && c.Author != nil && !c.Author.IsBot && !c.Author.Isme && p.SemanticCandidate(*c.Message) {
+		if c.Author.Name != "" {
+			target = c.Author.Name
+			candidate = true
+		}
+	}
+	out := p.Pipeline.Handle(participation.Event{Message: *c.Message, Snapshot: p.Snapshot(c), BotNick: c.Engine.GetName(), Prefix: c.Engine.GetPrefix(), AuthorIsBot: c.Author != nil && c.Author.IsBot, AmbientEnabled: p.AmbientEnabled, AmbientEvery: p.AmbientEvery, ModerationCandidate: candidate, ModerationTarget: target})
 	return out.Decision == participation.Claimed, out.Err
 }

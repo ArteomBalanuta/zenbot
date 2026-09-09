@@ -2,37 +2,24 @@ package command
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"testing"
-	"zenbot/internal/agent/runtime"
-	"zenbot/internal/agent/turn"
 	"zenbot/internal/common"
+	"zenbot/internal/listener"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
 )
 
-type directAgentInvokerStub struct {
-	prompt string
-	text   string
-	err    error
-	calls  int
-}
-
-func (s *directAgentInvokerStub) Invoke(_ context.Context, _ *model.ChatMessage, prompt string) (string, error) {
-	s.calls++
-	s.prompt = prompt
-	return s.text, s.err
-}
-
 type commandEngineStub struct {
 	common.Engine
-	chats    []string
-	raws     []string
-	users    map[string]*model.User
-	afkUsers map[*model.User]string
-	bundle   *service.Bundle
-	commands map[string]common.CommandMetadata
-	subs     map[string]struct{}
+	chats              []string
+	raws               []string
+	users              map[string]*model.User
+	afkUsers           map[*model.User]string
+	bundle             *service.Bundle
+	commands           map[string]common.CommandMetadata
+	subs               map[string]struct{}
+	authorizationCalls int
 }
 
 func (s *commandEngineStub) ServiceBundle() *service.Bundle { return s.bundle }
@@ -88,6 +75,61 @@ func (s *commandEngineStub) Unban(text string) {
 func (s *commandEngineStub) UnbanAll() { s.raws = append(s.raws, `{"cmd":"unbanall"}`) }
 func (s *commandEngineStub) Lock()     { s.raws = append(s.raws, `{"cmd":"lockroom"}`) }
 func (s *commandEngineStub) Unlock()   { s.raws = append(s.raws, `{"cmd":"unlockroom"}`) }
+func (s *commandEngineStub) BanNick(_ context.Context, target common.NickTarget) error {
+	s.Ban(string(target))
+	return nil
+}
+func (s *commandEngineStub) UnbanHash(_ context.Context, hash common.BanHash) error {
+	s.Unban(string(hash))
+	return nil
+}
+func (s *commandEngineStub) UnbanAllContext(_ context.Context) error { s.UnbanAll(); return nil }
+func (s *commandEngineStub) LockRoom(_ context.Context) error        { s.Lock(); return nil }
+func (s *commandEngineStub) UnlockRoom(_ context.Context) error      { s.Unlock(); return nil }
+func (s *commandEngineStub) EnableCaptcha(_ context.Context) error {
+	s.raws = append(s.raws, `{"cmd":"enablecaptcha"}`)
+	return nil
+}
+func (s *commandEngineStub) DisableCaptcha(_ context.Context) error {
+	s.raws = append(s.raws, `{"cmd":"disablecaptcha"}`)
+	return nil
+}
+func (s *commandEngineStub) AuthorizeTrip(_ context.Context, trip common.Trip) error {
+	s.raws = append(s.raws, `{"cmd":"authtrip","trip":"`+string(trip)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) DeauthorizeTrip(_ context.Context, trip common.Trip) error {
+	s.raws = append(s.raws, `{"cmd":"deauthtrip","trip":"`+string(trip)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) MuteNick(_ context.Context, target common.NickTarget) error {
+	s.raws = append(s.raws, `{"cmd":"mute","nick":"`+string(target)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) UnmuteHash(_ context.Context, hash common.BanHash) error {
+	s.raws = append(s.raws, `{"cmd":"unmute","hash":"`+string(hash)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) ForceFlair(_ context.Context, target common.NickTarget, flair common.Flair) error {
+	s.raws = append(s.raws, `{"cmd":"forceflair","nick":"`+string(target)+`","flair":"`+string(flair)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) ForceColor(_ context.Context, target common.NickTarget, color common.Color) error {
+	s.raws = append(s.raws, `{"cmd":"forcecolor","nick":"`+string(target)+`","color":"`+string(color)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) KickNick(_ context.Context, target common.NickTarget) error {
+	s.raws = append(s.raws, `{"cmd":"kick","nick":"`+string(target)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) KickNickTo(_ context.Context, target common.NickTarget, channel common.Channel) error {
+	s.raws = append(s.raws, `{"cmd":"kick","nick":"`+string(target)+`","to":"`+string(channel)+`"}`)
+	return nil
+}
+func (s *commandEngineStub) OverflowNick(_ context.Context, target common.NickTarget) error {
+	s.raws = append(s.raws, `{"cmd":"overflow","nick":"`+string(target)+`"}`)
+	return nil
+}
 func (s *commandEngineStub) Kick(name, channel string) {
 	s.raws = append(s.raws, `{"cmd":"kick","nick":"`+name+`","to":"`+channel+`"}`)
 }
@@ -106,13 +148,16 @@ func (s *commandEngineStub) GetActiveUsers() *map[*model.User]struct{} {
 	}
 	return &m
 }
-func (s *commandEngineStub) GetChannel() string                                 { return "programming" }
-func (s *commandEngineStub) GetName() string                                    { return "zenbot" }
-func (s *commandEngineStub) GetPrefix() string                                  { return "!" }
-func (s *commandEngineStub) IsUserAuthorized(_ *model.User, _ *model.Role) bool { return true }
-func (s *commandEngineStub) LogMessage(_, _, _, _, _ string) (int64, error)     { return 0, nil }
-func (s *commandEngineStub) RemoveIfAfk(_ *model.User)                          {}
-func (s *commandEngineStub) NotifyAfkIfMentioned(_ *model.ChatMessage)          {}
+func (s *commandEngineStub) GetChannel() string { return "programming" }
+func (s *commandEngineStub) GetName() string    { return "zenbot" }
+func (s *commandEngineStub) GetPrefix() string  { return "!" }
+func (s *commandEngineStub) IsUserAuthorized(_ *model.User, _ *model.Role) bool {
+	s.authorizationCalls++
+	return true
+}
+func (s *commandEngineStub) LogMessage(_, _, _, _, _ string) (int64, error) { return 0, nil }
+func (s *commandEngineStub) RemoveIfAfk(_ *model.User)                      {}
+func (s *commandEngineStub) NotifyAfkIfMentioned(_ *model.ChatMessage)      {}
 func (s *commandEngineStub) RegisterCommand(c common.Command) {
 	if s.commands == nil {
 		s.commands = map[string]common.CommandMetadata{}
@@ -169,137 +214,68 @@ func TestConcreteCommandsExecuteWithSaturnSemantics(t *testing.T) {
 	}
 }
 
-func TestDirectLCommandForwardsResponseAndInvokerFailure(t *testing.T) {
-	for _, tc := range []struct {
-		name, response, wantChat string
-		err                      error
-		wantStatus               model.Status
-	}{
-		{name: "response", response: "agent reply", wantChat: "alice|agent reply|false", wantStatus: model.SUCCESSFUL},
-		{name: "failure", err: errors.New("provider unavailable"), wantStatus: model.FAILED},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}}
-			invoker := &directAgentInvokerStub{text: tc.response, err: tc.err}
-			d, ok := directLDefinition(invoker)
-			if !ok {
-				t.Fatal("direct l definition was not available")
-			}
-			status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!l hello world"}).Execute(context.Background())
-			if status != tc.wantStatus {
-				t.Fatalf("status=%v, want %v", status, tc.wantStatus)
-			}
-			if !errors.Is(err, tc.err) {
-				t.Fatalf("error=%v, want %v", err, tc.err)
-			}
-			if invoker.calls != 1 || invoker.prompt != "hello world" {
-				t.Fatalf("invocations=%d prompt=%q", invoker.calls, invoker.prompt)
-			}
-			if tc.wantChat == "" {
-				if len(e.chats) != 0 {
-					t.Fatalf("unexpected chat=%v", e.chats)
-				}
-			} else if len(e.chats) != 1 || e.chats[0] != tc.wantChat {
-				t.Fatalf("chat=%v, want %q", e.chats, tc.wantChat)
-			}
-		})
-	}
+type recordingDirectAgentSubmitter struct {
+	calls   int
+	ctx     context.Context
+	message *model.ChatMessage
+	prompt  string
 }
 
-type persistentDirectInvokerStub struct {
-	directAgentInvokerStub
-	persisted int
-}
-
-func (s *persistentDirectInvokerStub) Persist(context.Context, *model.ChatMessage, string, string) error {
-	s.persisted++
-	return nil
-}
-
-type directDeliveryInvokerStub struct {
-	directAgentInvokerStub
-	persisted int
-}
-
-func (s *directDeliveryInvokerStub) InvokeCompletion(_ context.Context, _ *model.ChatMessage, prompt string) (runtime.DirectCompletion, error) {
+func (s *recordingDirectAgentSubmitter) Submit(ctx context.Context, message *model.ChatMessage, prompt string) error {
 	s.calls++
+	s.ctx = ctx
+	s.message = message
 	s.prompt = prompt
-	return runtime.NewDirectCompletion(s.text, []turn.PersistableEvidence{{Tool: "room_users", Content: `{}`}}), s.err
-}
-func (s *directDeliveryInvokerStub) PersistDelivery(_ context.Context, _ *model.ChatMessage, _ string, completion runtime.DirectCompletion) error {
-	if completion.Text() != s.text || len(completion.DurableEvidence()) != 1 {
-		return errors.New("missing direct delivery artifact")
-	}
-	s.persisted++
 	return nil
 }
 
-type failingCommandEngineStub struct {
-	*commandEngineStub
-	err error
-}
-
-func (s *failingCommandEngineStub) SendChatMessage(author, text string, whisper bool) (string, error) {
-	s.chats = append(s.chats, author+"|"+text+"|"+boolString(whisper))
-	return "", s.err
-}
-
-func TestDirectLCommandOnlyPersistsAfterVisibleSuccessfulDelivery(t *testing.T) {
-	t.Run("no reply is not delivered or persisted", func(t *testing.T) {
-		e := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}}
-		invoker := &persistentDirectInvokerStub{directAgentInvokerStub: directAgentInvokerStub{text: ""}}
-		d, ok := directLDefinition(invoker)
-		if !ok {
-			t.Fatal("direct l definition was not available")
-		}
-		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!l hello"}).Execute(context.Background())
-		if err != nil || status != model.SUCCESSFUL {
-			t.Fatalf("status=%v err=%v", status, err)
-		}
-		if len(e.chats) != 0 || invoker.persisted != 0 {
-			t.Fatalf("no-reply delivery=%v persisted=%d", e.chats, invoker.persisted)
-		}
-	})
-
-	t.Run("delivery failure is not persisted", func(t *testing.T) {
-		e := &failingCommandEngineStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}}, err: errors.New("sink failed")}
-		invoker := &persistentDirectInvokerStub{directAgentInvokerStub: directAgentInvokerStub{text: "visible"}}
-		d, ok := directLDefinition(invoker)
-		if !ok {
-			t.Fatal("direct l definition was not available")
-		}
-		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!l hello"}).Execute(context.Background())
-		if status != model.FAILED || !errors.Is(err, e.err) {
-			t.Fatalf("status=%v err=%v", status, err)
-		}
-		if len(e.chats) != 1 || invoker.persisted != 0 {
-			t.Fatalf("delivery=%v persisted=%d", e.chats, invoker.persisted)
-		}
-	})
-
-	t.Run("visible successful delivery persists once", func(t *testing.T) {
-		e := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}}
-		invoker := &persistentDirectInvokerStub{directAgentInvokerStub: directAgentInvokerStub{text: "visible"}}
-		d, ok := directLDefinition(invoker)
-		if !ok {
-			t.Fatal("direct l definition was not available")
-		}
-		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!l hello"}).Execute(context.Background())
-		if err != nil || status != model.SUCCESSFUL || len(e.chats) != 1 || invoker.persisted != 1 {
-			t.Fatalf("status=%v err=%v delivery=%v persisted=%d", status, err, e.chats, invoker.persisted)
-		}
-	})
-}
-
-func TestDirectLCommandPersistsDirectDeliveryArtifactAfterVisibleSend(t *testing.T) {
-	invoker := &directDeliveryInvokerStub{directAgentInvokerStub: directAgentInvokerStub{text: "agent reply"}}
+func TestDirectLCommandSubmitsTrimmedPromptWithoutCommandSideEffects(t *testing.T) {
 	e := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}}
-	d, ok := directLDefinition(invoker)
+	submitter := &recordingDirectAgentSubmitter{}
+	d, ok := directLDefinition(submitter)
 	if !ok {
-		t.Fatal("direct l definition missing")
+		t.Fatal("direct l definition was not available")
 	}
-	status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!l prompt"}).Execute(context.Background())
-	if err != nil || status != model.SUCCESSFUL || invoker.persisted != 1 {
-		t.Fatalf("status=%v err=%v persisted=%d", status, err, invoker.persisted)
+	message := &model.ChatMessage{Name: "alice", Text: "!l   hello world   "}
+	ctx := context.Background()
+	status, err := d.New(e, message).Execute(ctx)
+	if err != nil || status != model.SUCCESSFUL {
+		t.Fatalf("status=%v err=%v", status, err)
+	}
+	if submitter.calls != 1 || submitter.ctx != ctx || submitter.message != message || submitter.prompt != "hello world" {
+		t.Fatalf("submission = %#v", submitter)
+	}
+	if len(e.chats) != 0 || len(e.raws) != 0 {
+		t.Fatalf("command side effects chats=%v raws=%v", e.chats, e.raws)
+	}
+}
+
+func TestLiveLegacyDispatchPassesEngineCancellationToDirectLBeforeAdmission(t *testing.T) {
+	engine := &commandEngineStub{users: map[string]*model.User{
+		"alice": {Name: "alice", Hash: "hash"},
+	}}
+	submitter := &recordingDirectAgentSubmitter{}
+	definition, ok := directLDefinition(submitter)
+	if !ok {
+		t.Fatal("direct l definition was not available")
+	}
+	engine.RegisterCommand(&legacyAdapter{engine: engine, def: definition})
+	raw, err := json.Marshal(model.ChatMessage{Name: "alice", Text: "!l question"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	listener.NewUserChatListener(engine).NotifyContext(ctx, string(raw))
+
+	if engine.authorizationCalls != 1 {
+		t.Fatalf("authorization calls=%d, want 1", engine.authorizationCalls)
+	}
+	if submitter.calls != 0 {
+		t.Fatalf("submissions=%d, want 0", submitter.calls)
+	}
+	if len(engine.chats) != 0 || len(engine.raws) != 0 {
+		t.Fatalf("command output chats=%v raws=%v", engine.chats, engine.raws)
 	}
 }

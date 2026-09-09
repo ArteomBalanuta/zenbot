@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type ReplicaController interface {
@@ -27,6 +28,13 @@ func ParseReplicaChannel(args []string) (string, error) {
 		return "", errors.New("replica channel is required")
 	}
 	return ch, nil
+}
+
+// hasBlankReplicaChannel preserves Saturn's distinction between no argument and
+// a supplied-but-blank first argument despite ChatMessage.GetArguments using
+// strings.Fields, which otherwise discards trailing whitespace.
+func hasBlankReplicaChannel(message string, args []string) bool {
+	return len(args) == 1 && strings.TrimRightFunc(message, unicode.IsSpace) != message
 }
 func ReplicaReply(count int) string { return fmt.Sprintf(" replicas: %d", count) }
 func ReplicaStatusReply(host string, channels []string) string {

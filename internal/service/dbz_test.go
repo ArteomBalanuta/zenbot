@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"zenbot/internal/repository"
@@ -49,5 +51,44 @@ func TestDBZStatsTextExactAndEnemyStateConcurrent(t *testing.T) {
 	wg.Wait()
 	if len(s.Enemies()) != 0 {
 		t.Fatalf("enemies=%v", s.Enemies())
+	}
+}
+
+func TestDBZSpawnEnemyStateIsInstanceLocalAndRetainsInsertionOrder(t *testing.T) {
+	first := &DBZService{}
+	first.SpawnEnemy("a")
+	first.SpawnEnemy("a")
+	first.SpawnEnemy("b")
+	if got, want := first.Enemies(), []string{"a", "a", "b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first enemies=%q want=%q", got, want)
+	}
+	second := &DBZService{}
+	if enemies := second.Enemies(); len(enemies) != 0 {
+		t.Fatalf("second enemies=%q", enemies)
+	}
+}
+
+func TestDBZStatsTextRendersExactSevenLineSnapshot(t *testing.T) {
+	s := &DBZService{Repo: &dbzRepoStub{stats: repository.DBZStats{Name: "goku", Level: 2, FreeStats: 5, Strength: 3, Agility: 4, Vitality: 5, Energy: 6}}}
+	got, err := s.StatsText(context.Background(), "goku")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "character: goku\nlevel: 2\nfree stats: 5\nstr: 3\nagi: 4\nvit: 5\nene: 6\n"
+	if got != want {
+		t.Fatalf("StatsText()=%q, want %q", got, want)
+	}
+}
+
+type failingFreeStatsDBZRepo struct{ dbzRepoStub }
+
+func (*failingFreeStatsDBZRepo) FreeStats(context.Context, string) (int, bool, error) {
+	return 0, false, errors.New("free stats query failed")
+}
+
+func TestDBZFreeStatsConvertsRepositoryReadErrorToSourceEquivalentNoFreeValue(t *testing.T) {
+	free, err := (&DBZService{Repo: &failingFreeStatsDBZRepo{}}).FreeStats(context.Background(), "goku")
+	if err != nil || free != -1 {
+		t.Fatalf("FreeStats()=%d, %v; want -1, nil", free, err)
 	}
 }

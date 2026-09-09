@@ -14,10 +14,10 @@ type authRepo struct {
 	err   error
 }
 
-func (r *authRepo) IsTripAuthorized(_ context.Context, _ string, required model.Role, configured []string) (bool, error) {
+func (r *authRepo) IsTripAuthorized(_ context.Context, trip string, required model.Role, configured []string) (bool, error) {
 	r.calls++
 	for _, v := range configured {
-		if v == "x" {
+		if v == "x" || v == trip {
 			return true, nil
 		}
 	}
@@ -59,5 +59,29 @@ func TestSecurityServiceAuthorizeTripPropagatesRepositoryError(t *testing.T) {
 	}
 	if len(s.AdminTrips) != 0 {
 		t.Fatalf("failed authorization mutated AdminTrips: %v", s.AdminTrips)
+	}
+}
+
+func TestLifecycleAuthorizationAcceptsOnlySourceShapedUserOrAdminAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		trip      string
+		role      model.Role
+		userTrips []string
+		want      bool
+	}{
+		{name: "configured lifecycle user", trip: "lifecycle", role: model.USER, userTrips: []string{"lifecycle"}, want: true},
+		{name: "configured lifecycle wildcard", trip: "anyone", role: model.USER, userTrips: []string{"x"}, want: true},
+		{name: "configured admin", trip: "admin", role: model.USER, want: true},
+		{name: "persisted admin", trip: "persisted", role: model.ADMIN, want: true},
+		{name: "ordinary user", trip: "ordinary", role: model.PEST, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewSecurityService(&config.Config{AdminTrips: []string{"admin"}, UserTrips: tt.userTrips}, &authRepo{role: tt.role})
+			if got := s.IsLifecycleAuthorized(&model.User{Trip: tt.trip}); got != tt.want {
+				t.Fatalf("IsLifecycleAuthorized(%q)=%v, want %v", tt.trip, got, tt.want)
+			}
+		})
 	}
 }

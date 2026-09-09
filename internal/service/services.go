@@ -15,6 +15,7 @@ import (
 	"time"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 // CommandOutput is the only output seam used by migrated command services.
@@ -25,22 +26,86 @@ type CommandOutput interface {
 
 // Bundle contains the non-agent services attached to an engine.
 type Bundle struct {
-	Security *SecurityService
-	Mail     *MailService
-	Notes    *NoteService
-	Users    *UserService
-	Ping     *PingService
-	Weather  *WeatherService
-	Time     *TimeService
-	Search   *SearchService
-	SCP      *SCPService
-	DBZ      *DBZService
+	Security   *SecurityService
+	Mail       *MailService
+	Notes      *NoteService
+	Users      *UserService
+	Ping       *PingService
+	Weather    *WeatherService
+	Time       *TimeService
+	Search     *SearchService
+	SCP        *SCPService
+	DBZ        *DBZService
+	Activity   *ActivityService
+	ShadowBans *ShadowBanService
+	SQLCommand RawSQLQuery
 }
 
 type UserService struct {
 	Queries  repository.UserQueryRepository
 	Identity repository.IdentityRepository
 	GroupB   repository.SqlUtilGroupBRepository
+	Now      func() time.Time
+}
+
+func (s *UserService) LastOnline(ctx context.Context, target string) (string, error) {
+	record, err := s.Queries.LastOnline(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	if s.Now != nil {
+		now = s.Now().UTC()
+	}
+	joined, lastSeen, seenActive, sessionDuration, lastMessage := " - ", " - ", " - ", " - ", " - "
+	if record.LastSeenMillis.Valid {
+		lastSeen, err = util.FormatRFC1123(record.LastSeenMillis.Int64, util.UnitMilliseconds, "UTC")
+		if err != nil {
+			return "", err
+		}
+		seenActive = util.Difference(now, time.UnixMilli(record.LastSeenMillis.Int64).UTC())
+	}
+	if record.LastMessage.Valid {
+		lastMessage = escapeJSON(record.LastMessage.String)
+	}
+	// Saturn only renders session data when its last-seen lookup returned a row.
+	if record.LastSeenMillis.Valid && record.JoinedMillis.Valid {
+		joined, err = util.FormatRFC1123(record.JoinedMillis.Int64, util.UnitMilliseconds, "UTC")
+		if err != nil {
+			return "", err
+		}
+		sessionDuration = util.Difference(now, time.UnixMilli(record.JoinedMillis.Int64).UTC())
+	}
+	return fmt.Sprintf("\\n Nick|Trip: %s\\n Joined: %s\\n Last seen: %s\\n Seen active: %s ago.\\n Session duration: %s \\n Last message: %s\\n", target, joined, lastSeen, seenActive, sessionDuration, lastMessage), nil
+}
+
+func escapeJSON(value string) string {
+	var escaped strings.Builder
+	for _, character := range value {
+		switch character {
+		case '\\':
+			escaped.WriteString("\\\\")
+		case '"':
+			escaped.WriteString("\\\"")
+		case '\b':
+			escaped.WriteString("\\b")
+		case '\f':
+			escaped.WriteString("\\f")
+		case '\n':
+			escaped.WriteString("\\n")
+		case '\r':
+			escaped.WriteString("\\r")
+		case '	':
+			escaped.WriteString(`	`)
+		default:
+			if character < 0x20 {
+				fmt.Fprintf(&escaped, "\\u%04x", character)
+			} else {
+				escaped.WriteRune(character)
+			}
+		}
+	}
+	return escaped.String()
 }
 
 func (s *UserService) RegisteredUsers(ctx context.Context) ([]repository.RegisteredUser, error) {

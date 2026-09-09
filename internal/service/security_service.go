@@ -11,13 +11,14 @@ import (
 
 type SecurityService struct {
 	AdminTrips    []string
+	UserTrips     []string
 	Authorization repository.AuthorizationRepository
 }
 
 // The variadic repository preserves the original constructor for callers that
 // only need configured-trip authorization, while production injects H2.
 func NewSecurityService(c *config.Config, auth ...repository.AuthorizationRepository) *SecurityService {
-	s := &SecurityService{AdminTrips: append([]string(nil), c.AdminTrips...)}
+	s := &SecurityService{AdminTrips: append([]string(nil), c.AdminTrips...), UserTrips: append([]string(nil), c.UserTrips...)}
 	if len(auth) > 0 {
 		s.Authorization = auth[0]
 	}
@@ -60,6 +61,20 @@ func (s *SecurityService) IsAuthorized(u *model.User, r *model.Role) bool {
 		return false
 	}
 	return ok
+}
+
+// IsLifecycleAuthorized preserves Saturn's restart/shutdown user-trip bypass.
+func (s *SecurityService) IsLifecycleAuthorized(u *model.User) bool {
+	if u == nil {
+		return false
+	}
+	for _, trip := range s.UserTrips {
+		if strings.EqualFold(strings.TrimSpace(trip), "x") || strings.EqualFold(strings.TrimSpace(trip), strings.TrimSpace(u.Trip)) {
+			return true
+		}
+	}
+	admin := model.ADMIN
+	return s.IsAuthorized(u, &admin)
 }
 
 func (s *SecurityService) IsAuthorizedContext(ctx context.Context, u *model.User, required model.Role) (bool, error) {

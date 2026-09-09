@@ -53,6 +53,25 @@ func (f *InvocationFactory) Create(s TrustedSnapshot, message model.ChatMessage,
 	id := requestID()
 	return api.NewInvocation(id, ctx, prompt, mode, message.Text, commandOriginated)
 }
+
+// CreateModeration constructs the only autonomous moderation identity: the
+// bot/system principal, with the alleged author's canonical target carried
+// separately. Public invocation modes continue to use Create unchanged.
+func (f *InvocationFactory) CreateModeration(s TrustedSnapshot, botNick string, target string, message model.ChatMessage, prompt string) (api.Invocation, error) {
+	if strings.TrimSpace(botNick) == "" {
+		return api.Invocation{}, fmt.Errorf("moderation bot nick is required")
+	}
+	if strings.TrimSpace(target) == "" {
+		return api.Invocation{}, fmt.Errorf("moderation target is required")
+	}
+	users := make([]string, len(s.Users))
+	copy(users, s.Users)
+	ctx, err := api.NewContextWithModerationTarget(s.Room, botNick, s.CreatorTrip, "", false, users, []api.Capability{api.ModerationCommands}, target)
+	if err != nil {
+		return api.Invocation{}, err
+	}
+	return api.NewInvocation(requestID(), ctx, prompt, api.MODERATION, message.Text, false)
+}
 func contains(xs []string, v string) bool {
 	for _, x := range xs {
 		if x == v {
@@ -87,6 +106,9 @@ type Event struct {
 	AmbientEnabled      bool
 	AmbientEvery        uint64
 	ModerationCandidate bool
+	// ModerationTarget is canonical listener-resolved identity. It is never
+	// derived from model output or tool arguments.
+	ModerationTarget string
 }
 type Pipeline struct {
 	Factory *InvocationFactory
@@ -95,7 +117,10 @@ type Pipeline struct {
 	Submit  Submitter
 	// Monitor observes eligible/ineligible events for moderation telemetry. It
 	// never claims the event and runs before the eligibility filter.
-	Monitor                 func(Event)
+	Monitor func(Event)
+	// SemanticModerationReady is composition-owned and remains false until the
+	// complete source moderation command allowlist has typed operations.
+	SemanticModerationReady bool
 	eligibleAmbientMessages atomic.Uint64
 }
 type Outcome struct {
@@ -124,8 +149,11 @@ func (p *Pipeline) Handle(e Event) Outcome {
 	if prompt, ok := p.Parser.Parse(text, e.BotNick); ok {
 		return p.submit(e, e.Snapshot, prompt, api.MENTION, true, Claimed)
 	}
-	if e.ModerationCandidate {
-		return p.submit(e, e.Snapshot, text, api.MODERATION, false, Pass)
+	if p.SemanticModerationReady && e.ModerationCandidate && strings.TrimSpace(e.ModerationTarget) != "" {
+		moderation := p.submit(e, e.Snapshot, text, api.MODERATION, false, Pass)
+		if moderation.Err != nil {
+			return moderation
+		}
 	}
 	if e.AmbientEnabled && e.AmbientEvery > 0 && (p.Quiet == nil || !p.Quiet.IsQuiet(ctx)) {
 		if p.eligibleAmbientMessages.Add(1)%e.AmbientEvery == 0 {
@@ -141,7 +169,13 @@ func (p *Pipeline) submit(e Event, s TrustedSnapshot, prompt string, mode api.In
 	if p.Submit == nil || p.Factory == nil {
 		return Outcome{Decision: d, Mode: mode, Err: fmt.Errorf("agent submission is unsupported")}
 	}
-	inv, err := p.Factory.Create(s, e.Message, prompt, mode, origin)
+	var inv api.Invocation
+	var err error
+	if mode == api.MODERATION {
+		inv, err = p.Factory.CreateModeration(s, e.BotNick, e.ModerationTarget, e.Message, prompt)
+	} else {
+		inv, err = p.Factory.Create(s, e.Message, prompt, mode, origin)
+	}
 	if err != nil {
 		return Outcome{Decision: d, Mode: mode, Err: err}
 	}

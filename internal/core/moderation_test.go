@@ -34,7 +34,7 @@ func TestAuthoritativeCaptchaAndShadowBan(t *testing.T) {
 	if err := e.EnableCaptcha(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-e.OutMessageQueue; got != "{ \"cmd\": \"enablecaptcha\"}" {
+	if got := <-e.OutMessageQueue; got != `{"cmd":"enablecaptcha"}` {
 		t.Fatalf("%q", got)
 	}
 	if err := e.ShadowBan(context.Background(), "raider"); err != nil {
