@@ -44,16 +44,23 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	for index, example := range definition.Agent.Examples {
 		examples[index] = contract.Example{Prompt: example.Prompt, Arguments: append(json.RawMessage(nil), example.Arguments...)}
 	}
-	return contract.NewDescriptor(
-		t.Name(), definition.Agent.Label, definition.Agent.Description, definition.Agent.Category,
-		access, contract.Action, contract.RoomDelivery, definition.Agent.Arguments.Schema(),
-		capabilities, nil, false, 10*time.Second, result, nil, writes, definition.Agent.WhenNotUse,
+	options := []contract.DescriptorOption{
 		contract.WithRouting(contract.RoutingMetadata{
 			Aliases:  append([]string(nil), definition.Aliases...),
 			Targets:  append([]string(nil), definition.Agent.Targets...),
 			UseWhen:  append([]string(nil), definition.Agent.UseWhen...),
 			Examples: examples,
 		}),
+		contract.WithPrimaryIntent(definition.Agent.PrimaryIntent),
+	}
+	if definition.Agent.InternalFallback {
+		options = append(options, contract.WithInternalFallback())
+	}
+	return contract.NewDescriptor(
+		t.Name(), definition.Agent.Label, definition.Agent.Description, definition.Agent.Category,
+		access, contract.Action, contract.RoomDelivery, definition.Agent.Arguments.Schema(),
+		capabilities, nil, false, 10*time.Second, result, nil, writes, definition.Agent.WhenNotUse,
+		options...,
 	)
 }
 
@@ -81,6 +88,9 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	arguments, err := definition.Agent.Arguments.Encode(args)
 	if err != nil {
 		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error()), nil
+	}
+	if definition.Canonical == "list" && strings.EqualFold(strings.TrimSpace(arguments), strings.TrimSpace(caller.Room())) {
+		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", "saturn_list requires a room other than the caller's current room; use room_users for current-room presence"), nil
 	}
 	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(definition.Canonical) && !sameModerationTarget(firstArgument(arguments), *target) {
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author"), nil

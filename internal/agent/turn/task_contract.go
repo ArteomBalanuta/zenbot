@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -20,6 +21,8 @@ const (
 	ObligationTool   ObligationKind = "TOOL"
 )
 
+var primaryIntentRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
 type Constraint struct {
 	Text string `json:"text"`
 }
@@ -27,7 +30,7 @@ type Constraint struct {
 type Obligation struct {
 	ID              string          `json:"id"`
 	Kind            ObligationKind  `json:"kind"`
-	ProviderTool    string          `json:"providerTool,omitempty"`
+	PrimaryIntent   string          `json:"primaryIntent,omitempty"`
 	Subject         string          `json:"subject,omitempty"`
 	Required        bool            `json:"required"`
 	DependsOn       []string        `json:"dependsOn,omitempty"`
@@ -88,7 +91,7 @@ func validateObligations(obligations []Obligation) error {
 	for index := range obligations {
 		obligation := &obligations[index]
 		obligation.ID = strings.TrimSpace(obligation.ID)
-		obligation.ProviderTool = strings.TrimSpace(obligation.ProviderTool)
+		obligation.PrimaryIntent = strings.TrimSpace(obligation.PrimaryIntent)
 		obligation.Subject = NormalizeSubject(obligation.Subject)
 		if obligation.ID == "" {
 			return errors.New("task obligation ID must not be blank")
@@ -99,12 +102,12 @@ func validateObligations(obligations []Obligation) error {
 		byID[obligation.ID] = index
 		switch obligation.Kind {
 		case ObligationAnswer:
-			if obligation.ProviderTool != "" || obligation.Effect != "" || obligation.RequiresReceipt {
+			if obligation.PrimaryIntent != "" || obligation.Effect != "" || obligation.RequiresReceipt {
 				return fmt.Errorf("answer obligation %q has tool-only fields", obligation.ID)
 			}
 		case ObligationTool:
-			if obligation.ProviderTool == "" {
-				return fmt.Errorf("tool obligation %q has no provider tool", obligation.ID)
+			if !primaryIntentRE.MatchString(obligation.PrimaryIntent) {
+				return fmt.Errorf("tool obligation %q has invalid primary intent", obligation.ID)
 			}
 			if obligation.Effect != contract.ReadOnly && obligation.Effect != contract.Action {
 				return fmt.Errorf("tool obligation %q has invalid effect", obligation.ID)
@@ -168,11 +171,12 @@ func NormalizeSubject(subject string) string {
 }
 
 type TaskEvidence struct {
-	ObligationID string
-	Tool         string
-	CallID       string
-	Subject      string
-	Result       contract.Result
+	ObligationID  string
+	Tool          string
+	PrimaryIntent string
+	CallID        string
+	Subject       string
+	Result        contract.Result
 }
 
 type TaskState struct {
@@ -195,12 +199,13 @@ func (s *TaskState) Contract() TaskContract {
 	return owned
 }
 
-func (s *TaskState) Observe(toolName string, call execution.Call, result contract.Result) error {
+func (s *TaskState) Observe(primaryIntent string, call execution.Call, result contract.Result) error {
 	if s == nil {
 		return errors.New("task state is nil")
 	}
-	toolName = strings.TrimSpace(toolName)
-	if toolName == "" || toolName != strings.TrimSpace(call.Name) || call.ID == "" {
+	primaryIntent = strings.TrimSpace(primaryIntent)
+	toolName := strings.TrimSpace(call.Name)
+	if !primaryIntentRE.MatchString(primaryIntent) || toolName == "" || call.ID == "" {
 		return errors.New("task observation identity is invalid")
 	}
 	if result.ToolName != "" && result.ToolName != toolName {
@@ -215,9 +220,9 @@ func (s *TaskState) Observe(toolName string, call execution.Call, result contrac
 	if result.ErrorCode == "ACTION_OUTCOME_UNKNOWN" {
 		s.unknownActionOutcome = true
 	}
-	record := TaskEvidence{Tool: toolName, CallID: call.ID, Subject: subject, Result: result}
+	record := TaskEvidence{Tool: toolName, PrimaryIntent: primaryIntent, CallID: call.ID, Subject: subject, Result: result}
 	for _, obligation := range s.contract.obligations {
-		if obligation.Kind != ObligationTool || s.satisfied[obligation.ID] || obligation.ProviderTool != toolName || obligation.Subject != subject || !s.dependenciesSatisfied(obligation) {
+		if obligation.Kind != ObligationTool || s.satisfied[obligation.ID] || obligation.PrimaryIntent != primaryIntent || obligation.Subject != subject || !s.dependenciesSatisfied(obligation) {
 			continue
 		}
 		if result.IsError {

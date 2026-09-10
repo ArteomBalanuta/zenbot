@@ -43,6 +43,28 @@ func TestExecutorLogsToolLifecycleWithoutArgumentsOrResult(t *testing.T) {
 	}
 }
 
+func TestExecutorRejectsInternalFallbackEvenWhenItsNameIsInjected(t *testing.T) {
+	descriptor, err := contract.NewDescriptor(
+		"legacy_fallback", "Legacy fallback", "Internal executor-only fallback.", "test",
+		contract.AccessUser, contract.ReadOnly, contract.ModelData,
+		contract.SchemaObject(nil, nil, false), nil, nil, true, time.Second,
+		contract.SchemaObject(nil, nil, true), []string{"test"}, nil,
+		[]string{"Do not expose this provider."}, contract.WithPrimaryIntent("room_presence"), contract.WithInternalFallback(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback := &fake{name: "legacy_fallback", d: descriptor, fn: func(context.Context) (contract.Result, error) {
+		return contract.SuccessResult("", "legacy_fallback", map[string]any{"unexpected": true}), nil
+	}}
+	executor := &Executor{Registry: tool.NewRegistry([]tool.Tool{fallback}, []string{fallback.Name()})}
+
+	result := executor.Execute(context.Background(), ctx(t), Call{"injected", fallback.Name(), json.RawMessage(`{}`)})
+	if result.ErrorCode != "TOOL_NOT_ALLOWED" || fallback.calls.Load() != 0 {
+		t.Fatalf("result=%#v calls=%d", result, fallback.calls.Load())
+	}
+}
+
 type fake struct {
 	name  string
 	d     contract.Descriptor

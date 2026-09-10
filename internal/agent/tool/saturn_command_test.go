@@ -46,7 +46,7 @@ func TestSaturnCommandDescriptorCarriesCatalogIdentityAndCapabilityPolicy(t *tes
 	}
 	list := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "list")}
 	listDescriptor, err := list.Descriptor(public)
-	if err != nil || !strings.Contains(strings.Join(listDescriptor.Routing().UseWhen, " "), "currently in a room") || !strings.Contains(strings.Join(listDescriptor.ResourceWrites(), " "), "room_delivery") {
+	if err != nil || listDescriptor.PrimaryIntent() != "remote_room_presence" || listDescriptor.InternalFallback() || !strings.Contains(strings.Join(listDescriptor.Routing().UseWhen, " "), "other than") || !strings.Contains(strings.Join(listDescriptor.ResourceWrites(), " "), "room_delivery") {
 		t.Fatalf("remote-room list guidance missing: %#v err=%v", listDescriptor.Routing(), err)
 	}
 
@@ -69,6 +69,17 @@ func TestSaturnCommandDispatchesCanonicalArgumentsAndEnforcesCapabilities(t *tes
 	result, err = tool.Execute(context.Background(), public, json.RawMessage(`{}`))
 	if err != nil || !result.IsError || result.ErrorCode != "TOOL_NOT_AUTHORIZED" || gateway.calls != 1 {
 		t.Fatalf("unauthorized result=%#v calls=%d err=%v", result, gateway.calls, err)
+	}
+}
+
+func TestSaturnListRejectsCurrentRoomSoPresenceRoutesAreDisjoint(t *testing.T) {
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
+	caller, _ := api.NewContext("Programming", "caller", "", "", false, []string{})
+	list := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "list"), Gateway: gateway}
+
+	result, err := list.Execute(context.Background(), caller, json.RawMessage(`{"room":" programming "}`))
+	if err != nil || !result.IsError || result.ErrorCode != "INVALID_ARGUMENTS" || gateway.calls != 0 {
+		t.Fatalf("result=%#v err=%v gateway.calls=%d", result, err, gateway.calls)
 	}
 }
 

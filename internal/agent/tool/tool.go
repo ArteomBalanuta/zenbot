@@ -49,12 +49,20 @@ func (r *Registry) Find(ctx api.Context, n string) (Tool, bool) {
 		return nil, false
 	}
 	t, ok := r.tools[n]
+	if !ok {
+		return nil, false
+	}
+	descriptor, err := t.Descriptor(ctx)
+	if err != nil || descriptor.InternalFallback() {
+		return nil, false
+	}
 	return t, ok
 }
 func (r *Registry) Lookup(n string) (Tool, bool) { t, ok := r.tools[n]; return t, ok }
 func (r *Registry) Allowed(n string) bool        { return r.allow[n] }
 func (r *Registry) Manifest(ctx api.Context) (contract.Manifest, error) {
 	entries := make([]contract.ManifestEntry, 0, len(r.tools))
+	intentOwners := make(map[string]string, len(r.tools))
 	for name, registered := range r.tools {
 		if !r.allow[name] {
 			continue
@@ -62,6 +70,9 @@ func (r *Registry) Manifest(ctx api.Context) (contract.Manifest, error) {
 		descriptor, err := registered.Descriptor(ctx)
 		if err != nil {
 			return contract.Manifest{}, fmt.Errorf("describe tool %s: %w", name, err)
+		}
+		if descriptor.InternalFallback() {
+			continue
 		}
 		available := true
 		for _, required := range descriptor.RequiredCapabilities() {
@@ -71,6 +82,11 @@ func (r *Registry) Manifest(ctx api.Context) (contract.Manifest, error) {
 			}
 		}
 		if available {
+			intent := descriptor.PrimaryIntent()
+			if owner, duplicate := intentOwners[intent]; duplicate {
+				return contract.Manifest{}, fmt.Errorf("primary intent %q is owned by both %q and %q", intent, owner, name)
+			}
+			intentOwners[intent] = name
 			entries = append(entries, contract.NewManifestEntry(descriptor))
 		}
 	}
@@ -78,24 +94,9 @@ func (r *Registry) Manifest(ctx api.Context) (contract.Manifest, error) {
 	return contract.Manifest{Version: contract.ManifestVersion, Tools: entries}, nil
 }
 func (r *Registry) Definitions(ctx api.Context) []contract.Definition {
-	out := []contract.Definition{}
-	for n, t := range r.tools {
-		if !r.allow[n] {
-			continue
-		}
-		if d, e := t.Descriptor(ctx); e == nil {
-			available := true
-			for _, required := range d.RequiredCapabilities() {
-				if !ctx.HasCapability(api.Capability(required)) {
-					available = false
-					break
-				}
-			}
-			if available {
-				out = append(out, contract.NewDefinition(d))
-			}
-		}
+	manifest, err := r.Manifest(ctx)
+	if err != nil {
+		return nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return manifest.Definitions()
 }

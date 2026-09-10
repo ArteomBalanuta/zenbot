@@ -22,12 +22,19 @@ type DatabaseQuery struct {
 
 func (t DatabaseQuery) Name() string { return databaseQueryName }
 func (t DatabaseQuery) Descriptor(api.Context) (contract.Descriptor, error) {
-	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","enum":["message_count","registered_user_count","recent_messages_for_requester","recent_messages_for_user","recent_messages_for_room","known_nicks_for_trip"]},"limit":{"type":"integer","minimum":1,"maximum":60},"room":{"type":"string","minLength":1,"maxLength":100},"trip":{"type":"string","minLength":1,"maxLength":100},"nick":{"type":"string","minLength":1,"maxLength":100}},"required":["query"]}`)
-	return contract.NewDescriptor(databaseQueryName, "Approved database query", "Run one fixed read-only database query.", "database", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, json.RawMessage(`{"type":"any"}`), []string{"database"}, nil, []string{"Do not use for generated SQL or private data."})
+	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","enum":["message_count","registered_user_count","recent_messages_for_requester","recent_messages_for_room"]},"limit":{"type":"integer","minimum":1,"maximum":60},"room":{"type":"string","minLength":1,"maxLength":100},"trip":{"type":"string","minLength":1,"maxLength":100},"nick":{"type":"string","minLength":1,"maxLength":100}},"required":["query"]}`)
+	return contract.NewDescriptor(databaseQueryName, "Approved database query", "Run one fixed read-only database query.", "database", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, json.RawMessage(`{"type":"any"}`), []string{"database"}, nil, []string{"Do not use for generated SQL or private data."}, contract.WithPrimaryIntent("approved_database_query"))
 }
 func (t DatabaseQuery) Execute(ctx context.Context, agent api.Context, raw json.RawMessage) (contract.Result, error) {
 	if t.Repository == nil {
 		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "database query failed"), nil
+	}
+	descriptor, err := t.Descriptor(agent)
+	if err != nil {
+		return contract.Result{}, err
+	}
+	if err := contract.ValidateArguments(descriptor.Parameters(), raw); err != nil {
+		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", "database query arguments were rejected"), nil
 	}
 	var input struct {
 		Query string `json:"query"`

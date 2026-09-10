@@ -26,7 +26,8 @@ type RoomUserDirectory interface {
 	FindRoomUsers(room string) (RoomUserSnapshot, bool)
 }
 
-// RoomUsers exposes one current public managed-room user snapshot.
+// RoomUsers exposes the caller's current room snapshot. Remote-room presence
+// is intentionally owned by the typed saturn_list provider.
 type RoomUsers struct {
 	Directory RoomUserDirectory
 	MaxUsers  int
@@ -35,7 +36,7 @@ type RoomUsers struct {
 func (t RoomUsers) Name() string { return roomUsersName }
 
 func (t RoomUsers) Descriptor(api.Context) (contract.Descriptor, error) {
-	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"room":{"type":"string","minLength":1,"maxLength":100}}}`)
+	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`)
 	result := contract.SchemaObject(map[string]json.RawMessage{
 		"room":          json.RawMessage(`{"type":"string"}`),
 		"users":         json.RawMessage(`{"type":"array","items":{"type":"string"}}`),
@@ -43,7 +44,7 @@ func (t RoomUsers) Descriptor(api.Context) (contract.Descriptor, error) {
 		"returnedCount": json.RawMessage(`{"type":"integer"}`),
 		"truncated":     json.RawMessage(`{"type":"boolean"}`),
 	}, []string{"room", "users", "count", "returnedCount", "truncated"}, false)
-	return contract.NewDescriptor(roomUsersName, "Managed room users", "Get the current live snapshot of users currently present in the caller's current room or an already managed public room. Use this for current-room presence and counts. For a different room that may not have a managed replica, call saturn_list so Saturn can fetch a temporary live room snapshot.", "managed-room-users", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"managed_room_users"}, nil, []string{"Do not use database_query or message history to infer current presence. Do not use for whispers, private rooms, unmanaged rooms, or historical membership; use saturn_list for a different unmanaged room."})
+	return contract.NewDescriptor(roomUsersName, "Current room users", "Get the current live snapshot of users currently present in the caller's room. Use saturn_list for any other room.", "room-users", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"room_users"}, nil, []string{"Do not use for another room, whispers, private rooms, or historical membership; use saturn_list for other-room presence."}, contract.WithPrimaryIntent("current_room_presence"))
 }
 
 func (t RoomUsers) Execute(_ context.Context, agent api.Context, args json.RawMessage) (contract.Result, error) {
@@ -54,28 +55,17 @@ func (t RoomUsers) Execute(_ context.Context, agent api.Context, args json.RawMe
 	if err := json.Unmarshal(args, &raw); err != nil || raw == nil {
 		return contract.Result{}, fmt.Errorf("invalid room users arguments")
 	}
-	for name := range raw {
-		if name != "room" {
-			return contract.Result{}, fmt.Errorf("invalid room users arguments")
-		}
-	}
-	var input struct {
-		Room *string `json:"room"`
-	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if len(raw) != 0 {
 		return contract.Result{}, fmt.Errorf("invalid room users arguments")
 	}
 	room := agent.Room()
-	if input.Room != nil {
-		room = *input.Room
-	}
 	room = strings.TrimSpace(room)
 	if room == "" || len([]rune(room)) > 100 {
 		return contract.Result{}, fmt.Errorf("invalid room users room")
 	}
 	snapshot, ok := t.Directory.FindRoomUsers(room)
 	if !ok || strings.TrimSpace(snapshot.Room) == "" {
-		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", fmt.Sprintf("No managed live snapshot is available for room %q; call saturn_list with that room to fetch a temporary live snapshot.", room)), nil
+		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", fmt.Sprintf("No live snapshot is available for room %q.", room)), nil
 	}
 	users := make([]string, 0, len(snapshot.Users))
 	for _, user := range snapshot.Users {

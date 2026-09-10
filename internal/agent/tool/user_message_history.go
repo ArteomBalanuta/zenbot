@@ -32,7 +32,7 @@ func (t UserMessageHistory) Descriptor(api.Context) (contract.Descriptor, error)
 		"oldestCreatedOn": json.RawMessage(`{"type":"any"}`),
 		"newestCreatedOn": json.RawMessage(`{"type":"any"}`),
 	}, []string{"rows", "returnedCount", "oldestCreatedOn", "newestCreatedOn"}, false)
-	return contract.NewDescriptor(userMessageHistoryName, "User message history", "Fetch up to 500 latest public messages by one named user across all rooms; pass room only to restrict the search.", "history", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"messages"}, nil, []string{"Do not use for whispers or current-presence claims."})
+	return contract.NewDescriptor(userMessageHistoryName, "User message history", "Fetch up to 500 latest public messages by one named user across all rooms; pass room only to restrict the search.", "history", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"messages"}, nil, []string{"Do not use for whispers or current-presence claims."}, contract.WithPrimaryIntent("named_user_public_history"))
 }
 
 func (t UserMessageHistory) Execute(ctx context.Context, agent api.Context, args json.RawMessage) (contract.Result, error) {

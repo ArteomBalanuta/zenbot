@@ -523,24 +523,24 @@ func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing
 }
 
 func TestRegistryToolLoopCorrectsTypedSaturnArgumentsWithoutInventingCommandText(t *testing.T) {
-	definition, ok := commandcatalog.AgentEntry("list")
+	definition, ok := commandcatalog.AgentEntry("weather")
 	if !ok {
-		t.Fatal("list command is not agent actionable")
+		t.Fatal("weather command is not agent actionable")
 	}
 	gateway := &typedCommandGateway{}
 	command := agenttool.SaturnCommand{Definition: definition, Gateway: gateway}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("bad", command.Name(), map[string]any{"arguments": "lounge"})}, "tool_calls"),
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("fixed", command.Name(), map[string]any{"room": "lounge"})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("bad", command.Name(), map[string]any{"arguments": "Tokyo"})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("fixed", command.Name(), map[string]any{"location": "Tokyo"})}, "tool_calls"),
 		llm.NewLlmResponse("completed", nil, "stop"),
 	}}
 	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{command}, []string{command.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2, MaxCallsPerTool: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	invocation := runtime.NewInvocation("typed-correction", runtime.NewContext("room", "moderator", "trip", "", false, nil), "list users in lounge", runtime.MENTION, "", false)
+	invocation := runtime.NewInvocation("typed-correction", runtime.NewContext("room", "moderator", "trip", "", false, nil), "show weather in Tokyo", runtime.MENTION, "", false)
 	completion, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, "")
-	if err != nil || completion.Response.Content() != "completed" || gateway.calls != 1 || gateway.command != "list" || gateway.arguments != "lounge" {
+	if err != nil || completion.Response.Content() != "completed" || gateway.calls != 1 || gateway.command != "weather" || gateway.arguments != "Tokyo" {
 		t.Fatalf("completion=%#v gateway=%#v err=%v", completion, gateway, err)
 	}
 	if len(client.requests) != 3 || len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 1 {

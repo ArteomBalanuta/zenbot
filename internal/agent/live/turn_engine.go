@@ -103,7 +103,7 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 		}
 		observability.Info(ctx, "agent.tool.batch_completed", "cycle", cycle, "tool_call_count", len(batch), "failure_count", failures)
 		for _, item := range batch {
-			if err := task.Observe(item.Call.Name, item.Call, item.Result); err != nil {
+			if err := task.Observe(e.primaryIntent(item.Call.Name), item.Call, item.Result); err != nil {
 				return llm.LlmResponse{}, nil, nil, fmt.Errorf("reduce task observation: %w", err)
 			}
 		}
@@ -181,7 +181,7 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 			if err := phase.Transition(turn.PhaseModel); err != nil {
 				return llm.LlmResponse{}, nil, false, err
 			}
-			next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.task_obligation_retry.%d", cycle)), llm.NewLlmRequest(messages, toolsForPending(providerTools, pending), false, nil, nil))
+			next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.task_obligation_retry.%d", cycle)), llm.NewLlmRequest(messages, toolsForPending(providerTools, pending, e.Registry, e.Agent), false, nil, nil))
 			if err != nil {
 				return llm.LlmResponse{}, nil, false, err
 			}
@@ -418,11 +418,11 @@ func withTaskState(messages []llm.LlmMessage, state *turn.TaskState) []llm.LlmMe
 	return append(filtered, llm.NewLlmMessage("system", "TASK_STATE_JSON="+string(payload), nil, ""))
 }
 
-func toolsForPending(providerTools []any, pending []turn.Obligation) []any {
+func toolsForPending(providerTools []any, pending []turn.Obligation, registry *tool.Registry, agent api.Context) []any {
 	wanted := make(map[string]struct{}, len(pending))
 	for _, obligation := range pending {
-		if obligation.Kind == turn.ObligationTool && obligation.ProviderTool != "" {
-			wanted[obligation.ProviderTool] = struct{}{}
+		if obligation.Kind == turn.ObligationTool && obligation.PrimaryIntent != "" {
+			wanted[obligation.PrimaryIntent] = struct{}{}
 		}
 	}
 	if len(wanted) == 0 {
@@ -439,11 +439,30 @@ func toolsForPending(providerTools []any, pending []turn.Obligation) []any {
 			continue
 		}
 		name, _ := function["name"].(string)
-		if _, found := wanted[name]; found {
+		registered, found := registry.Lookup(name)
+		if !found {
+			continue
+		}
+		descriptor, err := registered.Descriptor(agent)
+		if err != nil {
+			continue
+		}
+		if _, found := wanted[descriptor.PrimaryIntent()]; found {
 			filtered = append(filtered, raw)
 		}
 	}
 	return filtered
+}
+
+func (e TurnEngine) primaryIntent(toolName string) string {
+	if e.Registry != nil {
+		if registered, found := e.Registry.Lookup(toolName); found {
+			if descriptor, err := registered.Descriptor(e.Agent); err == nil {
+				return descriptor.PrimaryIntent()
+			}
+		}
+	}
+	return "unknown_tool"
 }
 
 func availableProviderTools(providerTools []any, ledger *execution.Ledger) []any {

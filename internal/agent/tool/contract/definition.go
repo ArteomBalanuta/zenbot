@@ -32,6 +32,7 @@ const (
 
 type Descriptor struct {
 	name, label, description, category         string
+	primaryIntent                              string
 	access                                     Access
 	effect                                     Effect
 	mode                                       ResultMode
@@ -41,6 +42,7 @@ type Descriptor struct {
 	timeout                                    time.Duration
 	whenNotUse                                 []string
 	routing                                    RoutingMetadata
+	internalFallback                           bool
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
@@ -66,7 +68,7 @@ func NewDescriptor(name, label, description, category string, access Access, eff
 	if err := ValidateSchema(resultSchema, false); err != nil {
 		return Descriptor{}, err
 	}
-	descriptor := Descriptor{name: name, label: label, description: description, category: category, access: access, effect: effect, mode: mode, parameters: clone(parameters), resultSchema: clone(resultSchema), capabilities: sortedClone(capabilities), prerequisites: sortedClone(prerequisites), reads: sortedClone(reads), writes: sortedClone(writes), idempotent: idempotent, timeout: timeout, whenNotUse: append([]string(nil), whenNotUse...)}
+	descriptor := Descriptor{name: name, label: label, description: description, category: category, primaryIntent: name, access: access, effect: effect, mode: mode, parameters: clone(parameters), resultSchema: clone(resultSchema), capabilities: sortedClone(capabilities), prerequisites: sortedClone(prerequisites), reads: sortedClone(reads), writes: sortedClone(writes), idempotent: idempotent, timeout: timeout, whenNotUse: append([]string(nil), whenNotUse...)}
 	for _, option := range options {
 		if option == nil {
 			return Descriptor{}, &ContractError{"nil descriptor option"}
@@ -95,6 +97,7 @@ func (d Descriptor) Name() string                   { return d.name }
 func (d Descriptor) Label() string                  { return d.label }
 func (d Descriptor) Description() string            { return d.description }
 func (d Descriptor) Category() string               { return d.category }
+func (d Descriptor) PrimaryIntent() string          { return d.primaryIntent }
 func (d Descriptor) Access() Access                 { return d.access }
 func (d Descriptor) Effect() Effect                 { return d.effect }
 func (d Descriptor) ResultMode() ResultMode         { return d.mode }
@@ -110,6 +113,7 @@ func (d Descriptor) Idempotent() bool         { return d.idempotent }
 func (d Descriptor) Timeout() time.Duration   { return d.timeout }
 func (d Descriptor) IsReadOnly() bool         { return d.effect == ReadOnly }
 func (d Descriptor) Routing() RoutingMetadata { return cloneRoutingMetadata(d.routing) }
+func (d Descriptor) InternalFallback() bool   { return d.internalFallback }
 
 type Definition struct {
 	Name, Description string

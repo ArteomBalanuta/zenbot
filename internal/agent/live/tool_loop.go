@@ -414,7 +414,7 @@ func planningTools(registry *tool.Registry, agent api.Context, providerTools []a
 			continue
 		}
 		tools = append(tools, PlanningTool{
-			Name: descriptor.Name(), Description: descriptor.Description(), Effect: descriptor.Effect(), ResultMode: descriptor.ResultMode(),
+			Name: descriptor.Name(), PrimaryIntent: descriptor.PrimaryIntent(), Description: descriptor.Description(), Effect: descriptor.Effect(), ResultMode: descriptor.ResultMode(),
 		})
 	}
 	return tools

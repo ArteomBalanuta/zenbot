@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const ManifestVersion = "1.0"
+const ManifestVersion = "1.1"
 
 // Example binds a natural-language request to valid structured tool arguments.
 type Example struct {
@@ -26,6 +26,34 @@ type RoutingMetadata struct {
 // DescriptorOption adds optional metadata while preserving existing descriptor
 // construction call sites.
 type DescriptorOption func(*Descriptor) error
+
+// WithPrimaryIntent assigns the stable semantic operation owned by this
+// provider. A caller-visible manifest may expose only one provider per intent.
+func WithPrimaryIntent(intent string) DescriptorOption {
+	intent = strings.TrimSpace(intent)
+	return func(descriptor *Descriptor) error {
+		if descriptor == nil {
+			return &ContractError{"nil descriptor"}
+		}
+		if !nameRE.MatchString(intent) {
+			return &ContractError{"invalid primary intent"}
+		}
+		descriptor.primaryIntent = intent
+		return nil
+	}
+}
+
+// WithInternalFallback marks a provider as an executor-owned implementation
+// detail. It remains callable by trusted code but is never offered to a model.
+func WithInternalFallback() DescriptorOption {
+	return func(descriptor *Descriptor) error {
+		if descriptor == nil {
+			return &ContractError{"nil descriptor"}
+		}
+		descriptor.internalFallback = true
+		return nil
+	}
+}
 
 // WithRouting attaches validated semantic routing metadata to a descriptor.
 func WithRouting(metadata RoutingMetadata) DescriptorOption {
@@ -99,6 +127,7 @@ type Resources struct {
 // ManifestEntry is the JSON-safe representation of one executable tool.
 type ManifestEntry struct {
 	Name                    string          `json:"name"`
+	PrimaryIntent           string          `json:"primaryIntent"`
 	Actionable              bool            `json:"actionable"`
 	Label                   string          `json:"label"`
 	Description             string          `json:"description"`
@@ -120,6 +149,7 @@ type ManifestEntry struct {
 func NewManifestEntry(descriptor Descriptor) ManifestEntry {
 	return ManifestEntry{
 		Name:                    descriptor.Name(),
+		PrimaryIntent:           descriptor.PrimaryIntent(),
 		Actionable:              true,
 		Label:                   descriptor.Label(),
 		Description:             descriptor.Description(),
@@ -147,6 +177,7 @@ func NewManifestEntry(descriptor Descriptor) ManifestEntry {
 func (entry ManifestEntry) Definition() Definition {
 	metadata := []string{
 		entry.Description,
+		"Primary intent: " + entry.PrimaryIntent,
 		"Label: " + entry.Label,
 		"Category: " + entry.Category,
 		"Access: " + string(entry.Access),
@@ -189,7 +220,7 @@ func (entry ManifestEntry) Definition() Definition {
 // ProviderDefinition keeps the model-facing contract compact while preserving
 // the complete inspectable metadata in ManifestEntry.
 func (entry ManifestEntry) ProviderDefinition() Definition {
-	header := []string{"L=" + entry.Label, "C=" + entry.Category, "A=" + string(entry.Access)}
+	header := []string{"I=" + entry.PrimaryIntent, "L=" + entry.Label, "A=" + string(entry.Access)}
 	if len(entry.Routing.Aliases) > 0 {
 		header = append(header, "Aliases="+strings.Join(entry.Routing.Aliases, ","))
 	}

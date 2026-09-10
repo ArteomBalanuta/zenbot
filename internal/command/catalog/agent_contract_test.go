@@ -122,3 +122,32 @@ func TestAgentCatalogDerivedPoliciesRemainExact(t *testing.T) {
 		t.Fatal("hidden recursive command l was exposed")
 	}
 }
+
+func TestAgentCatalogDeclaresAuthoritativePrimaryIntents(t *testing.T) {
+	list, ok := AgentEntry("list")
+	if !ok || list.Agent.PrimaryIntent != "remote_room_presence" || list.Agent.InternalFallback {
+		t.Fatalf("list routing policy = %#v", list.Agent)
+	}
+	nicks, ok := AgentEntry("nicks")
+	if !ok || nicks.Agent.PrimaryIntent != "trip_nicknames" || nicks.Agent.InternalFallback {
+		t.Fatalf("nicks routing policy = %#v", nicks.Agent)
+	}
+	messages, ok := AgentEntry("messages")
+	if !ok || messages.Agent.PrimaryIntent != "trip_public_message_history" || messages.Agent.InternalFallback {
+		t.Fatalf("messages routing policy = %#v", messages.Agent)
+	}
+	seen := map[string]string{}
+	for _, entry := range AgentEntries() {
+		intent := entry.Agent.PrimaryIntent
+		if intent == "" {
+			t.Fatalf("command %q has no primary intent", entry.Canonical)
+		}
+		if entry.Agent.InternalFallback {
+			continue
+		}
+		if owner, duplicate := seen[intent]; duplicate {
+			t.Fatalf("intent %q is owned by %q and %q", intent, owner, entry.Canonical)
+		}
+		seen[intent] = entry.Canonical
+	}
+}

@@ -28,7 +28,7 @@ func TestRoomUsersDescriptorAndBoundedDeterministicResult(t *testing.T) {
 	for i := 0; i < 198; i++ {
 		users = append(users, "user"+string(rune('a'+i%26)))
 	}
-	directory := &roomDirectoryStub{snapshots: map[string]agenttool.RoomUserSnapshot{"other": {Room: "Other", Users: users}}}
+	directory := &roomDirectoryStub{snapshots: map[string]agenttool.RoomUserSnapshot{"trusted": {Room: "Trusted", Users: users}}}
 	roomUsers := agenttool.RoomUsers{Directory: directory}
 	d, err := roomUsers.Descriptor(historyContext(t, "trusted"))
 	if err != nil {
@@ -38,7 +38,7 @@ func TestRoomUsersDescriptorAndBoundedDeterministicResult(t *testing.T) {
 		t.Fatalf("descriptor=%#v", d)
 	}
 	definition := d.Description() + " " + strings.Join(d.ResourceReads(), " ")
-	if !strings.Contains(definition, "currently present") || !strings.Contains(definition, "current live snapshot") || !strings.Contains(definition, "saturn_list") {
+	if d.PrimaryIntent() != "current_room_presence" || !strings.Contains(definition, "currently present") || !strings.Contains(definition, "current live snapshot") || !strings.Contains(definition, "saturn_list") {
 		t.Fatalf("room-users contract does not clearly describe current-presence lookup: %q", definition)
 	}
 	var schema struct {
@@ -46,10 +46,10 @@ func TestRoomUsersDescriptorAndBoundedDeterministicResult(t *testing.T) {
 		Required   []string                  `json:"required"`
 		Properties map[string]map[string]any `json:"properties"`
 	}
-	if err := json.Unmarshal(d.Parameters(), &schema); err != nil || schema.Additional || len(schema.Required) != 0 || schema.Properties["room"]["maxLength"] != float64(100) {
+	if err := json.Unmarshal(d.Parameters(), &schema); err != nil || schema.Additional || len(schema.Required) != 0 || len(schema.Properties) != 0 {
 		t.Fatalf("schema=%s err=%v", d.Parameters(), err)
 	}
-	r, err := roomUsers.Execute(context.Background(), historyContext(t, "trusted"), json.RawMessage(`{"room":" OTHER "}`))
+	r, err := roomUsers.Execute(context.Background(), historyContext(t, "trusted"), json.RawMessage(`{}`))
 	if err != nil || r.IsError {
 		t.Fatalf("result=%#v err=%v", r, err)
 	}
@@ -63,19 +63,8 @@ func TestRoomUsersDescriptorAndBoundedDeterministicResult(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.Content), &output); err != nil {
 		t.Fatal(err)
 	}
-	if directory.lastRoom != "OTHER" || output.Room != "Other" || output.Count != 202 || output.ReturnedCount != 200 || !output.Truncated || output.Users[0] != "Alice" || output.Users[1] != "alice" || strings.Contains(r.Content, "trip") {
+	if directory.lastRoom != "trusted" || output.Room != "Trusted" || output.Count != 202 || output.ReturnedCount != 200 || !output.Truncated || output.Users[0] != "Alice" || output.Users[1] != "alice" || strings.Contains(r.Content, "trip") {
 		t.Fatalf("output=%s directory=%#v", r.Content, directory)
-	}
-}
-
-func TestRoomUsersUnavailableSnapshotGuidesModelToRemoteRoomTool(t *testing.T) {
-	directory := &roomDirectoryStub{snapshots: map[string]agenttool.RoomUserSnapshot{}}
-	result, err := (agenttool.RoomUsers{Directory: directory}).Execute(context.Background(), historyContext(t, "programming"), json.RawMessage(`{"room":"lounge"}`))
-	if err != nil || !result.IsError || result.ErrorCode != "TOOL_EXECUTION_FAILED" {
-		t.Fatalf("result=%#v err=%v", result, err)
-	}
-	if !strings.Contains(result.Content, "lounge") || !strings.Contains(result.Content, "saturn_list") {
-		t.Fatalf("unavailable observation cannot guide correction: %q", result.Content)
 	}
 }
 
@@ -86,7 +75,7 @@ func TestRoomUsersUsesTrustedDefaultAndRejectsInvalidWithoutLookup(t *testing.T)
 	if err != nil || result.IsError || directory.lastRoom != "trusted" {
 		t.Fatalf("default result=%#v err=%v directory=%#v", result, err, directory)
 	}
-	for _, args := range []string{`{"room":" "}`, `{"room":123}`, `{"room":"` + strings.Repeat("a", 101) + `"}`} {
+	for _, args := range []string{`{"room":"lounge"}`, `{"room":123}`} {
 		directory.calls = 0
 		if _, err := roomUsers.Execute(context.Background(), historyContext(t, "trusted"), json.RawMessage(args)); err == nil || directory.calls != 0 {
 			t.Fatalf("args=%s err=%v calls=%d", args, err, directory.calls)

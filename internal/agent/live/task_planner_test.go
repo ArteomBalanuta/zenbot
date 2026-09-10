@@ -11,8 +11,8 @@ import (
 
 func plannerTools() []PlanningTool {
 	return []PlanningTool{
-		{Name: "lookup_user", Description: "Look up one user.", Effect: contract.ReadOnly, ResultMode: contract.ModelData},
-		{Name: "notify_user", Description: "Notify one user.", Effect: contract.Action, ResultMode: contract.RoomDelivery},
+		{Name: "lookup_user", PrimaryIntent: "user_lookup", Description: "Look up one user.", Effect: contract.ReadOnly, ResultMode: contract.ModelData},
+		{Name: "notify_user", PrimaryIntent: "user_notification", Description: "Notify one user.", Effect: contract.Action, ResultMode: contract.RoomDelivery},
 	}
 }
 
@@ -55,6 +55,9 @@ func TestSemanticTaskPlannerFreezesObjectiveAndReassignsObligationIDs(t *testing
 	}
 	if obligations[0].Effect != contract.ReadOnly || obligations[0].RequiresReceipt || obligations[1].Effect != contract.Action || !obligations[1].RequiresReceipt {
 		t.Fatalf("model controlled execution requirements: %#v", obligations)
+	}
+	if obligations[0].PrimaryIntent != "user_lookup" || obligations[1].PrimaryIntent != "user_notification" {
+		t.Fatalf("provider names were not converted to stable intents: %#v", obligations)
 	}
 }
 

@@ -301,6 +301,24 @@ func TestNewAgentToolLoopRegistersEveryAgentCommandWithContextualVisibility(t *t
 	if !definitionNames(loop.Registry.Definitions(creator))["saturn_prefix"] || !definitionNames(loop.Registry.Definitions(creator))["saturn_ban"] {
 		t.Fatal("creator command inventory is incomplete")
 	}
+	manifest, err := loop.Registry.Manifest(creator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := map[string][]string{}
+	for _, entry := range manifest.Tools {
+		owners[entry.PrimaryIntent] = append(owners[entry.PrimaryIntent], entry.Name)
+	}
+	for intent, want := range map[string]string{
+		"current_room_presence":     "room_users",
+		"remote_room_presence":      "saturn_list",
+		"named_user_public_history": "user_message_history",
+		"trip_nicknames":            "saturn_nicks",
+	} {
+		if got := owners[intent]; len(got) != 1 || got[0] != want {
+			t.Fatalf("primary intent %q owners=%v, want [%s]", intent, got, want)
+		}
+	}
 }
 
 func definitionNames(definitions []contract.Definition) map[string]bool {

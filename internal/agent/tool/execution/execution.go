@@ -203,6 +203,9 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 	if err != nil {
 		return contract.ErrorResult(c.ID, c.Name, "INVALID_TOOL_CONTRACT", "invalid tool contract")
 	}
+	if d.InternalFallback() {
+		return contract.ErrorResult(c.ID, c.Name, "TOOL_NOT_ALLOWED", "tool is not model-callable")
+	}
 	for _, cap := range d.RequiredCapabilities() {
 		if !agent.HasCapability(api.Capability(cap)) {
 			return contract.ErrorResult(c.ID, c.Name, "TOOL_NOT_AUTHORIZED", "tool is not authorized")

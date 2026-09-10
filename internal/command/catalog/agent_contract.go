@@ -24,6 +24,8 @@ type AgentExample struct {
 type AgentToolSpec struct {
 	Actionable           bool
 	HiddenReason         string
+	PrimaryIntent        string
+	InternalFallback     bool
 	Label                string
 	Description          string
 	Category             string
@@ -41,6 +43,10 @@ type agentToolOption func(*AgentToolSpec)
 
 func targetedCommand(spec *AgentToolSpec)      { spec.TargetsUser = true }
 func runCommandCompatible(spec *AgentToolSpec) { spec.RunCommandCompatible = true }
+func primaryIntent(intent string) agentToolOption {
+	return func(spec *AgentToolSpec) { spec.PrimaryIntent = strings.TrimSpace(intent) }
+}
+func internalAgentFallback(spec *AgentToolSpec) { spec.InternalFallback = true }
 
 func agentTool(label, description, category string, access AgentAccess, arguments AgentArgumentContract, targets []string, useWhen, whenNotUse, examplePrompt, exampleArguments string, options ...agentToolOption) AgentToolSpec {
 	spec := AgentToolSpec{
