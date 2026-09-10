@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,6 +45,54 @@ func TestOpenMigratesLegacySQLiteRowsAndArchivesSource(t *testing.T) {
 	}
 	if _, err := os.Stat(legacy + ".bak"); err != nil {
 		t.Fatalf("legacy archive missing: %v", err)
+	}
+}
+
+func TestOpenConnectsToSaturnCredentiallessH2Database(t *testing.T) {
+	dir := t.TempDir()
+	stem := filepath.Join(dir, "database")
+	config := testH2Config(dir, stem)
+	createSaturnH2Database(t, config.H2Jar, stem)
+
+	database, err := Open(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	var count int
+	if err := database.DB.QueryRow("SELECT COUNT(*) FROM saturn_seed").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("saturn seed count = %d, want 1", count)
+	}
+}
+
+func TestOpenNormalizesRelativeBaseDirectoryForPGServer(t *testing.T) {
+	baseDirectory, err := os.MkdirTemp(".", "h2-relative-base-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(baseDirectory) })
+	relativeBaseDirectory, err := filepath.Rel(".", baseDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := testH2Config(relativeBaseDirectory, "database")
+	database, err := Open(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	var version string
+	if err := database.DB.QueryRow("SELECT H2VERSION()").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version == "" {
+		t.Fatal("H2 version is empty")
 	}
 }
 
@@ -94,6 +143,21 @@ func createLegacySQLite(t *testing.T, path, name string, id, created int64) {
 	}
 	if _, err := database.Exec(`INSERT INTO messages(id,trip,name,hash,message,created_on,channel) VALUES(?,?,?,?,?,?,?)`, id, "trip", name, "hash", "migrated", created, "programming"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func createSaturnH2Database(t *testing.T, jar, stem string) {
+	t.Helper()
+	url := "jdbc:h2:file:" + stem + ";AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;NON_KEYWORDS=VALUE"
+	command := exec.Command(
+		"java", "-cp", jar, "org.h2.tools.Shell",
+		"-url", url,
+		"-user", "",
+		"-password", "",
+		"-sql", "CREATE TABLE saturn_seed(id BIGINT PRIMARY KEY); INSERT INTO saturn_seed VALUES(1)",
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("create Saturn H2 database: %v\n%s", err, output)
 	}
 }
 

@@ -283,6 +283,11 @@ func Open(ctx context.Context, c Config) (*Database, error) {
 			c.BaseDir = "."
 		}
 	}
+	absoluteBaseDir, err := filepath.Abs(c.BaseDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve H2 base directory: %w", err)
+	}
+	c.BaseDir = absoluteBaseDir
 	c.DatabaseStem = filepath.Base(c.DatabaseStem)
 	s := &processServer{cfg: c}
 	if err := s.Start(ctx); err != nil {
@@ -297,6 +302,9 @@ func Open(ctx context.Context, c Config) (*Database, error) {
 		_ = s.Stop(context.Background())
 		return nil, err
 	}
+	// Saturn initializes its embedded H2 files through DriverManager without a
+	// username. Preserve that credentialless ownership model over the PG wire.
+	pgxConfig.User = ""
 	// H2's PostgreSQL compatibility server rejects PostgreSQL startup
 	// runtime parameters; the wire protocol itself remains usable.
 	pgxConfig.RuntimeParams = map[string]string{}
