@@ -30,8 +30,7 @@ func (p *parityPolicy) Apply(_ context.Context, i PolicyInput) (PolicyResult, er
 func TestParityPolicyInputSnapshotsAndChainCarriesAllFields(t *testing.T) {
 	st := NewState(ExecutionLimits{})
 	defs := []contract.Definition{{Name: "x", Description: "x", Parameters: []byte(`{"type":"object"}`)}}
-	required := "x"
-	in, err := NewPolicyInput(llm.NewLlmResponse("start", nil, "stop"), []llm.LlmMessage{llm.NewLlmMessage("user", "p", nil, "")}, defs, parityGuard{}, st, "prompt", "corr", &required)
+	in, err := NewPolicyInput(llm.NewLlmResponse("start", nil, "stop"), []llm.LlmMessage{llm.NewLlmMessage("user", "p", nil, "")}, defs, parityGuard{}, st, "prompt", "corr")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +41,7 @@ func TestParityPolicyInputSnapshotsAndChainCarriesAllFields(t *testing.T) {
 	if err != nil || got.Response.Content() != "next" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if p.seen.State != st || p.seen.Prompt != "prompt" || p.seen.CorrelationID != "corr" || p.seen.CommandProseGuard == nil || p.seen.RequiredFreshTool == nil || p.seen.Definitions[0].Parameters[0] != '{' {
+	if p.seen.State != st || p.seen.Prompt != "prompt" || p.seen.CorrelationID != "corr" || p.seen.CommandProseGuard == nil || p.seen.Definitions[0].Parameters[0] != '{' {
 		t.Fatal("fields not preserved")
 	}
 }
@@ -54,7 +53,7 @@ func TestParityUnverifiedActionCorrectsOnceAndReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in, _ := NewPolicyInput(llm.NewLlmResponse("I did it", nil, "stop"), []llm.LlmMessage{}, []contract.Definition{}, parityGuard{}, st, "p", "c", nil)
+	in, _ := NewPolicyInput(llm.NewLlmResponse("I did it", nil, "stop"), []llm.LlmMessage{}, []contract.Definition{}, parityGuard{}, st, "p", "c")
 	r, err := p.Apply(context.Background(), in)
 	if err != nil || r.Response.Content() != "corrected" || corr.calls != 1 || !st.UnverifiedActionChecked() {
 		t.Fatalf("%+v %v", r, err)
@@ -70,24 +69,6 @@ func TestParityUnverifiedActionCorrectsOnceAndReset(t *testing.T) {
 	}
 }
 
-func TestParityFinalValidatorRequiresRealFreshResultAndFreshSynthesis(t *testing.T) {
-	st := NewState(ExecutionLimits{})
-	st.RecordSuccessfulTool(UserMessageHistory)
-	if err := (FinalValidator{}).Validate(llm.NewLlmResponse("new", nil, "stop"), st, UserMessageHistory); err == nil {
-		t.Fatal("marker must not satisfy evidence")
-	}
-	st.MarkToolAttempted(1)
-	_ = st.RecordToolSuccess()
-	_ = st.RecordSuccessfulToolResult(contract.SuccessResult("id", UserMessageHistory, "history"))
-	history := []llm.LlmMessage{llm.NewLlmMessage("assistant", "old", nil, "")}
-	if err := (FinalValidator{}).ValidateWithHistory(llm.NewLlmResponse("old", nil, "stop"), history, UserMessageHistory, st.SuccessfulToolResults()); err == nil {
-		t.Fatal("stale synthesis accepted")
-	}
-	if err := (FinalValidator{}).ValidateWithHistory(llm.NewLlmResponse("new", nil, "stop"), history, UserMessageHistory, st.SuccessfulToolResults()); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestParityMemoryEvidenceUsesContextBucket(t *testing.T) {
 	m := NewMemoryStore()
 	a, _ := api.NewContext("room-a", "u", "", "", false, []string{})
@@ -97,23 +78,6 @@ func TestParityMemoryEvidenceUsesContextBucket(t *testing.T) {
 	}
 	if len(m.EvidenceFor(a)) != 1 || len(m.EvidenceFor(b)) != 0 {
 		t.Fatal("cross-key evidence")
-	}
-}
-
-func TestParityFreshCorrectionHonorsDisabledToolsAndRejectsEmptyJSON(t *testing.T) {
-	client := &scriptedLLM{responses: []llm.LlmResponse{llm.NewLlmResponse("unused", nil, "stop")}}
-	executor := &countingExecutor{result: contract.SuccessResult("id", "room_users", "ok")}
-	state := NewState(ExecutionLimits{MaxToolCalls: 2})
-	state.DisableTools()
-	ctx, _ := api.NewContext("room", "user", "", "", false, []string{})
-	_, err := (FreshDataCoordinator{Client: client, Executor: executor}).Process(context.Background(), FreshProcessInput{
-		Response: llm.NewLlmResponse("answer", nil, "stop"), RequiredTool: "room_users", Context: ctx, State: state,
-	})
-	if err == nil || client.calls != 0 || executor.calls != 0 {
-		t.Fatalf("disabled correction executed: err=%v client=%d executor=%d", err, client.calls, executor.calls)
-	}
-	if exactFreshResponse(llm.NewLlmResponse("", []llm.LlmToolCall{llm.NewLlmToolCall("id", "room_users", "")}, "tool"), "room_users", "") {
-		t.Fatal("empty arguments accepted as a fresh call")
 	}
 }
 

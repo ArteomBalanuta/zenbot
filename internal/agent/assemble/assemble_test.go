@@ -107,6 +107,36 @@ func TestSystemPromptSelectsModeAndDynamicSQLPoliciesAndCarriesMetadata(t *testi
 	}
 }
 
+func TestSystemPromptCarriesTrustedModeratorAuthority(t *testing.T) {
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := testAssembler(t, catalog).Assemble(
+		context.Background(),
+		invocation(runtime.DIRECT, "kick doggBot", runtime.ModerationCommands),
+		nil,
+		"",
+		nil,
+		Command,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := request.Messages()[0].Content()
+	for _, expected := range []string{
+		`"capabilities":["MODERATION_COMMANDS"]`,
+		`"canModerate":true`,
+		`"canPermanentlyBan":false`,
+		"Every tool included in the current provider manifest is already authorized for this caller",
+		"caller.canModerate is true",
+	} {
+		if !strings.Contains(system, expected) {
+			t.Fatalf("system prompt omits trusted moderator authority %q: %s", expected, system)
+		}
+	}
+}
+
 func TestAssembleKeepsUntrustedContextOutsideSystemRoleAndOmitsIdentitySecrets(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {
@@ -179,6 +209,28 @@ func TestSystemPromptRequiresTerseOptionRepliesToContinuePriorExchange(t *testin
 	for _, required := range []string{"bare number", "immediately preceding assistant", "without asking for clarification"} {
 		if !strings.Contains(system, required) {
 			t.Fatalf("system prompt does not require option follow-up resolution %q", required)
+		}
+	}
+}
+
+func TestSystemPromptUsesProductionCommandToolNames(t *testing.T) {
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := testAssembler(t, catalog).Assemble(context.Background(), invocation(runtime.DIRECT, "show the weather"), nil, "", nil, Talk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := request.Messages()[0].Content()
+	for _, stale := range []string{"Only commands exposed by run_command exist", "call run_command before answering", "for a run_command tool call"} {
+		if strings.Contains(system, stale) {
+			t.Fatalf("system prompt requires absent compatibility tool: %q", stale)
+		}
+	}
+	for _, required := range []string{"saturn_<canonical>", "saturn_weather", "saturn_time"} {
+		if !strings.Contains(system, required) {
+			t.Fatalf("system prompt omits production command contract %q", required)
 		}
 	}
 }
@@ -266,7 +318,7 @@ func TestProjectPairsToolCallsAndDropsOrphansWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestTruncateFreshnessBoundsAndCancellation(t *testing.T) {
+func TestTruncateBoundsAndCancellation(t *testing.T) {
 	if Truncate("a😀b", 2) != "a😀" || CodePointCount("a😀b") != 3 || Truncate("x", 0) != "" {
 		t.Fatal("unicode bounds incorrect")
 	}
@@ -275,19 +327,6 @@ func TestTruncateFreshnessBoundsAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := testAssembler(t, catalog)
-	r, err := a.Assemble(context.Background(), invocation(runtime.DIRECT, "tell me about jill user"), nil, "", nil, Talk)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.RequiredFreshTool() != "user_message_history" || r.RequiredFreshNick() != "jill" {
-		t.Fatalf("freshness = %q/%q", r.RequiredFreshTool(), r.RequiredFreshNick())
-	}
-	for _, prompt := range []string{"who is president", "who is in room", "tell me about Java"} {
-		r, err := a.Assemble(context.Background(), invocation(runtime.DIRECT, prompt), nil, "", nil, Talk)
-		if err != nil || r.RequiredFreshTool() != "" || r.RequiredFreshNick() != "" {
-			t.Fatalf("false-positive assembly %q => %#v %v", prompt, r, err)
-		}
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := a.Assemble(ctx, invocation(runtime.DIRECT, "hello"), nil, "", nil, Talk); !errors.Is(err, context.Canceled) {

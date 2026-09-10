@@ -21,9 +21,7 @@ func TestStateBoundsFlagsSetsSnapshotsAndEvidence(t *testing.T) {
 		t.Fatal("disable")
 	}
 	s.MarkCommandCorrectionUsed()
-	s.MarkFreshnessCorrectionUsed()
-	s.MarkFreshSynthesisCorrectionUsed()
-	if !s.CommandCorrectionUsed() || !s.FreshnessCorrectionUsed() || !s.FreshSynthesisCorrectionUsed() {
+	if !s.CommandCorrectionUsed() {
 		t.Fatal("flags")
 	}
 	if !s.RecordSuccessfulCommand("x") || s.RecordSuccessfulCommand("x") || !s.RecordFailedCommand("y") || s.RecordFailedCommand("y") {
@@ -68,66 +66,6 @@ func TestPolicyChainCarriesResponseAndStops(t *testing.T) {
 	r, err := p.Apply(context.Background(), PolicyInput{Response: llm.NewLlmResponse("start", nil, "stop")})
 	if err != nil || r.Response.Content() != "two" || r.Continue {
 		t.Fatalf("%+v %v", r, err)
-	}
-}
-func TestHistoryNickAndFreshness(t *testing.T) {
-	ms := []llm.LlmMessage{llm.NewLlmMessage("assistant", "old", nil, ""), llm.NewLlmMessage("assistant", "[Internal tool evidence from x]\nsecret", nil, "")}
-	if got := LatestConversationAssistant(ms); got != "old" {
-		t.Fatal(got)
-	}
-	if NormalizeNick(" @Жанна\\_x ") != "Жанна_x" {
-		t.Fatal("nick")
-	}
-	p := FreshnessPolicy{}
-	tool, nick, ok := p.Required("tell me about @Жанна", nil, nil)
-	if !ok || tool != UserMessageHistory || nick != "Жанна" {
-		t.Fatalf("%q %q %v", tool, nick, ok)
-	}
-	for _, tc := range []struct{ prompt, nick string }{
-		{"show me Jill's messages", "Jill"},
-		{"what has Жанна written?", "Жанна"},
-		{"check it again", "Жанна"},
-	} {
-		historyPrompt := tc.prompt
-		if tc.prompt == "check it again" {
-			historyPrompt = "tell me about Жанна"
-		}
-		history := []llm.LlmMessage{llm.NewLlmMessage("user", historyPrompt, nil, "")}
-		p, n, found := FreshnessPolicy{}.Required(tc.prompt, history, nil)
-		if !found || p != UserMessageHistory || n != tc.nick {
-			t.Fatalf("freshness %q => %q %q %v", tc.prompt, p, n, found)
-		}
-	}
-}
-func TestFreshnessPolicyRecognizesOnlySourceShapedPublicHistoryRequests(t *testing.T) {
-	policy := FreshnessPolicy{}
-	for _, tc := range []struct {
-		prompt, nick string
-	}{
-		{"user named @alice profile", "alice"},
-		{"describe user named alice\\_dev", "alice_dev"},
-		{"summarize Alice's history", "Alice"},
-		{"what did @bob say?", "bob"},
-		{"messages from carol", "carol"},
-	} {
-		tool, nick, ok := policy.Required(tc.prompt, nil, nil)
-		if !ok || tool != UserMessageHistory || nick != tc.nick {
-			t.Fatalf("recognized %q => %q/%q/%v", tc.prompt, tool, nick, ok)
-		}
-	}
-	for _, prompt := range []string{
-		"who is president", "who is in room", "tell me about Java", "user experience", "Rome history", "Shakespeare profile", "check it again",
-	} {
-		if tool, nick, ok := policy.Required(prompt, nil, nil); ok || tool != "" || nick != "" {
-			t.Fatalf("false positive %q => %q/%q/%v", prompt, tool, nick, ok)
-		}
-	}
-	history := []llm.LlmMessage{
-		llm.NewLlmMessage("user", "tell me about alice", nil, ""),
-		llm.NewLlmMessage("tool", "ignored", nil, ""),
-	}
-	if tool, nick, ok := policy.Required("check it again", history, nil); !ok || tool != UserMessageHistory || nick != "alice" {
-		t.Fatalf("follow-up => %q/%q/%v", tool, nick, ok)
 	}
 }
 func TestMemoryPrevalidatesAndRedacts(t *testing.T) {

@@ -37,6 +37,9 @@ func TestRunCommandDescriptorIsClosedBoundedAction(t *testing.T) {
 	if d.Name() != "run_command" || d.Effect() != contract.Action || d.ResultMode() != contract.RoomDelivery || d.Idempotent() || d.Timeout() != 10*time.Second {
 		t.Fatalf("descriptor=%#v", d)
 	}
+	if !strings.Contains(d.Description(), "Invoke this tool immediately") || !strings.Contains(d.Description(), "Do not answer with instructions") {
+		t.Fatalf("execution guidance missing from description: %q", d.Description())
+	}
 	var parameters struct {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`

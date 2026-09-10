@@ -98,16 +98,32 @@ type LlmRequest struct {
 	bypassPromptCache bool
 	responseFormat    any
 	projection        any
+	toolChoice        ToolChoice
 }
 
+type ToolChoice string
+
+const (
+	ToolChoiceAuto     ToolChoice = "auto"
+	ToolChoiceRequired ToolChoice = "required"
+)
+
 func NewLlmRequest(messages []LlmMessage, tools []any, bypassPromptCache bool, responseFormat, projection any) LlmRequest {
-	return LlmRequest{messages: cloneMessages(messages), tools: cloneAnySlice(tools), bypassPromptCache: bypassPromptCache, responseFormat: cloneValue(responseFormat), projection: cloneValue(projection)}
+	return LlmRequest{messages: cloneMessages(messages), tools: cloneAnySlice(tools), bypassPromptCache: bypassPromptCache, responseFormat: cloneValue(responseFormat), projection: cloneValue(projection), toolChoice: ToolChoiceAuto}
 }
 func (r LlmRequest) Messages() []LlmMessage  { return cloneMessages(r.messages) }
 func (r LlmRequest) Tools() []any            { return cloneAnySlice(r.tools) }
 func (r LlmRequest) BypassPromptCache() bool { return r.bypassPromptCache }
 func (r LlmRequest) ResponseFormat() any     { return cloneValue(r.responseFormat) }
 func (r LlmRequest) Projection() any         { return cloneValue(r.projection) }
+func (r LlmRequest) ToolChoice() ToolChoice  { return r.toolChoice }
+func (r LlmRequest) WithToolChoice(choice ToolChoice) LlmRequest {
+	if choice != ToolChoiceRequired {
+		choice = ToolChoiceAuto
+	}
+	r.toolChoice = choice
+	return r
+}
 
 type LlmResponse struct {
 	content             *string

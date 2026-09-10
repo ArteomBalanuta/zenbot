@@ -22,7 +22,6 @@ type PolicyInput struct {
 	State             *State
 	Prompt            string
 	CorrelationID     string
-	RequiredFreshTool *string
 }
 
 func cloneDefinitions(in []contract.Definition) []contract.Definition {
@@ -36,20 +35,16 @@ func clonePolicyInput(in PolicyInput) PolicyInput {
 	out := in
 	out.Messages = append([]llm.LlmMessage(nil), in.Messages...)
 	out.Definitions = cloneDefinitions(in.Definitions)
-	if in.RequiredFreshTool != nil {
-		v := *in.RequiredFreshTool
-		out.RequiredFreshTool = &v
-	}
 	return out
 }
-func NewPolicyInput(response llm.LlmResponse, messages []llm.LlmMessage, definitions []contract.Definition, guard CommandProseGuard, state *State, prompt, correlation string, required *string) (PolicyInput, error) {
+func NewPolicyInput(response llm.LlmResponse, messages []llm.LlmMessage, definitions []contract.Definition, guard CommandProseGuard, state *State, prompt, correlation string) (PolicyInput, error) {
 	if guard == nil || state == nil || messages == nil || definitions == nil {
 		return PolicyInput{}, errors.New("policy input dependencies missing")
 	}
 	if strings.TrimSpace(prompt) == "" || strings.TrimSpace(correlation) == "" {
 		return PolicyInput{}, errors.New("policy input identity missing")
 	}
-	return clonePolicyInput(PolicyInput{response, messages, definitions, guard, state, prompt, correlation, required}), nil
+	return clonePolicyInput(PolicyInput{response, messages, definitions, guard, state, prompt, correlation}), nil
 }
 
 type PolicyResult struct {

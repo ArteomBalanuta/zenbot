@@ -61,6 +61,17 @@ func TestContextCopiesCapabilitiesAndMemoryKey(t *testing.T) {
 		t.Fatal("nil users accepted")
 	}
 }
+
+func TestContextTreatsBlankOptionalModerationTargetAsAbsent(t *testing.T) {
+	c, err := NewContextWithCapabilities("room", "moderator", "trip", "hash", false, []string{}, []Capability{ModerationCommands}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target := c.ModerationTarget(); target != nil {
+		t.Fatalf("blank optional moderation target became present: %q", *target)
+	}
+}
+
 func TestContextPreservesEmptyCollectionsAndJSONNullableEmptyStrings(t *testing.T) {
 	c, err := NewContextWithCapabilities("r", "n", "", "", false, []string{}, []Capability{})
 	if err != nil || c.RoomUsers() == nil || c.Capabilities() == nil {

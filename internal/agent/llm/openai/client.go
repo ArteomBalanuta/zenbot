@@ -244,7 +244,7 @@ func requestPayload(c Config, r llm.LlmRequest) (map[string]any, error) {
 	}
 	if tools := r.Tools(); len(tools) > 0 {
 		p["tools"] = tools
-		p["tool_choice"] = "auto"
+		p["tool_choice"] = string(r.ToolChoice())
 	}
 	if v := r.ResponseFormat(); v != nil {
 		p["response_format"] = v

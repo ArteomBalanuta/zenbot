@@ -49,3 +49,13 @@ func TestResponseDiagnosticsAreDefensivelyCopied(t *testing.T) {
 		t.Fatal("provider diagnostics were not defensively copied")
 	}
 }
+
+func TestLlmRequestCarriesExplicitToolChoice(t *testing.T) {
+	request := llm.NewLlmRequest(nil, []any{map[string]any{"type": "function"}}, false, nil, nil).WithToolChoice(llm.ToolChoiceRequired)
+	if request.ToolChoice() != llm.ToolChoiceRequired {
+		t.Fatalf("tool choice=%q", request.ToolChoice())
+	}
+	if llm.NewLlmRequest(nil, nil, false, nil, nil).ToolChoice() != llm.ToolChoiceAuto {
+		t.Fatal("default tool choice must remain auto")
+	}
+}

@@ -205,18 +205,6 @@ func TestRunnerPassesPublicConversationContextAndSuppressesWhispers(t *testing.T
 	}
 }
 
-func TestRunnerFailsClosedForRequiredFreshHistoryWithoutBoundedLoop(t *testing.T) {
-	client := &captureLiveClient{}
-	runner := Runner{Assembler: testLiveAssembler(t), Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "none"}}
-	inv := runtime.NewInvocation("fresh-without-loop", runtime.NewContext("room", "caller", "", "", false, nil), "tell me about alice", runtime.MENTION, "", true)
-	if _, err := runner.Run(context.Background(), inv); err == nil {
-		t.Fatal("required fresh history fell back to a provider-only response")
-	}
-	if len(client.requests) != 0 {
-		t.Fatalf("required fresh history reached provider without bounded loop: %#v", client.requests)
-	}
-}
-
 func TestRunnerRejectsToolBackedInternalEvidenceWithoutThirdCompletion(t *testing.T) {
 	finalizer, err := NewOutputFinalizer("none", 8000)
 	if err != nil {

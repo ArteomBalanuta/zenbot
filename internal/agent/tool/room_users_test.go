@@ -37,6 +37,10 @@ func TestRoomUsersDescriptorAndBoundedDeterministicResult(t *testing.T) {
 	if d.Name() != "room_users" || !d.IsReadOnly() || d.Timeout().Seconds() != 2 {
 		t.Fatalf("descriptor=%#v", d)
 	}
+	definition := d.Description() + " " + strings.Join(d.ResourceReads(), " ")
+	if !strings.Contains(definition, "currently present") || !strings.Contains(definition, "current live snapshot") || !strings.Contains(definition, "saturn_list") {
+		t.Fatalf("room-users contract does not clearly describe current-presence lookup: %q", definition)
+	}
 	var schema struct {
 		Additional bool                      `json:"additionalProperties"`
 		Required   []string                  `json:"required"`
@@ -61,6 +65,17 @@ func TestRoomUsersDescriptorAndBoundedDeterministicResult(t *testing.T) {
 	}
 	if directory.lastRoom != "OTHER" || output.Room != "Other" || output.Count != 202 || output.ReturnedCount != 200 || !output.Truncated || output.Users[0] != "Alice" || output.Users[1] != "alice" || strings.Contains(r.Content, "trip") {
 		t.Fatalf("output=%s directory=%#v", r.Content, directory)
+	}
+}
+
+func TestRoomUsersUnavailableSnapshotGuidesModelToRemoteRoomTool(t *testing.T) {
+	directory := &roomDirectoryStub{snapshots: map[string]agenttool.RoomUserSnapshot{}}
+	result, err := (agenttool.RoomUsers{Directory: directory}).Execute(context.Background(), historyContext(t, "programming"), json.RawMessage(`{"room":"lounge"}`))
+	if err != nil || !result.IsError || result.ErrorCode != "TOOL_EXECUTION_FAILED" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if !strings.Contains(result.Content, "lounge") || !strings.Contains(result.Content, "saturn_list") {
+		t.Fatalf("unavailable observation cannot guide correction: %q", result.Content)
 	}
 }
 

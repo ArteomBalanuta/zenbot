@@ -43,7 +43,7 @@ func (t RoomUsers) Descriptor(api.Context) (contract.Descriptor, error) {
 		"returnedCount": json.RawMessage(`{"type":"integer"}`),
 		"truncated":     json.RawMessage(`{"type":"boolean"}`),
 	}, []string{"room", "users", "count", "returnedCount", "truncated"}, false)
-	return contract.NewDescriptor(roomUsersName, "Managed room users", "List the current users in one managed public room.", "managed-room-users", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"managed_room_users"}, nil, []string{"Do not use for whisper or private rooms, unmanaged rooms, or historical messages."})
+	return contract.NewDescriptor(roomUsersName, "Managed room users", "Get the current live snapshot of users currently present in the caller's current room or an already managed public room. Use this for current-room presence and counts. For a different room that may not have a managed replica, call saturn_list so Saturn can fetch a temporary live room snapshot.", "managed-room-users", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"managed_room_users"}, nil, []string{"Do not use database_query or message history to infer current presence. Do not use for whispers, private rooms, unmanaged rooms, or historical membership; use saturn_list for a different unmanaged room."})
 }
 
 func (t RoomUsers) Execute(_ context.Context, agent api.Context, args json.RawMessage) (contract.Result, error) {
@@ -75,7 +75,7 @@ func (t RoomUsers) Execute(_ context.Context, agent api.Context, args json.RawMe
 	}
 	snapshot, ok := t.Directory.FindRoomUsers(room)
 	if !ok || strings.TrimSpace(snapshot.Room) == "" {
-		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "tool execution failed"), nil
+		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", fmt.Sprintf("No managed live snapshot is available for room %q; call saturn_list with that room to fetch a temporary live snapshot.", room)), nil
 	}
 	users := make([]string, 0, len(snapshot.Users))
 	for _, user := range snapshot.Users {

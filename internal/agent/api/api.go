@@ -56,7 +56,7 @@ func NewContextWithCapabilities(room, nick, trip, hash string, whisper bool, roo
 	if len(moderationTarget) > 1 {
 		return Context{}, errors.New("moderation target accepts at most one value")
 	}
-	if len(moderationTarget) == 1 {
+	if len(moderationTarget) == 1 && strings.TrimSpace(moderationTarget[0]) != "" {
 		target = &moderationTarget[0]
 	}
 	return newContext(room, nick, trip, hash, whisper, roomUsers, capabilities, target)

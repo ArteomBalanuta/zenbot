@@ -136,7 +136,9 @@ Exact public mentions of the bot also enter the same room-scoped agent runtime. 
 
 Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose.
 
-The model can request multiple tools in one response. Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations. Correctable failures retain the authorized manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before execution.
+The model receives one checked, caller-filtered semantic manifest and can request multiple tools in one response. Each of the 59 exposed `saturn_<command>` tools has command-specific typed parameters, routing guidance, negative constraints, and valid examples; raw command strings and generic argument tails are not accepted. The five explicit non-actionable commands are `l`, `mine`, `whiskey`, `ws`, and `wsa`. There is no keyword router or preliminary discovery/model call.
+
+Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations. Correctable failures retain the same authorized manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before execution.
 
 Moderators can request moderation actions through natural language. The configured creator receives direct admin and permanent-ban capabilities. The gateway still performs Saturn role checks and binds autonomous moderation actions to the reviewed author.
 

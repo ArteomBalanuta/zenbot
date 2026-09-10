@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"zenbot/internal/agent/api"
@@ -52,6 +53,30 @@ func (r *Registry) Find(ctx api.Context, n string) (Tool, bool) {
 }
 func (r *Registry) Lookup(n string) (Tool, bool) { t, ok := r.tools[n]; return t, ok }
 func (r *Registry) Allowed(n string) bool        { return r.allow[n] }
+func (r *Registry) Manifest(ctx api.Context) (contract.Manifest, error) {
+	entries := make([]contract.ManifestEntry, 0, len(r.tools))
+	for name, registered := range r.tools {
+		if !r.allow[name] {
+			continue
+		}
+		descriptor, err := registered.Descriptor(ctx)
+		if err != nil {
+			return contract.Manifest{}, fmt.Errorf("describe tool %s: %w", name, err)
+		}
+		available := true
+		for _, required := range descriptor.RequiredCapabilities() {
+			if !ctx.HasCapability(api.Capability(required)) {
+				available = false
+				break
+			}
+		}
+		if available {
+			entries = append(entries, contract.NewManifestEntry(descriptor))
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return contract.Manifest{Version: contract.ManifestVersion, Tools: entries}, nil
+}
 func (r *Registry) Definitions(ctx api.Context) []contract.Definition {
 	out := []contract.Definition{}
 	for n, t := range r.tools {

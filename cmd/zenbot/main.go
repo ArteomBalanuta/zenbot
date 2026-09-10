@@ -109,12 +109,14 @@ func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUs
 	if db == nil || assembler == nil || client == nil || directory == nil || gateway == nil {
 		return nil, fmt.Errorf("agent tool composition is incomplete")
 	}
+	if err := commandcatalog.ValidateAgentContracts(); err != nil {
+		return nil, fmt.Errorf("agent command catalog: %w", err)
+	}
 	baseTools := []tool.Tool{
 		tool.UserMessageHistory{Repository: db, Limit: tool.MaxUserMessageHistory},
 		tool.RoomUsers{Directory: directory},
-		tool.RunCommand{Gateway: gateway},
 	}
-	allowed := []string{"user_message_history", "room_users", "run_command"}
+	allowed := []string{"user_message_history", "room_users"}
 	tools := baseTools
 	for _, definition := range commandcatalog.AgentEntries() {
 		commandTool := tool.SaturnCommand{Definition: definition, Gateway: gateway}

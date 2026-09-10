@@ -23,12 +23,12 @@ func NewEvidence(attempted bool, attemptedCount, successfulCount, failedCount in
 }
 
 type State struct {
-	limits                                                                  ExecutionLimits
-	steps, reserved, attempted, succeeded, failed                           int
-	tools                                                                   bool
-	commandCorrection, freshnessCorrection, synthesisCorrection, unverified bool
-	successfulCommands, failedCommands, successfulTools                     map[string]struct{}
-	results                                                                 []contract.Result
+	limits                                              ExecutionLimits
+	steps, reserved, attempted, succeeded, failed       int
+	tools                                               bool
+	commandCorrection, unverified                       bool
+	successfulCommands, failedCommands, successfulTools map[string]struct{}
+	results                                             []contract.Result
 }
 
 func NewState(l ExecutionLimits) *State {
@@ -109,13 +109,9 @@ func keys(m map[string]struct{}) []string {
 	}
 	return r
 }
-func (s *State) CommandCorrectionUsed() bool        { return s.commandCorrection }
-func (s *State) MarkCommandCorrectionUsed()         { s.commandCorrection = true }
-func (s *State) ClearCommandCorrection()            { s.commandCorrection = false }
-func (s *State) FreshnessCorrectionUsed() bool      { return s.freshnessCorrection }
-func (s *State) MarkFreshnessCorrectionUsed()       { s.freshnessCorrection = true }
-func (s *State) FreshSynthesisCorrectionUsed() bool { return s.synthesisCorrection }
-func (s *State) MarkFreshSynthesisCorrectionUsed()  { s.synthesisCorrection = true }
-func (s *State) UnverifiedActionChecked() bool      { return s.unverified }
-func (s *State) MarkUnverifiedActionChecked()       { s.unverified = true }
-func (s *State) ResetUnverifiedActionCheck()        { s.unverified = false }
+func (s *State) CommandCorrectionUsed() bool   { return s.commandCorrection }
+func (s *State) MarkCommandCorrectionUsed()    { s.commandCorrection = true }
+func (s *State) ClearCommandCorrection()       { s.commandCorrection = false }
+func (s *State) UnverifiedActionChecked() bool { return s.unverified }
+func (s *State) MarkUnverifiedActionChecked()  { s.unverified = true }
+func (s *State) ResetUnverifiedActionCheck()   { s.unverified = false }

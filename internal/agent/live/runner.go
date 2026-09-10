@@ -147,9 +147,6 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 		if e != nil {
 			return runtime.Result{}, fmt.Errorf("assemble agent request: %w", e)
 		}
-		if !inv.Context().Whisper() && prepared.RequiredFreshTool() != "" {
-			return runtime.Result{}, fmt.Errorf("required fresh history needs bounded tool loop")
-		}
 		response, err = r.Client.Complete(observability.WithStage(ctx, "llm.direct"), prepared.LlmRequest())
 	}
 	if err != nil {

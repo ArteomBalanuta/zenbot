@@ -49,14 +49,44 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 	response := initial
 	all := make([]toolBatchResult, 0)
 	cycle := 0
+	structuredDecisionPending := providerHasTool(providerTools, respondToUserTool)
+	decisionCorrectionUsed := false
 	for {
 		cycle++
 		calls := response.ToolCalls()
 		observability.Info(ctx, "agent.loop.cycle", "cycle", cycle, "tool_call_count", len(calls), "finish_reason", response.FinishReason())
+		if structuredDecisionPending {
+			finalResponse, final, finalErr := structuredFinalResponse(response)
+			if final {
+				completed, finalMessages, err := e.finalize(ctx, phase, messages, finalResponse)
+				return completed, finalMessages, all, err
+			}
+			if finalErr != nil || len(calls) == 0 {
+				if decisionCorrectionUsed || !state.AdvanceStep() {
+					if finalErr != nil {
+						return llm.LlmResponse{}, nil, nil, fmt.Errorf("model returned an invalid structured tool decision: %w", finalErr)
+					}
+					return llm.LlmResponse{}, nil, nil, fmt.Errorf("model did not return a structured tool decision")
+				}
+				decisionCorrectionUsed = true
+				messages = append(messages,
+					llm.NewLlmMessage("assistant", response.Content(), nil, ""),
+					llm.NewLlmMessage("user", "Your previous response was not a valid structured decision. Re-evaluate the newest request: call the matching Saturn tool when execution or live data is requested; otherwise call respond_to_user with the complete final answer. Do not narrate or promise a tool call.", nil, ""),
+				)
+				observability.Info(ctx, "agent.correction.started", "correction_type", "structured_tool_decision")
+				next, err := e.Client.Complete(observability.WithStage(ctx, "llm.structured_decision_correction"), llm.NewLlmRequest(messages, providerTools, false, nil, nil).WithToolChoice(llm.ToolChoiceRequired))
+				if err != nil {
+					return llm.LlmResponse{}, nil, nil, err
+				}
+				response = next
+				continue
+			}
+		}
 		if len(calls) == 0 {
 			final, finalMessages, err := e.finalize(ctx, phase, messages, response)
 			return final, finalMessages, all, err
 		}
+		structuredDecisionPending = false
 		if response.FinishReason() == "length" {
 			return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent response was truncated")
 		}
@@ -108,7 +138,8 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 		} else if err := phase.Transition(turn.PhaseModel); err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}
-		response, err = e.Client.Complete(observability.WithStage(ctx, stage), llm.NewLlmRequest(messages, tools, false, nil, nil))
+		nextRequest := llm.NewLlmRequest(messages, tools, false, nil, nil)
+		response, err = e.Client.Complete(observability.WithStage(ctx, stage), nextRequest)
 		if err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}

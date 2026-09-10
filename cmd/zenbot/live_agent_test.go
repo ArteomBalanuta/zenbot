@@ -284,6 +284,9 @@ func TestNewAgentToolLoopRegistersEveryAgentCommandWithContextualVisibility(t *t
 			t.Fatalf("missing agent command tool for %q", definition.Canonical)
 		}
 	}
+	if _, duplicate := loop.Registry.Lookup("run_command"); duplicate {
+		t.Fatal("production inventory exposes both concrete command tools and run_command")
+	}
 	if loop.Limits.MaxSteps != 5 || loop.Limits.MaxToolCalls != 4 {
 		t.Fatalf("registry limits=%+v", loop.Limits)
 	}

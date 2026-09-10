@@ -127,6 +127,23 @@ func TestCompleteMapsToolCallsAndToolResults(t *testing.T) {
 	}
 }
 
+func TestClientSendsRequiredToolChoice(t *testing.T) {
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, _ := io.ReadAll(r.Body)
+		body = string(payload)
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"respond_to_user","arguments":"{\"response\":\"hello\"}"}}]},"finish_reason":"tool_calls"}]}`)
+	}))
+	defer server.Close()
+	request := llm.NewLlmRequest([]llm.LlmMessage{llm.NewLlmMessage("user", "hello", nil, "")}, []any{map[string]any{"type": "function"}}, false, nil, nil).WithToolChoice(llm.ToolChoiceRequired)
+	if _, err := NewClient(Config{Endpoint: server.URL}).Complete(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, `"tool_choice":"required"`) {
+		t.Fatalf("request body=%s", body)
+	}
+}
+
 func TestCompleteMalformedSuccessfulResponse(t *testing.T) {
 	for _, body := range []string{`not-json`, `{"choices":[]}`, `{"choices":[{"message":{"tool_calls":[{"function":{"arguments":"["}}]}}]}`} {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))

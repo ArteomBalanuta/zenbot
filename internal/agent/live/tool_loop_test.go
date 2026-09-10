@@ -193,96 +193,6 @@ func (g *rejectingCommandGateway) Execute(context.Context, api.Context, string, 
 	return commandgateway.Execution{Executed: false}, nil
 }
 
-func TestToolLoopForcesTrustedHistoryForRecognizedPublicRequest(t *testing.T) {
-	repo := &loopHistoryRepository{}
-	directory := &loopRoomDirectory{}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse("old profile summary", nil, "stop"),
-		llm.NewLlmResponse("fresh profile summary", nil, "stop"),
-	}}
-	loop, err := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{
-		agenttool.UserMessageHistory{Repository: repo, Limit: 1},
-		agenttool.RoomUsers{Directory: directory},
-		agenttool.RunCommand{Gateway: loopGateway{}},
-	}, []string{"user_message_history", "room_users", "run_command"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inv := runtime.NewInvocation("request-7", runtime.NewContext("room", "caller", "", "", false, nil), "tell me about alice", runtime.MENTION, "", false)
-	out, err := loop.Complete(context.Background(), inv, nil, "")
-	if err != nil || out.Content() != "fresh profile summary" || repo.calls != 1 || directory.calls != 0 || len(client.requests) != 2 || len(client.requests[0].Tools()) != 3 || len(client.requests[1].Tools()) != 0 {
-		t.Fatalf("out=%#v err=%v history=%d directory=%d requests=%#v", out, err, repo.calls, directory.calls, client.requests)
-	}
-	messages := client.requests[1].Messages()
-	if len(messages) < 2 || len(messages[len(messages)-2].ToolCalls()) != 1 || messages[len(messages)-2].ToolCalls()[0].Name() != "user_message_history" || messages[len(messages)-2].ToolCalls()[0].ID() != "fresh-history-request-7" || messages[len(messages)-1].ToolCallID() != "fresh-history-request-7" {
-		t.Fatalf("synthetic fresh pair=%#v", messages)
-	}
-}
-
-func TestToolLoopIgnoresHostileInitialCallsForRequiredHistory(t *testing.T) {
-	repo := &loopHistoryRepository{}
-	directory := &loopRoomDirectory{}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse("old", []llm.LlmToolCall{llm.NewLlmToolCall("wrong", "room_users", map[string]any{"room": "other"})}, "tool_calls"),
-		llm.NewLlmResponse("fresh", nil, "stop"),
-	}}
-	loop, _ := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{
-		agenttool.UserMessageHistory{Repository: repo, Limit: 1}, agenttool.RoomUsers{Directory: directory}, agenttool.RunCommand{Gateway: loopGateway{}},
-	}, []string{"user_message_history", "room_users", "run_command"})
-	inv := runtime.NewInvocation("hostile", runtime.NewContext("room", "caller", "", "", false, nil), "tell me about alice", runtime.MENTION, "", false)
-	if _, err := loop.Complete(context.Background(), inv, nil, ""); err != nil || repo.calls != 1 || directory.calls != 0 || len(client.requests) != 2 {
-		t.Fatalf("err=%v history=%d directory=%d requests=%#v", err, repo.calls, directory.calls, client.requests)
-	}
-	messages := client.requests[1].Messages()
-	calls := messages[len(messages)-2].ToolCalls()
-	if len(calls) != 1 || calls[0].ID() != "fresh-history-hostile" || calls[0].Name() != "user_message_history" {
-		t.Fatalf("provider call leaked into protocol: %#v", messages)
-	}
-}
-
-func TestToolLoopIgnoresProviderForgedRunCommandForRequiredHistory(t *testing.T) {
-	repo := &loopHistoryRepository{}
-	directory := &loopRoomDirectory{}
-	gateway := &recordingCommandGateway{}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse("old", []llm.LlmToolCall{llm.NewLlmToolCall("wrong", "run_command", map[string]any{"command": "weather", "arguments": "Tokyo"})}, "tool_calls"),
-		llm.NewLlmResponse("fresh", nil, "stop"),
-	}}
-	loop, _ := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{
-		agenttool.UserMessageHistory{Repository: repo, Limit: 1}, agenttool.RoomUsers{Directory: directory}, agenttool.RunCommand{Gateway: gateway},
-	}, []string{"user_message_history", "room_users", "run_command"})
-	inv := runtime.NewInvocation("hostile-command", runtime.NewContext("room", "caller", "", "", false, nil), "tell me about alice", runtime.MENTION, "", false)
-	if _, err := loop.Complete(context.Background(), inv, nil, ""); err != nil || repo.calls != 1 || directory.calls != 0 || gateway.calls != 0 || len(client.requests) != 2 {
-		t.Fatalf("err=%v history=%d directory=%d gateway=%d requests=%d", err, repo.calls, directory.calls, gateway.calls, len(client.requests))
-	}
-	messages := client.requests[1].Messages()
-	calls := messages[len(messages)-2].ToolCalls()
-	if len(calls) != 1 || calls[0].ID() != "fresh-history-hostile-command" || calls[0].Name() != "user_message_history" {
-		t.Fatalf("provider command leaked into protocol: %#v", messages)
-	}
-}
-
-func TestToolLoopFailsClosedWhenRequiredHistoryFailsOrSynthesisRepeats(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		repository repository.AgentUserMessageHistoryRepository
-		responses  []llm.LlmResponse
-		calls      int
-	}{
-		{"tool failure", &failingLoopHistoryRepository{}, []llm.LlmResponse{llm.NewLlmResponse("old", nil, "stop")}, 1},
-		{"repeat", &loopHistoryRepository{}, []llm.LlmResponse{llm.NewLlmResponse("old", nil, "stop"), llm.NewLlmResponse(" old ", nil, "stop")}, 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			client := &scriptedToolClient{responses: tc.responses}
-			loop, _ := NewHistoryToolLoop(testLiveAssembler(t), client, agenttool.UserMessageHistory{Repository: tc.repository, Limit: 1})
-			inv := runtime.NewInvocation("failure", runtime.NewContext("room", "caller", "", "", false, nil), "tell me about alice", runtime.MENTION, "", false)
-			if _, err := loop.Complete(context.Background(), inv, nil, ""); err == nil || len(client.requests) != tc.calls {
-				t.Fatalf("err=%v requests=%d", err, len(client.requests))
-			}
-		})
-	}
-}
-
 func TestToolLoopMakesOneFollowUpWithMatchingToolID(t *testing.T) {
 	repo := &loopHistoryRepository{}
 	c := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("call-1", "user_message_history", map[string]any{"nick": "alice"})}, "tool_calls"), llm.NewLlmResponse("answer", nil, "stop")}}
@@ -416,18 +326,6 @@ func TestToolLoopRejectsWhisperCommandProseWithoutCorrection(t *testing.T) {
 	inv := runtime.NewInvocation("whisper-prose", runtime.NewContext("room", "caller", "", "", true, nil), "weather?", runtime.MENTION, "", false)
 	if _, err := loop.CompleteWithEvidence(context.Background(), inv, nil, ""); err == nil || gateway.calls != 0 || len(client.requests) != 1 || len(client.requests[0].Tools()) != 0 {
 		t.Fatalf("err=%v gateway=%d requests=%d tools=%d", err, gateway.calls, len(client.requests), len(client.requests[0].Tools()))
-	}
-}
-
-func TestToolLoopFreshHistoryRetainsPrecedenceOverCommandProse(t *testing.T) {
-	repo := &loopHistoryRepository{}
-	gateway := &recordingCommandGateway{}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse("`weather Tokyo`", nil, "stop"), llm.NewLlmResponse("fresh profile", nil, "stop")}}
-	loop, _ := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{agenttool.UserMessageHistory{Repository: repo, Limit: 1}, agenttool.RoomUsers{Directory: &loopRoomDirectory{}}, agenttool.RunCommand{Gateway: gateway}}, []string{userMessageHistoryTool, roomUsersTool, "run_command"})
-	inv := runtime.NewInvocation("fresh-prose", runtime.NewContext("room", "caller", "", "", false, nil), "tell me about alice", runtime.MENTION, "", false)
-	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
-	if err != nil || completion.SuppressReply || completion.Response.Content() != "fresh profile" || repo.calls != 1 || gateway.calls != 0 || len(client.requests) != 2 {
-		t.Fatalf("completion=%#v err=%v history=%d gateway=%d requests=%d", completion, err, repo.calls, gateway.calls, len(client.requests))
 	}
 }
 

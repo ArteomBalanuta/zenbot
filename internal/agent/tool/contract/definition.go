@@ -2,7 +2,6 @@ package contract
 
 import (
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -41,11 +40,12 @@ type Descriptor struct {
 	idempotent                                 bool
 	timeout                                    time.Duration
 	whenNotUse                                 []string
+	routing                                    RoutingMetadata
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
-func NewDescriptor(name, label, description, category string, access Access, effect Effect, mode ResultMode, parameters json.RawMessage, capabilities, prerequisites []string, idempotent bool, timeout time.Duration, resultSchema json.RawMessage, reads, writes, whenNotUse []string) (Descriptor, error) {
+func NewDescriptor(name, label, description, category string, access Access, effect Effect, mode ResultMode, parameters json.RawMessage, capabilities, prerequisites []string, idempotent bool, timeout time.Duration, resultSchema json.RawMessage, reads, writes, whenNotUse []string, options ...DescriptorOption) (Descriptor, error) {
 	if !nameRE.MatchString(name) {
 		return Descriptor{}, &ContractError{"invalid name"}
 	}
@@ -66,7 +66,16 @@ func NewDescriptor(name, label, description, category string, access Access, eff
 	if err := ValidateSchema(resultSchema, false); err != nil {
 		return Descriptor{}, err
 	}
-	return Descriptor{name: name, label: label, description: description, category: category, access: access, effect: effect, mode: mode, parameters: clone(parameters), resultSchema: clone(resultSchema), capabilities: sortedClone(capabilities), prerequisites: sortedClone(prerequisites), reads: sortedClone(reads), writes: sortedClone(writes), idempotent: idempotent, timeout: timeout, whenNotUse: append([]string(nil), whenNotUse...)}, nil
+	descriptor := Descriptor{name: name, label: label, description: description, category: category, access: access, effect: effect, mode: mode, parameters: clone(parameters), resultSchema: clone(resultSchema), capabilities: sortedClone(capabilities), prerequisites: sortedClone(prerequisites), reads: sortedClone(reads), writes: sortedClone(writes), idempotent: idempotent, timeout: timeout, whenNotUse: append([]string(nil), whenNotUse...)}
+	for _, option := range options {
+		if option == nil {
+			return Descriptor{}, &ContractError{"nil descriptor option"}
+		}
+		if err := option(&descriptor); err != nil {
+			return Descriptor{}, err
+		}
+	}
+	return descriptor, nil
 }
 
 type ContractError struct{ Message string }
@@ -100,6 +109,7 @@ func (d Descriptor) ResourceWrites() []string { return append([]string(nil), d.w
 func (d Descriptor) Idempotent() bool         { return d.idempotent }
 func (d Descriptor) Timeout() time.Duration   { return d.timeout }
 func (d Descriptor) IsReadOnly() bool         { return d.effect == ReadOnly }
+func (d Descriptor) Routing() RoutingMetadata { return cloneRoutingMetadata(d.routing) }
 
 type Definition struct {
 	Name, Description string
@@ -107,29 +117,7 @@ type Definition struct {
 }
 
 func NewDefinition(d Descriptor) Definition {
-	metadata := []string{
-		d.description,
-		"Label: " + d.label,
-		"Category: " + d.category,
-		"Access: " + string(d.access),
-		"Effect: " + string(d.effect),
-		"Result mode: " + string(d.mode),
-		fmt.Sprintf("Idempotent: %t", d.idempotent),
-	}
-	if len(d.capabilities) > 0 {
-		metadata = append(metadata, "Required capabilities: "+strings.Join(d.capabilities, ", "))
-	}
-	if len(d.prerequisites) > 0 {
-		metadata = append(metadata, "Required successful tools: "+strings.Join(d.prerequisites, ", "))
-	}
-	if len(d.reads) > 0 {
-		metadata = append(metadata, "Reads: "+strings.Join(d.reads, ", "))
-	}
-	if len(d.writes) > 0 {
-		metadata = append(metadata, "Writes: "+strings.Join(d.writes, ", "))
-	}
-	metadata = append(metadata, "When not to use: "+strings.Join(d.whenNotUse, " "))
-	return Definition{d.name, strings.Join(metadata, "\n"), d.Parameters()}
+	return NewManifestEntry(d).Definition()
 }
 func (d Definition) JSON() json.RawMessage {
 	b, _ := json.Marshal(struct {

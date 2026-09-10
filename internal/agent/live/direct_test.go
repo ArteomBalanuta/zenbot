@@ -99,18 +99,6 @@ func TestDirectInvokerPersistDeliveryAppendsCandidateOnlyForPublicVisibleArtifac
 	}
 }
 
-func TestDirectInvokerFailsClosedForRequiredFreshHistoryWithoutBoundedLoop(t *testing.T) {
-	client := &captureLiveClient{}
-	invoker := DirectInvoker{Assembler: testLiveAssembler(t), Client: client}
-	message := &model.ChatMessage{Channel: "room", Name: "caller", Text: "l tell me about alice"}
-	if _, err := invoker.Invoke(context.Background(), message, "tell me about alice"); err == nil {
-		t.Fatal("required fresh history fell back to a provider-only direct response")
-	}
-	if len(client.requests) != 0 {
-		t.Fatalf("required fresh history reached provider without bounded loop: %#v", client.requests)
-	}
-}
-
 func TestDirectInvokerRejectsInternalEvidenceWithoutDeliveryArtifact(t *testing.T) {
 	finalizer, err := NewOutputFinalizer("none", 8000)
 	if err != nil {

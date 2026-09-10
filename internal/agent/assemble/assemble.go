@@ -69,7 +69,14 @@ func (p *SystemPrompt) Render(inv runtime.Invocation, correlationID, recent stri
 		return "", errors.New("prompt catalog must not be nil")
 	}
 	ctx := inv.Context()
-	caller := map[string]any{"nick": ctx.Nick(), "isCreator": p.config.CreatorTrip != "" && p.config.CreatorTrip == ctx.Trip()}
+	caller := map[string]any{
+		"nick":              ctx.Nick(),
+		"isCreator":         p.config.CreatorTrip != "" && p.config.CreatorTrip == ctx.Trip(),
+		"capabilities":      ctx.Capabilities(),
+		"canModerate":       ctx.HasCapability(runtime.ModerationCommands),
+		"canPermanentlyBan": ctx.HasCapability(runtime.PermanentBan),
+		"canAdminister":     ctx.HasCapability(runtime.AdminCommands),
+	}
 	runtimeMeta := map[string]any{"correlationId": correlationID, "invocationMode": string(inv.Mode()), "requestKind": string(kind), "requestKindPhase": phase, "toolEvidence": map[string]any{"attempted": evidence.Attempted, "attemptedCount": evidence.AttemptedCount, "successfulCount": evidence.SuccessfulCount, "failedCount": evidence.FailedCount}, "room": ctx.Room(), "whisper": ctx.Whisper(), "caller": caller}
 	meta, err := json.Marshal(runtimeMeta)
 	if err != nil {
@@ -213,19 +220,16 @@ func fingerprint(ms []Message) string {
 
 // PreparedRequest is immutable request state prepared before provider execution.
 type PreparedRequest struct {
-	messages                   []Message
-	tools                      []any
-	contextualized             string
-	requiredTool, requiredNick string
-	kind                       RequestKind
-	projection                 Projection
+	messages       []Message
+	tools          []any
+	contextualized string
+	kind           RequestKind
+	projection     Projection
 }
 
 func (r PreparedRequest) Messages() []Message          { return append([]Message(nil), r.messages...) }
 func (r PreparedRequest) Tools() []any                 { return cloneAnySlice(r.tools) }
 func (r PreparedRequest) ContextualizedPrompt() string { return r.contextualized }
-func (r PreparedRequest) RequiredFreshTool() string    { return r.requiredTool }
-func (r PreparedRequest) RequiredFreshNick() string    { return r.requiredNick }
 func (r PreparedRequest) RequestKind() RequestKind     { return r.kind }
 func (r PreparedRequest) Projection() Projection       { return r.projection }
 func (r PreparedRequest) LlmRequest() llm.LlmRequest {
@@ -307,11 +311,7 @@ func (a *Assembler) AssembleWithHistoricalEvidence(ctx context.Context, inv runt
 	if e != nil {
 		return PreparedRequest{}, e
 	}
-	freshTool, freshNick, _ := (turn.FreshnessPolicy{}).Required(inv.Prompt(), history, ctxr.RoomUsers())
-	if inv.Mode() == runtime.MODERATION {
-		freshTool, freshNick = "", ""
-	}
-	return PreparedRequest{messages: pr.Messages, tools: filteredTools, contextualized: promptText, requiredTool: freshTool, requiredNick: freshNick, kind: kind, projection: pr}, nil
+	return PreparedRequest{messages: pr.Messages, tools: filteredTools, contextualized: promptText, kind: kind, projection: pr}, nil
 }
 
 func historyContextUnits(history []Message) []ContextUnit {

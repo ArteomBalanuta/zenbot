@@ -112,7 +112,9 @@ type Tool interface {
 }
 ```
 
-A descriptor defines the stable name, label, capability description, negative guidance, strict JSON parameter schema, result schema, access, effect, result mode, idempotency, timeout, prerequisites, and resource reads/writes. Construction recursively validates every registered descriptor and rejects unsupported schema keywords before the live loop is accepted. `contract.NewDefinition` projects the routing metadata into the provider-visible function description, while the JSON parameter schema remains the source of truth for arguments.
+A descriptor defines the stable name, label, capability description, negative guidance, strict JSON parameter schema, result schema, access, effect, result mode, idempotency, timeout, prerequisites, resource reads/writes, and optional semantic `RoutingMetadata`. Routing metadata contains aliases, targets, positive selection guidance, and schema-valid request/argument examples. Construction recursively validates every registered descriptor and rejects unsupported schema keywords or malformed examples before the live loop is accepted.
+
+`Registry.Manifest` is the checked boundary between registration and provider assembly. It returns a deterministic, versioned, caller-capability-filtered manifest and propagates descriptor errors instead of silently dropping a tool. The complete JSON manifest retains every local contract field. `ManifestEntry.ProviderDefinition` projects only the routing-critical summary, use/avoid guidance, example arguments, execution policy, and parameter schema into the OpenAI-compatible function shape. It deliberately omits `strict: true`; local schema and result validation remain authoritative. The full creator-visible provider tool payload is kept at or below 32 KiB.
 
 The standard result envelope is:
 
@@ -139,18 +141,17 @@ Expected command validation or authorization failures become `COMMAND_REJECTED` 
 | `database_query` | Fixed read-only query | Yes | Public invocation |
 | `database_schema` | Read-only schema | Yes | `DYNAMIC_SQL` |
 | `database_sql` | Bounded read-only SQL after schema | Sequential prerequisite chain | `DYNAMIC_SQL` |
-| `run_command` | Room-delivery action | Never | Contextual enum and capabilities |
 | `saturn_<command>` | One concrete Saturn command | Never | Command-specific capability |
 
 The complete command mapping is in [COMMAND_TOOL_INVENTORY.md](COMMAND_TOOL_INVENTORY.md).
 
 ## Tool Loop And State Machine
 
-The active generalized loop is coordinated by `internal/agent/live/turn_engine.go`. `internal/agent/live/tool_loop.go` owns initial assembly and the deterministic fresh-user-history policy, while `internal/agent/live/registry_loop.go` adapts protocol messages and delegates generalized execution. The closed phases are `ASSEMBLE -> MODEL -> PLAN -> GATE -> EXECUTE -> OBSERVE`, followed by another model cycle or `FINALIZE -> COMPLETE`. `REFLECT`, `PAUSED`, and `FAILED` are explicit bounded branches.
+The active generalized loop is coordinated by `internal/agent/live/turn_engine.go`. `internal/agent/live/tool_loop.go` owns initial assembly, while `internal/agent/live/registry_loop.go` adapts protocol messages and delegates generalized execution. No keyword or regular-expression intent router chooses tools. For direct and mention invocations, the LLM must make an explicit structured decision: invoke one or more exposed tools, or invoke the private `respond_to_user` control tool with a final answer. The closed phases are `ASSEMBLE -> MODEL -> PLAN -> GATE -> EXECUTE -> OBSERVE`, followed by another model cycle or `FINALIZE -> COMPLETE`. `REFLECT`, `PAUSED`, and `FAILED` are explicit bounded branches.
 
-1. The registry computes descriptors for the current trusted context and hides unauthorized tools.
-2. The assembler sends one provider request with all eligible definitions.
-3. If the model returns no calls, its content moves to finalization.
+1. The registry computes a checked manifest for the current trusted context, hides unauthorized tools, and orders entries by stable tool name.
+2. The manifest is compactly projected and the assembler sends one provider request with all eligible definitions plus `respond_to_user`, using `tool_choice: required` for direct and mention decisions.
+3. A valid `respond_to_user` call becomes the final answer without entering the tool executor. Unstructured narration receives one bounded LLM self-correction request and cannot escape as a successful initial answer.
 4. Every returned call must have an ID and registered name.
 5. The executor validates capability prerequisites and the strict argument schema before invoking code.
 6. The request-local ledger rejects duplicate call-and-argument keys, per-tool overuse, missing successful prerequisites, and tools disabled after repeated failures.
@@ -175,7 +176,9 @@ The relevant bounds are:
 
 ## Command Execution
 
-Command identity and aliases have one source in `internal/command/catalog/catalog.go`. `internal/command/registry.go` materializes chat handlers from that catalog, while `internal/command/agent_catalog.go` derives the agent manifest from it.
+Command identity and aliases have one source in `internal/command/catalog/catalog.go`. The same `catalog.Entry` also owns `AgentToolSpec`: actionability or a hidden reason, label, description, category, access, targets, use/avoid guidance, examples, argument strategy, moderation targeting, and compatibility flags. `internal/command/registry.go` materializes chat handlers from that catalog, while production composition creates one `saturn_<canonical>` adapter for each of the 59 actionable entries. The five non-actionable entries are `l`, `mine`, `whiskey`, `ws`, and `wsa`.
+
+`AgentArgumentContract` exposes an immutable JSON schema and an encoder. Empty, positional, boolean-state, comma-list, kick, shadow-ban, auto-move, and notes strategies translate strict structured fields into the existing command tail. The adapter validates the descriptor schema and strategy cross-field rules before invoking the gateway; no model-authored raw command string crosses this boundary.
 
 `internal/command/agent_gateway.go` reconstructs a normal Saturn command message using the current prefix and trusted caller identity. It resolves the current master for every invocation, applies command/capability authorization, binds autonomous moderation to its reviewed author, captures command output, and records the command audit result.
 
@@ -189,7 +192,7 @@ When loaded history exceeds `memoryRawTurns`, `ModelConversationSummarizer` send
 
 Conversation, assistant outcome, and reusable tool evidence are committed through one `AppendAgentTurn` transaction. A failed evidence insert rolls back the whole turn, preventing half-written conversational state.
 
-Reusable tool evidence is persisted only for successful eligible model-data tools. Command room-delivery results are not replayed as fresh facts. Required named-user history is fetched again instead of reusing an old prose profile.
+Reusable tool evidence is persisted only for successful eligible model-data tools. Command room-delivery results are not replayed as fresh facts. The LLM-facing contract requires live `user_message_history` or `room_users` calls instead of treating old prose as current evidence; selection remains LLM-backed rather than keyword-routed.
 
 Recent room context and user-history queries read only `PUBLIC` messages. New whispers are stored as `WHISPER`; schema upgrades classify legacy null visibility as `PUBLIC` for Saturn compatibility.
 
@@ -228,8 +231,8 @@ The primary lifecycle events are:
   size, media type, and SHA-256 fingerprint, never the response body.
 - `agent.tool.batch_started`, `agent.tool.started`, `agent.tool.completed`, and
   `agent.tool.batch_completed`
-- `agent.correction.started`, with `stage` distinguishing command, freshness,
-  tool-follow-up, and synthesis calls
+- `agent.correction.started`, with `stage` distinguishing structured-decision,
+  command, tool-follow-up, and synthesis calls
 - `agent.response.finalized`, `agent.response.finalization_failed`,
   `agent.delivery.completed`, and persistence failure events
 
@@ -256,7 +259,9 @@ The main hardening controls are `requestTimeoutMillis`, `maxSteps`, `maxToolCall
 - `internal/agent/live/registry_loop_test.go`: correction loop, multi-tool ordering, parallel read fan-out, per-tool and failure limits
 - `internal/agent/tool/execution/execution_test.go`: validation, authorization, cancellation, default/descriptor timeouts, ledger behavior
 - `internal/agent/tool/*_test.go`: schemas and individual tool contracts
+- `internal/command/catalog/agent_contract_test.go`: exhaustive actionability,
+  metadata, schema-example, defensive-copy, and typed encoder coverage
 - `internal/agent/runtime/*_test.go`: admission, cancellation, memory-key ordering, ambient coalescing
-- `internal/agent/turn/*_test.go`: phases, recovery, freshness, evidence, memory compaction, and policy state
+- `internal/agent/turn/*_test.go`: phases, recovery, evidence, memory compaction, and policy state
 - `cmd/zenbot/live_agent_test.go`: production composition, contextual command visibility, moderator/admin role propagation
 - `internal/repository/h2/agent_*_test.go`: atomic turns, persisted summaries, context, schema, SQL, and 500-message history

@@ -73,9 +73,6 @@ func (i DirectInvoker) InvokeCompletion(ctx context.Context, message *model.Chat
 		if e != nil {
 			return runtime.DirectCompletion{}, e
 		}
-		if !inv.Context().Whisper() && prepared.RequiredFreshTool() != "" {
-			return runtime.DirectCompletion{}, fmt.Errorf("required fresh history needs bounded tool loop")
-		}
 		response, err = i.Client.Complete(ctx, prepared.LlmRequest())
 	}
 	if err != nil {

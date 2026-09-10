@@ -31,27 +31,30 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 		return contract.Descriptor{}, fmt.Errorf("unknown Saturn command tool %q", t.Definition.Canonical)
 	}
 	capabilities := []string(nil)
-	access := contract.AccessUser
+	access := contractAccess(definition.Agent.Access)
 	if required, restricted := requiredCommandCapability(definition); restricted {
 		capabilities = []string{string(required)}
-		if required == api.AdminCommands {
-			access = contract.AccessAdmin
-		} else {
-			access = contract.AccessModerator
-		}
 	}
-	aliases := append([]string(nil), definition.Aliases...)
-	description := fmt.Sprintf("Execute Saturn's '%s' command (aliases: %s). Pass only the exact argument text that follows the command alias; Saturn performs command validation and room delivery.", definition.Canonical, strings.Join(aliases, ", "))
-	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"arguments":{"type":"string","maxLength":4000,"description":"Exact text after the Saturn command alias, without the prefix."}},"required":[]}`)
 	result := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"}},"required":["messages","deliveredCount"]}`)
 	writes := []string{"commands", "room_delivery"}
-	if access == contract.AccessModerator {
+	if definition.Agent.Access == commandcatalog.AgentModerator || definition.Agent.Access == commandcatalog.AgentPermanentBan {
 		writes = append(writes, "moderation")
 	}
-	return contract.NewDescriptor(t.Name(), "Run Saturn "+definition.Canonical, description, "commands", access, contract.Action, contract.RoomDelivery, parameters, capabilities, nil, false, 10*time.Second, result, nil, writes, []string{
-		"Do not use when the user is asking a question that does not require executing this command.",
-		"Do not invent arguments or use this tool for a different Saturn command.",
-	})
+	examples := make([]contract.Example, len(definition.Agent.Examples))
+	for index, example := range definition.Agent.Examples {
+		examples[index] = contract.Example{Prompt: example.Prompt, Arguments: append(json.RawMessage(nil), example.Arguments...)}
+	}
+	return contract.NewDescriptor(
+		t.Name(), definition.Agent.Label, definition.Agent.Description, definition.Agent.Category,
+		access, contract.Action, contract.RoomDelivery, definition.Agent.Arguments.Schema(),
+		capabilities, nil, false, 10*time.Second, result, nil, writes, definition.Agent.WhenNotUse,
+		contract.WithRouting(contract.RoutingMetadata{
+			Aliases:  append([]string(nil), definition.Aliases...),
+			Targets:  append([]string(nil), definition.Agent.Targets...),
+			UseWhen:  append([]string(nil), definition.Agent.UseWhen...),
+			Examples: examples,
+		}),
+	)
 }
 
 func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args json.RawMessage) (contract.Result, error) {
@@ -75,15 +78,10 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	if err := contract.ValidateArguments(descriptor.Parameters(), args); err != nil {
 		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error()), nil
 	}
-	var input struct {
-		Arguments string `json:"arguments"`
+	arguments, err := definition.Agent.Arguments.Encode(args)
+	if err != nil {
+		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error()), nil
 	}
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &input); err != nil {
-			return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", "arguments must be an object"), nil
-		}
-	}
-	arguments := strings.TrimSpace(input.Arguments)
 	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(definition.Canonical) && !sameModerationTarget(firstArgument(arguments), *target) {
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author"), nil
 	}
@@ -102,6 +100,17 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 		messages = []string{fmt.Sprintf("Saturn command '%s' executed and delivered any command output directly to the room.", definition.Canonical)}
 	}
 	return contract.SuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": len(execution.Messages)}), nil
+}
+
+func contractAccess(access commandcatalog.AgentAccess) contract.Access {
+	switch access {
+	case commandcatalog.AgentAdmin:
+		return contract.AccessAdmin
+	case commandcatalog.AgentModerator, commandcatalog.AgentPermanentBan:
+		return contract.AccessModerator
+	default:
+		return contract.AccessUser
+	}
 }
 
 func requiredCommandCapability(definition commandcatalog.Entry) (api.Capability, bool) {

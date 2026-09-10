@@ -115,6 +115,9 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 			if err != nil {
 				return Completion{}, err
 			}
+			if inv.Mode() == runtime.DIRECT || inv.Mode() == runtime.MENTION {
+				definitions = append(definitions, respondToUserDefinition())
+			}
 		} else {
 			definitions = append([]any(nil), l.Tools...)
 		}
@@ -126,24 +129,24 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	observability.Info(ctx, "agent.request.assembled",
 		"context_items", len(prepared.Messages()),
 		"tool_definition_count", len(prepared.Tools()),
-		"required_fresh_tool", prepared.RequiredFreshTool(),
 	)
 	state = turn.NewState(l.Limits)
 	if !state.AdvanceStep() {
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
-	first, err := l.Client.Complete(observability.WithStage(ctx, "llm.initial"), prepared.LlmRequest())
+	initialRequest := prepared.LlmRequest()
+	if providerHasTool(prepared.Tools(), respondToUserTool) {
+		initialRequest = initialRequest.WithToolChoice(llm.ToolChoiceRequired)
+	}
+	first, err := l.Client.Complete(observability.WithStage(ctx, "llm.initial"), initialRequest)
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete agent request: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return Completion{}, err
 	}
-	if first.FinishReason() == "length" {
+	if first.FinishReason() == "length" && !l.general {
 		return Completion{}, errors.New("agent response was truncated")
-	}
-	if prepared.RequiredFreshTool() != "" {
-		return l.completeRequiredHistory(ctx, inv, agent, prepared, first, state)
 	}
 	if l.general {
 		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state, l.Interrupt)
@@ -285,83 +288,6 @@ func suppressRegistryReply(registry *tool.Registry, agent api.Context, batch []t
 	return true
 }
 
-// completeRequiredHistory is router-owned: the provider cannot choose its one call.
-func (l ToolLoop) completeRequiredHistory(ctx context.Context, inv runtime.Invocation, agent api.Context, prepared assemble.PreparedRequest, first llm.LlmResponse, state *turn.State) (Completion, error) {
-	if inv.Context().Whisper() || strings.TrimSpace(agent.Room()) == "" {
-		return Completion{}, errors.New("required history is not available for private or roomless invocation")
-	}
-	if prepared.RequiredFreshTool() != userMessageHistoryTool {
-		return Completion{}, errors.New("unsupported required fresh tool")
-	}
-	nick := turn.NormalizeNick(prepared.RequiredFreshNick())
-	if !turn.IsValidNick(nick) {
-		return Completion{}, errors.New("invalid required fresh nick")
-	}
-	registered, ok := l.Registry.Lookup(userMessageHistoryTool)
-	if !ok || !l.Registry.Allowed(userMessageHistoryTool) {
-		return Completion{}, errors.New("required history tool is unavailable")
-	}
-	descriptor, err := registered.Descriptor(agent)
-	if err != nil || !trustedHistoryDescriptor(descriptor) {
-		return Completion{}, errors.New("required history tool contract is invalid")
-	}
-	args, err := json.Marshal(map[string]string{"nick": nick})
-	if err != nil {
-		return Completion{}, err
-	}
-	call := execution.Call{ID: "fresh-history-" + inv.RequestID(), Name: userMessageHistoryTool, Arguments: args}
-	if strings.TrimSpace(call.ID) == "fresh-history-" || !state.ReserveToolCalls(1) {
-		return Completion{}, errors.New("agent tool call limit")
-	}
-	if err := state.MarkToolAttempted(1); err != nil {
-		return Completion{}, err
-	}
-	executor := &execution.Executor{Registry: l.Registry, Ledger: execution.NewLedger(map[string]int{userMessageHistoryTool: 1}, 1)}
-	result := executor.Execute(ctx, agent, call)
-	if err := ctx.Err(); err != nil {
-		return Completion{}, err
-	}
-	if result.IsError {
-		_ = state.RecordToolFailure()
-		return Completion{}, errors.New("required history lookup failed")
-	}
-	if err := state.RecordToolSuccess(); err != nil {
-		return Completion{}, err
-	}
-	if !state.RecordSuccessfulTool(userMessageHistoryTool) || state.RecordSuccessfulToolResult(result) != nil {
-		return Completion{}, errors.New("required history result is invalid")
-	}
-	var content any
-	if first.ContentNullable() != nil {
-		content = first.Content()
-	}
-	synthetic := llm.NewLlmToolCall(call.ID, userMessageHistoryTool, map[string]any{"nick": nick})
-	messages := append(prepared.Messages(), llm.NewLlmMessage("assistant", content, []llm.LlmToolCall{synthetic}, ""))
-	messages = append(messages, llm.NewLlmMessage("tool", string(result.Envelope()), nil, call.ID))
-	if !state.AdvanceStep() {
-		return Completion{}, errors.New("agent tool loop step limit")
-	}
-	second, err := l.Client.Complete(observability.WithStage(ctx, "llm.required_history_synthesis"), llm.NewLlmRequest(messages, nil, false, nil, nil))
-	if err != nil {
-		return Completion{}, fmt.Errorf("complete required history follow-up: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return Completion{}, err
-	}
-	if second.FinishReason() == "length" || len(second.ToolCalls()) != 0 || strings.TrimSpace(second.Content()) == "" || strings.TrimSpace(second.Content()) == strings.TrimSpace(first.Content()) {
-		return Completion{}, errors.New("invalid required history synthesis")
-	}
-	candidate, _ := turn.NewPersistableEvidence(descriptor, result)
-	if candidate.Tool == "" {
-		return Completion{Response: second}, nil
-	}
-	return Completion{Response: second, DurableEvidence: []turn.PersistableEvidence{candidate}}, nil
-}
-
-func trustedHistoryDescriptor(d contract.Descriptor) bool {
-	return d.Name() == userMessageHistoryTool && d.Access() == contract.AccessUser && d.IsReadOnly() && d.ResultMode() == contract.ModelData && d.Idempotent() && d.Timeout() > 0 && len(d.RequiredCapabilities()) == 0 && len(d.RequiredSuccessfulTools()) == 0 && len(d.ResourceWrites()) == 0 && len(d.ResourceReads()) == 1 && d.ResourceReads()[0] == "messages"
-}
-
 // NewBoundedToolLoop freezes exactly three public tools: two reads and one ordered command action.
 func NewBoundedToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tools []tool.Tool, allowed []string) (*ToolLoop, error) {
 	if len(tools) != 3 || len(allowed) != 3 || !containsExactly(allowed, userMessageHistoryTool, roomUsersTool, "run_command") || !frozenPublicTools(tools) {
@@ -448,32 +374,48 @@ func newFrozenToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tool
 			return nil, fmt.Errorf("tool %q descriptor identity mismatch", registered.Name())
 		}
 	}
-	defs := registry.Definitions(ctx)
+	manifest, err := registry.Manifest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build tool manifest: %w", err)
+	}
+	defs := manifest.ProviderDefinitions()
 	if requirePublicDefinitions && len(defs) != len(allowed) {
 		return nil, errors.New("bounded tool definition is unavailable")
 	}
 	providerTools := make([]any, 0, len(defs))
 	for _, definition := range defs {
-		var parameters any
-		if err := json.Unmarshal(definition.Parameters, &parameters); err != nil {
+		providerDefinition, err := providerToolDefinition(definition)
+		if err != nil {
 			return nil, err
 		}
-		providerTools = append(providerTools, map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters}})
+		providerTools = append(providerTools, providerDefinition)
 	}
 	return &ToolLoop{Assembler: assembler, Client: client, Registry: registry, Tools: providerTools, allowed: append([]string(nil), allowed...), Limits: ToolLoopLimits()}, nil
 }
 
 func providerToolDefinitions(registry *tool.Registry, ctx api.Context) ([]any, error) {
-	defs := registry.Definitions(ctx)
+	manifest, err := registry.Manifest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build tool manifest: %w", err)
+	}
+	defs := manifest.ProviderDefinitions()
 	providerTools := make([]any, 0, len(defs))
 	for _, definition := range defs {
-		var parameters any
-		if err := json.Unmarshal(definition.Parameters, &parameters); err != nil {
+		providerDefinition, err := providerToolDefinition(definition)
+		if err != nil {
 			return nil, err
 		}
-		providerTools = append(providerTools, map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters}})
+		providerTools = append(providerTools, providerDefinition)
 	}
 	return providerTools, nil
+}
+
+func providerToolDefinition(definition contract.Definition) (any, error) {
+	var parameters any
+	if err := json.Unmarshal(definition.Parameters, &parameters); err != nil {
+		return nil, err
+	}
+	return map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters}}, nil
 }
 
 func containsAllowed(values []string, want string) bool {
