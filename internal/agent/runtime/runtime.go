@@ -3,10 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"sync"
 	"time"
+
+	"zenbot/internal/agent/observability"
 )
 
 var (
@@ -119,30 +120,57 @@ func (rt *Runtime) execute(invocation Invocation, admitted bool) {
 	case <-rt.ctx.Done():
 		return
 	}
-	result, err := rt.runner.Run(rt.ctx, invocation)
+	ctx := observability.WithRequest(rt.ctx, observability.Request{
+		ID: invocation.RequestID(), Mode: string(invocation.Mode()),
+		Room: invocation.Context().Room(), Nick: invocation.Context().Nick(),
+	})
+	started := time.Now()
+	observability.Info(ctx, "agent.request.started",
+		"queue_wait_ms", started.Sub(invocation.CreatedOn()).Milliseconds(),
+		"input_chars", len([]rune(invocation.Prompt())),
+		"command_originated", invocation.CommandOriginated(),
+		"whisper", invocation.Context().Whisper(),
+	)
+	result, err := rt.runner.Run(ctx, invocation)
 	if err != nil {
+		observability.Error(ctx, "agent.request.failed", err, "duration_ms", time.Since(started).Milliseconds())
 		if rt.ctx.Err() == nil && invocation.Mode().RequiresReply() && rt.failureSink != nil {
-			rt.failureSink.DeliverFailure(rt.ctx, invocation, err)
+			rt.failureSink.DeliverFailure(ctx, invocation, err)
 		}
 		return
 	}
 	if result.ShouldReply() == false || rt.ctx.Err() != nil || rt.sink == nil {
+		observability.Info(ctx, "agent.request.completed",
+			"duration_ms", time.Since(started).Milliseconds(),
+			"reply", false,
+			"evidence_count", len(result.DurableEvidence()),
+		)
 		return
 	}
-	if err := rt.sink.Deliver(rt.ctx, invocation, result); err != nil {
+	observability.Debug(ctx, "agent.delivery.started", "output_chars", len([]rune(result.Text())))
+	if err := rt.sink.Deliver(ctx, invocation, result); err != nil {
+		observability.Error(ctx, "agent.delivery.failed", err, "duration_ms", time.Since(started).Milliseconds())
 		return
 	}
+	observability.Info(ctx, "agent.delivery.completed", "output_chars", len([]rune(result.Text())))
 	if after, ok := rt.runner.(interface {
 		AfterDelivery(context.Context, Invocation, Result) error
 	}); ok {
-		if err := after.AfterDelivery(rt.ctx, invocation, result); err != nil {
+		if err := after.AfterDelivery(ctx, invocation, result); err != nil {
 			if strings.Contains(err.Error(), "agent tool evidence persistence failed") {
-				log.Printf("agent tool evidence persistence failed")
+				observability.Error(ctx, "agent.evidence.persistence_failed", err)
 			} else {
-				log.Printf("agent memory persistence failed correlation=%s", result.CorrelationID())
+				observability.Error(ctx, "agent.memory.persistence_failed", err)
 			}
+			return
 		}
+		observability.Debug(ctx, "agent.persistence.completed", "evidence_count", len(result.DurableEvidence()))
 	}
+	observability.Info(ctx, "agent.request.completed",
+		"duration_ms", time.Since(started).Milliseconds(),
+		"reply", true,
+		"evidence_count", len(result.DurableEvidence()),
+	)
 }
 
 // SubmitAmbient retains only the latest pending ambient request. Unlike Submit,

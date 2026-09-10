@@ -17,6 +17,7 @@ import (
 	"zenbot/internal/agent/live"
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/llm/openai"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/prompt"
 	"zenbot/internal/agent/runtime"
@@ -223,17 +224,21 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 		_, err := current.SendChatMessage(inv.Context().Nick(), "\n"+result.Text(), inv.Context().Whisper())
 		return err
 	})
-	failure := runtime.FailureSinkFunc(func(ctx context.Context, inv runtime.Invocation, _ error) {
+	failure := runtime.FailureSinkFunc(func(ctx context.Context, inv runtime.Invocation, cause error) {
 		if ctx.Err() != nil {
 			return
 		}
+		observability.Error(ctx, "agent.failure_reply.started", cause)
 		current := resolveEngine()
 		if current == nil {
+			observability.Error(ctx, "agent.failure_reply.failed", fmt.Errorf("current master is not constructed"))
 			return
 		}
 		if _, err := current.SendChatMessage(inv.Context().Nick(), "failed: the agent could not answer that request.", inv.Context().Whisper()); err != nil {
-			log.Printf("agent failure delivery: %v", err)
+			observability.Error(ctx, "agent.failure_reply.failed", err)
+			return
 		}
+		observability.Info(ctx, "agent.failure_reply.completed")
 	})
 	finalizer, err := outputFinalizer(resolved)
 	if err != nil {

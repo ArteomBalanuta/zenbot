@@ -1,16 +1,47 @@
 package execution
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
 )
+
+func TestExecutorLogsToolLifecycleWithoutArgumentsOrResult(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	f := &fake{name: "lookup", d: desc(t, "lookup", contract.ReadOnly, []string{"rows"}, nil, true, 0, nil), fn: func(context.Context) (contract.Result, error) {
+		return contract.Result{CallID: "call-1", ToolName: "lookup", Content: `"private-value"`}, nil
+	}}
+	executor := &Executor{Registry: tool.NewRegistry([]tool.Tool{f}, []string{"lookup"})}
+	requestCtx := observability.WithRequest(context.Background(), observability.Request{ID: "tool-request"})
+	result := executor.Execute(requestCtx, ctx(t), Call{"call-1", "lookup", json.RawMessage(`{}`)})
+	if result.IsError {
+		t.Fatalf("tool failed: %#v", result)
+	}
+
+	logged := output.String()
+	for _, expected := range []string{"agent.tool.started", "agent.tool.completed", "request_id=tool-request", "tool=lookup", "tool_call_id=call-1", "status=success"} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("log %q does not contain %q", logged, expected)
+		}
+	}
+	if strings.Contains(logged, "private-value") {
+		t.Fatalf("tool payload leaked into log: %q", logged)
+	}
+}
 
 type fake struct {
 	name  string

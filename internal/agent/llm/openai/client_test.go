@@ -1,9 +1,11 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,12 +14,39 @@ import (
 	"time"
 
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 )
 
 func testRequest() llm.LlmRequest {
 	return llm.NewLlmRequest([]llm.LlmMessage{llm.NewLlmMessage("user", "hello", nil, "")}, nil, false, nil, nil)
 }
 func noSleep(context.Context, time.Duration) error { return nil }
+
+func TestCompleteLogsProviderLifecycleWithoutPayload(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"choices":[{"message":{"content":"private answer"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	ctx := observability.WithStage(observability.WithRequest(context.Background(), observability.Request{ID: "provider-1"}), "llm.initial")
+	if _, err := NewClient(Config{Endpoint: server.URL}).Complete(ctx, testRequest()); err != nil {
+		t.Fatal(err)
+	}
+
+	logged := output.String()
+	for _, expected := range []string{"agent.llm.request.started", "agent.llm.attempt.started", "agent.llm.request.completed", "request_id=provider-1", "stage=llm.initial", "finish_reason=stop", "tool_call_count=0"} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("log %q does not contain %q", logged, expected)
+		}
+	}
+	if strings.Contains(logged, "private answer") || strings.Contains(logged, "hello") {
+		t.Fatalf("provider payload leaked into log: %q", logged)
+	}
+}
 
 func TestCompleteSuccessAndRequestOptions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

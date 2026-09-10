@@ -8,6 +8,7 @@ import (
 	"strings"
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/agent/tool/execution"
 )
@@ -82,7 +83,8 @@ func (c FreshDataCoordinator) Process(ctx context.Context, in FreshProcessInput)
 			for i := range selected {
 				defs[i] = selected[i]
 			}
-			next, err := c.Client.Complete(ctx, llm.NewLlmRequest(msgs, defs, false, nil, nil))
+			observability.Info(ctx, "agent.correction.started", "correction_type", "fresh_tool_selection", "required_tool", in.RequiredTool)
+			next, err := c.Client.Complete(observability.WithStage(ctx, "llm.fresh_tool_correction"), llm.NewLlmRequest(msgs, defs, false, nil, nil))
 			if err != nil {
 				return FreshProcessResult{}, err
 			}
@@ -118,7 +120,7 @@ func (c FreshDataCoordinator) Process(ctx context.Context, in FreshProcessInput)
 		toolContent = c.Renderer.Render(in.Context, call, r)
 	}
 	msgs = append(msgs, llm.NewLlmMessage("assistant", in.Response.Content(), []llm.LlmToolCall{call}, ""), llm.NewLlmMessage("tool", toolContent, nil, call.ID()))
-	next, err := c.Client.Complete(ctx, llm.NewLlmRequest(msgs, nil, false, nil, nil))
+	next, err := c.Client.Complete(observability.WithStage(ctx, "llm.fresh_data_synthesis"), llm.NewLlmRequest(msgs, nil, false, nil, nil))
 	if err != nil {
 		return FreshProcessResult{}, err
 	}
@@ -130,7 +132,8 @@ func (c FreshDataCoordinator) Process(ctx context.Context, in FreshProcessInput)
 			return FreshProcessResult{}, e
 		}
 		correctionMsgs := append(append([]llm.LlmMessage(nil), msgs...), llm.NewLlmMessage("assistant", next.Content(), next.ToolCalls(), ""), llm.NewLlmMessage("user", "router-fresh-synthesis-correction", nil, ""))
-		corrected, e := c.Client.Complete(ctx, llm.NewLlmRequest(correctionMsgs, nil, false, nil, nil))
+		observability.Info(ctx, "agent.correction.started", "correction_type", "fresh_synthesis", "required_tool", in.RequiredTool)
+		corrected, e := c.Client.Complete(observability.WithStage(ctx, "llm.fresh_synthesis_correction"), llm.NewLlmRequest(correctionMsgs, nil, false, nil, nil))
 		if e != nil {
 			return FreshProcessResult{}, e
 		}

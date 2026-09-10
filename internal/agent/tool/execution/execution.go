@@ -6,8 +6,10 @@ import (
 	"errors"
 	"sync"
 	"time"
+
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
 )
@@ -123,10 +125,25 @@ func invoke(t tool.Tool, ctx context.Context, agent api.Context, args json.RawMe
 	}
 }
 
-func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) contract.Result {
+func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (result contract.Result) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	started := time.Now()
+	observability.Info(ctx, "agent.tool.started", "tool", c.Name, "tool_call_id", c.ID)
+	defer func() {
+		status := "success"
+		if result.IsError {
+			status = "error"
+		}
+		observability.Info(ctx, "agent.tool.completed",
+			"tool", c.Name,
+			"tool_call_id", c.ID,
+			"status", status,
+			"error_code", result.ErrorCode,
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
+	}()
 	if ctx.Err() != nil {
 		code := "TOOL_BATCH_CANCELLED"
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

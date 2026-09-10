@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/runtime"
 	"zenbot/internal/agent/tool"
@@ -56,11 +58,32 @@ func (l ToolLoop) CompleteWithEvidence(ctx context.Context, inv runtime.Invocati
 // CompleteWithEvidenceAndHistorical projects durable evidence only on completion #1.
 func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv runtime.Invocation, memory []llm.LlmMessage, recent string, historical []turn.HistoricalEvidence) (completion Completion, err error) {
 	candidateKind := participation.Classifier{}.Classify(inv.Prompt())
+	started := time.Now()
 	var state *turn.State
+	observability.Info(ctx, "agent.loop.started",
+		"candidate_kind", string(candidateKind),
+		"max_steps", l.Limits.MaxSteps,
+		"max_tool_calls", l.Limits.MaxToolCalls,
+		"memory_turn_count", len(memory),
+		"historical_evidence_count", len(historical),
+		"recent_context_bytes", len(recent),
+	)
 	defer func() {
 		completion.CandidateKind = candidateKind
+		attributes := []any{"duration_ms", time.Since(started).Milliseconds(), "candidate_kind", string(candidateKind)}
 		if state != nil {
-			completion.ToolAttempted = state.Evidence().Attempted
+			evidence := state.Evidence()
+			completion.ToolAttempted = evidence.Attempted
+			attributes = append(attributes,
+				"tool_attempt_count", evidence.AttemptedCount,
+				"tool_success_count", evidence.SuccessfulCount,
+				"tool_failure_count", evidence.FailedCount,
+			)
+		}
+		if err != nil {
+			observability.Error(ctx, "agent.loop.failed", err, attributes...)
+		} else {
+			observability.Info(ctx, "agent.loop.completed", attributes...)
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -99,11 +122,16 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	if err != nil {
 		return Completion{}, fmt.Errorf("assemble agent request: %w", err)
 	}
+	observability.Info(ctx, "agent.request.assembled",
+		"context_items", len(prepared.Messages()),
+		"tool_definition_count", len(prepared.Tools()),
+		"required_fresh_tool", prepared.RequiredFreshTool(),
+	)
 	state = turn.NewState(l.Limits)
 	if !state.AdvanceStep() {
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
-	first, err := l.Client.Complete(ctx, prepared.LlmRequest())
+	first, err := l.Client.Complete(observability.WithStage(ctx, "llm.initial"), prepared.LlmRequest())
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete agent request: %w", err)
 	}
@@ -202,7 +230,7 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	if !state.AdvanceStep() {
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
-	second, err := l.Client.Complete(ctx, llm.NewLlmRequest(messages, nil, false, nil, nil))
+	second, err := l.Client.Complete(observability.WithStage(ctx, "llm.bounded_tool_follow_up"), llm.NewLlmRequest(messages, nil, false, nil, nil))
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete agent tool follow-up: %w", err)
 	}
@@ -286,7 +314,7 @@ func (l ToolLoop) completeRequiredHistory(ctx context.Context, inv runtime.Invoc
 	if !state.AdvanceStep() {
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
-	second, err := l.Client.Complete(ctx, llm.NewLlmRequest(messages, nil, false, nil, nil))
+	second, err := l.Client.Complete(observability.WithStage(ctx, "llm.required_history_synthesis"), llm.NewLlmRequest(messages, nil, false, nil, nil))
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete required history follow-up: %w", err)
 	}

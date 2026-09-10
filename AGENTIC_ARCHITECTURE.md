@@ -189,6 +189,35 @@ Recent room context and user-history queries read only `PUBLIC` messages. New wh
 
 Reply-required runtime failures use the configured failure sink. Tool failures do not crash the runtime; they become coded observations unless the enclosing context was cancelled.
 
+## Operational Observability
+
+Every production invocation carries its request ID through structured `slog`
+events. The same `request_id`, `mode`, `room`, and `nick` fields connect runtime,
+context, provider, tool-loop, delivery, and persistence activity. Logs record
+counts, stage names, finish reasons, error codes, HTTP status, and durations;
+they do not record prompts, API keys, tool arguments/results, database rows, or
+conversation contents.
+
+The primary lifecycle events are:
+
+- `agent.request.started`, `agent.request.completed`, and `agent.request.failed`
+- `agent.context.loaded` and `agent.context.load_failed`
+- `agent.request.assembled`, `agent.loop.started`, `agent.loop.cycle`,
+  `agent.loop.completed`, and `agent.loop.failed`
+- `agent.llm.request.started`, `agent.llm.attempt.retrying`,
+  `agent.llm.request.completed`, and `agent.llm.request.failed`
+- `agent.tool.batch_started`, `agent.tool.started`, `agent.tool.completed`, and
+  `agent.tool.batch_completed`
+- `agent.correction.started`, with `stage` distinguishing command, freshness,
+  tool-follow-up, and synthesis calls
+- `agent.response.finalized`, `agent.response.finalization_failed`,
+  `agent.delivery.completed`, and persistence failure events
+
+For Docker deployments, follow all events with `docker logs -f zenbot`. Filter
+for one turn by its `request_id`, or filter `agent.` to inspect only agentic
+activity. A generic room failure now always has a matching
+`agent.request.failed` event containing the wrapped server-side cause.
+
 ## Configuration
 
 `internal/config/agent_config.go` accepts both native Zenbot names and Saturn TOML/environment names. Environment values take precedence over TOML. See [config.example.toml](config.example.toml) and [.env.example](.env.example) for the complete surface.

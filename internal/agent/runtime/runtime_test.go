@@ -1,13 +1,52 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestRuntimeLogsFailedInvocationWithCorrelationAndCause(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	failureDelivered := make(chan struct{})
+	rt, err := NewWithFailureSink(
+		Config{MaxConcurrent: 1, QueueCapacity: 1},
+		RunnerFunc(func(context.Context, Invocation) (Result, error) {
+			return Result{}, errors.New("provider timed out")
+		}),
+		nil,
+		FailureSinkFunc(func(context.Context, Invocation, error) { close(failureDelivered) }),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	if err := rt.Submit(NewInvocation("request-99", NewContext("programming", "alice", "", "", false, nil), "hello", DIRECT, "", true)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-failureDelivered:
+	case <-time.After(time.Second):
+		t.Fatal("failure was not delivered")
+	}
+
+	logged := output.String()
+	for _, expected := range []string{"agent.request.started", "agent.request.failed", "request_id=request-99", "mode=DIRECT", "room=programming", "nick=alice", "error=\"provider timed out\""} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("log %q does not contain %q", logged, expected)
+		}
+	}
+}
 
 func TestRuntimeFailureSinkOnlyRepliesForRequiredModes(t *testing.T) {
 	var got []Mode

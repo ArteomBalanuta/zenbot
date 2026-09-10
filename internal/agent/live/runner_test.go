@@ -1,19 +1,48 @@
 package live
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 
 	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/prompt"
 	"zenbot/internal/agent/runtime"
 	agenttool "zenbot/internal/agent/tool"
 	"zenbot/internal/repository"
 )
+
+func TestRunnerLogsLoadedContextAndFinalizedResponse(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	runner := Runner{
+		Assembler: testLiveAssembler(t),
+		Client:    &captureLiveClient{},
+		Finalizer: MarkerFinalizer{NoReplyMarker: "none"},
+	}
+	inv := runtime.NewInvocation("runner-log", runtime.NewContext("programming", "alice", "", "", false, nil), "hello", runtime.DIRECT, "", true)
+	ctx := observability.WithRequest(context.Background(), observability.Request{ID: inv.RequestID()})
+	result, err := runner.Run(ctx, inv)
+	if err != nil || !result.ShouldReply() {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+
+	logged := output.String()
+	for _, expected := range []string{"agent.context.loaded", "memory_turn_count=0", "historical_evidence_count=0", "agent.response.finalized", "reply=true", "request_id=runner-log"} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("log %q does not contain %q", logged, expected)
+		}
+	}
+}
 
 func TestOutputFinalizerAppliesMarkerSemanticsAndSanitization(t *testing.T) {
 	f := OutputFinalizer{NoReplyMarker: "[[SATURN_NO_REPLY]]", MaxOutputChars: 8000}

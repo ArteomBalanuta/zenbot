@@ -9,6 +9,7 @@ import (
 
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/runtime"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
@@ -60,10 +61,11 @@ func (c *commandChannel) correct(ctx context.Context, inv runtime.Invocation, ag
 		return Completion{}, errors.New("command correction is unavailable")
 	}
 	state.MarkCommandCorrectionUsed()
+	observability.Info(ctx, "agent.correction.started", "correction_type", "command_channel")
 	messages := append([]llm.LlmMessage(nil), prepared...)
 	messages = append(messages, llm.NewLlmMessage("assistant", first.Content(), nil, ""))
 	messages = append(messages, llm.NewLlmMessage("user", "The rendered command was not executed. Return exactly one matching run_command call for the rendered command, or respond_without_command with exactly one non-command response string.", nil, ""))
-	second, err := c.client.Complete(ctx, llm.NewLlmRequest(messages, []any{c.runDefinition, responseWithoutCommandDefinition()}, false, nil, nil))
+	second, err := c.client.Complete(observability.WithStage(ctx, "llm.command_correction"), llm.NewLlmRequest(messages, []any{c.runDefinition, responseWithoutCommandDefinition()}, false, nil, nil))
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete command correction: %w", err)
 	}

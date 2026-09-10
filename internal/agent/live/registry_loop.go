@@ -7,6 +7,7 @@ import (
 
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/agent/tool/execution"
@@ -83,11 +84,14 @@ func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *t
 	executor := &execution.Executor{Registry: registry, Ledger: execution.NewLedger(budget, maxFailures), DefaultTimeout: limits.ToolTimeout}
 	response := initial
 	all := []toolBatchResult{}
+	cycle := 0
 	for {
+		cycle++
 		if response.FinishReason() == "length" {
 			return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent response was truncated")
 		}
 		calls := response.ToolCalls()
+		observability.Info(ctx, "agent.loop.cycle", "cycle", cycle, "tool_call_count", len(calls), "finish_reason", response.FinishReason())
 		if len(calls) == 0 {
 			return response, messages, all, nil
 		}
@@ -95,10 +99,18 @@ func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *t
 		for _, call := range calls {
 			batchCalls = append(batchCalls, execution.FromLLM(call))
 		}
+		observability.Info(ctx, "agent.tool.batch_started", "cycle", cycle, "tool_call_count", len(batchCalls))
 		_, batch, err := executeRegistryBatch(ctx, executor, agent, limits, state, batchCalls)
 		if err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}
+		failures := 0
+		for _, item := range batch {
+			if item.Result.IsError {
+				failures++
+			}
+		}
+		observability.Info(ctx, "agent.tool.batch_completed", "cycle", cycle, "tool_call_count", len(batch), "failure_count", failures)
 		all = append(all, batch...)
 		messages, err = appendRegistryProtocol(messages, response, batch)
 		if err != nil {
@@ -107,7 +119,7 @@ func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *t
 		if !state.AdvanceStep() {
 			return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent execution step limit reached")
 		}
-		response, err = client.Complete(ctx, llm.NewLlmRequest(messages, providerTools, false, nil, nil))
+		response, err = client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.tool_follow_up.%d", cycle)), llm.NewLlmRequest(messages, providerTools, false, nil, nil))
 		if err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 )
 
 // Config controls an OpenAI-compatible endpoint. HTTP and timing hooks are injectable for tests.
@@ -86,7 +87,31 @@ func NewClient(cfg Config) *Client {
 }
 
 // Complete sends one non-streaming chat completion, retrying only transient failures.
-func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (llm.LlmResponse, error) {
+func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (response llm.LlmResponse, err error) {
+	started := time.Now()
+	attempts := 0
+	observability.Info(ctx, "agent.llm.request.started",
+		"context_items", len(in.Messages()),
+		"tool_definition_count", len(in.Tools()),
+	)
+	defer func() {
+		attributes := []any{"duration_ms", time.Since(started).Milliseconds(), "attempt_count", attempts}
+		if err != nil {
+			var providerErr *llm.LlmError
+			if errors.As(err, &providerErr) {
+				attributes = append(attributes, "error_code", providerErr.Code, "http_status", providerErr.Status, "provider_code", providerErr.ProviderCode)
+			}
+			observability.Error(ctx, "agent.llm.request.failed", err, attributes...)
+			return
+		}
+		observability.Info(ctx, "agent.llm.request.completed",
+			"duration_ms", time.Since(started).Milliseconds(),
+			"attempt_count", attempts,
+			"finish_reason", response.FinishReason(),
+			"tool_call_count", len(response.ToolCalls()),
+			"output_chars", len([]rune(response.Content())),
+		)
+	}()
 	cfg := c.Config
 	if c.BaseURL != "" {
 		cfg.Endpoint = c.BaseURL
@@ -133,6 +158,8 @@ func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (llm.LlmRespon
 	opCtx, cancelOperation := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancelOperation()
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		attempts = attempt + 1
+		observability.Debug(ctx, "agent.llm.attempt.started", "attempt", attempts, "max_attempts", maxAttempts, "payload_bytes", len(body))
 		if err := opCtx.Err(); err != nil {
 			return llm.LlmResponse{}, contextError(err)
 		}
@@ -173,6 +200,7 @@ func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (llm.LlmRespon
 			return llm.LlmResponse{}, &llm.LlmError{Code: "transport", Err: readErr}
 		}
 		if retryable(resp.StatusCode) && attempt+1 < maxAttempts {
+			observability.Info(ctx, "agent.llm.attempt.retrying", "attempt", attempts, "http_status", resp.StatusCode)
 			if err := cfg.Sleep(opCtx, retryAfter(resp.Header.Get("Retry-After"), cfg.RetryDelay, attempt, cfg.Now)); err != nil {
 				return llm.LlmResponse{}, contextError(err)
 			}

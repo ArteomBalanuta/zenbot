@@ -7,6 +7,7 @@ import (
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/runtime"
 	"zenbot/internal/agent/turn"
@@ -126,16 +127,24 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 	}
 	memory, err := r.loadMemory(ctx, inv)
 	if err != nil {
+		observability.Error(ctx, "agent.context.load_failed", err, "context_source", "memory")
 		return runtime.Result{}, err
 	}
 	historical, err := r.loadHistoricalEvidence(ctx, inv)
 	if err != nil {
+		observability.Error(ctx, "agent.context.load_failed", err, "context_source", "historical_evidence")
 		return runtime.Result{}, err
 	}
 	recent, err := loadRecentContext(ctx, r.ConversationContext, inv)
 	if err != nil {
+		observability.Error(ctx, "agent.context.load_failed", err, "context_source", "recent_room")
 		return runtime.Result{}, err
 	}
+	observability.Info(ctx, "agent.context.loaded",
+		"memory_turn_count", len(memory),
+		"historical_evidence_count", len(historical),
+		"recent_context_bytes", len(recent),
+	)
 	var response llm.LlmResponse
 	var evidence []turn.PersistableEvidence
 	suppressReply := false
@@ -153,18 +162,26 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 		if !inv.Context().Whisper() && prepared.RequiredFreshTool() != "" {
 			return runtime.Result{}, fmt.Errorf("required fresh history needs bounded tool loop")
 		}
-		response, err = r.Client.Complete(ctx, prepared.LlmRequest())
+		response, err = r.Client.Complete(observability.WithStage(ctx, "llm.direct"), prepared.LlmRequest())
 	}
 	if err != nil {
 		return runtime.Result{}, fmt.Errorf("complete agent request: %w", err)
 	}
 	if suppressReply {
+		observability.Info(ctx, "agent.response.suppressed", "tool_attempted", meta.ToolAttempted)
 		return runtime.NewResultWithEvidence(inv.RequestID(), "", false, nil), nil
 	}
+	observability.Debug(ctx, "agent.response.finalization_started",
+		"finish_reason", response.FinishReason(),
+		"tool_call_count", len(response.ToolCalls()),
+		"output_chars", len([]rune(response.Content())),
+	)
 	content, reply, err := finalizeWithContext(r.Finalizer, inv, response.Content(), meta)
 	if err != nil {
+		observability.Error(ctx, "agent.response.finalization_failed", err)
 		return runtime.Result{}, fmt.Errorf("finalize agent response: %w", err)
 	}
+	observability.Info(ctx, "agent.response.finalized", "reply", reply, "output_chars", len([]rune(content)), "evidence_count", len(evidence))
 	return runtime.NewResultWithEvidence(inv.RequestID(), content, reply, evidence), nil
 }
 func (r Runner) loadMemory(ctx context.Context, inv runtime.Invocation) ([]llm.LlmMessage, error) {
