@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -135,6 +136,71 @@ func TestCompleteMalformedSuccessfulResponse(t *testing.T) {
 		if !errors.As(err, &le) || le.Code != "malformed_response" {
 			t.Errorf("body %s error=%v", body, err)
 		}
+	}
+}
+
+func TestDecodeResponseToleratesOptionalUsageSchemaDrift(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage string
+		want  map[string]int
+	}{
+		{
+			name:  "nested and non-integral metadata",
+			usage: `{"prompt_tokens":7351,"completion_tokens":10,"total_tokens":7361,"prompt_tokens_details":{"cached_tokens":4},"regions":["local"],"provider":"llama.cpp","estimated":1.5,"missing":null,"oversized":9223372036854775808}`,
+			want:  map[string]int{"prompt_tokens": 7351, "completion_tokens": 10, "total_tokens": 7361},
+		},
+		{name: "array shape", usage: `[{"prompt_tokens":1}]`, want: map[string]int{}},
+		{name: "string shape", usage: `"not-accounting"`, want: map[string]int{}},
+		{name: "null shape", usage: `null`, want: map[string]int{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := []byte(`{"choices":[{"message":{"content":"answer"},"finish_reason":"stop"}],"usage":` + test.usage + `}`)
+			got, err := decodeResponse(body)
+			if err != nil {
+				t.Fatalf("valid completion rejected because of optional usage metadata: %v", err)
+			}
+			if got.Content() != "answer" || got.FinishReason() != "stop" || !reflect.DeepEqual(got.Usage(), test.want) {
+				t.Fatalf("response content=%q finish=%q usage=%v, want usage=%v", got.Content(), got.FinishReason(), got.Usage(), test.want)
+			}
+		})
+	}
+}
+
+func TestCompleteLogsSafeMalformedResponseDiagnostics(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		io.WriteString(w, `{"choices":[`)
+	}))
+	defer server.Close()
+	ctx := observability.WithRequest(context.Background(), observability.Request{ID: "malformed-1"})
+	_, err := NewClient(Config{Endpoint: server.URL}).Complete(ctx, testRequest())
+	if err == nil {
+		t.Fatal("malformed provider response was accepted")
+	}
+
+	logged := output.String()
+	for _, expected := range []string{
+		"agent.llm.response.malformed",
+		"request_id=malformed-1",
+		"response_bytes=12",
+		"media_type=application/json",
+		"json_offset=12",
+		"body_sha256=",
+		"unexpected end of JSON input",
+	} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("log %q does not contain %q", logged, expected)
+		}
+	}
+	if strings.Contains(logged, "choices") {
+		t.Fatalf("malformed response body leaked into log: %q", logged)
 	}
 }
 

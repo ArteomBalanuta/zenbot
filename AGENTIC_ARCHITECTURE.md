@@ -87,6 +87,11 @@ Named-user profile/history requests require fresh `user_message_history` evidenc
 
 `internal/agent/llm/openai/client.go` calls `<agent.endpoint>/v1/chat/completions`. It sends the optional model, completion-token bound, contextual tools, and `chat_template_kwargs.enable_thinking`. The configured operation timeout covers retries and retry backoff. Only transient transport/status failures are retried.
 
+Provider accounting is schema-open optional metadata. Integer usage counters are
+retained through the stable `Usage()` API, while nested details and unfamiliar
+value shapes are ignored. Provider additions therefore cannot invalidate an
+otherwise usable completion.
+
 Tool manifests remain present on every correction round. This is required for the model to repair invalid arguments or choose a fallback tool after receiving an error observation.
 
 ## Tool Contracts
@@ -205,7 +210,9 @@ The primary lifecycle events are:
 - `agent.request.assembled`, `agent.loop.started`, `agent.loop.cycle`,
   `agent.loop.completed`, and `agent.loop.failed`
 - `agent.llm.request.started`, `agent.llm.attempt.retrying`,
-  `agent.llm.request.completed`, and `agent.llm.request.failed`
+  `agent.llm.request.completed`, and `agent.llm.request.failed`. Invalid JSON
+  also emits `agent.llm.response.malformed` with the parser offset, response
+  size, media type, and SHA-256 fingerprint, never the response body.
 - `agent.tool.batch_started`, `agent.tool.started`, `agent.tool.completed`, and
   `agent.tool.batch_completed`
 - `agent.correction.started`, with `stage` distinguishing command, freshness,

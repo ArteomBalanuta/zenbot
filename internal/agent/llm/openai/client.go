@@ -3,10 +3,12 @@ package openai
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -209,7 +211,11 @@ func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (response llm.
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return llm.LlmResponse{}, httpError(resp.StatusCode, data)
 		}
-		return decodeResponse(data)
+		decoded, decodeErr := decodeResponse(data)
+		if decodeErr != nil {
+			logMalformedResponse(ctx, data, resp.Header.Get("Content-Type"), decodeErr)
+		}
+		return decoded, decodeErr
 	}
 	return llm.LlmResponse{}, &llm.LlmError{Code: "transport", Err: errors.New("request attempts exhausted")}
 }
@@ -286,13 +292,13 @@ type responseEnvelope struct {
 		} `json:"message"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage map[string]int `json:"usage"`
+	Usage json.RawMessage `json:"usage"`
 }
 
 func decodeResponse(data []byte) (llm.LlmResponse, error) {
 	var e responseEnvelope
 	if err := json.Unmarshal(data, &e); err != nil {
-		return llm.LlmResponse{}, &llm.LlmError{Code: "malformed_response", Err: errors.New("invalid JSON response")}
+		return llm.LlmResponse{}, &llm.LlmError{Code: "malformed_response", Err: fmt.Errorf("invalid JSON response: %w", err)}
 	}
 	if len(e.Choices) == 0 {
 		return llm.LlmResponse{}, &llm.LlmError{Code: "malformed_response", Err: errors.New("response has no choices")}
@@ -329,7 +335,45 @@ func decodeResponse(data []byte) (llm.LlmResponse, error) {
 		delete(diagnostics, "choices")
 		delete(diagnostics, "usage")
 	}
-	return llm.NewLlmResponseWithMetadata(content, calls, reason, e.Usage, diagnostics), nil
+	return llm.NewLlmResponseWithMetadata(content, calls, reason, decodeUsage(e.Usage), diagnostics), nil
+}
+
+// decodeUsage treats provider accounting as optional metadata. Providers may
+// add nested detail objects without invalidating an otherwise usable response.
+func decodeUsage(raw json.RawMessage) map[string]int {
+	usage := map[string]int{}
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return usage
+	}
+	for name, value := range fields {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			continue
+		}
+		var count int
+		if json.Unmarshal(value, &count) == nil {
+			usage[name] = count
+		}
+	}
+	return usage
+}
+
+func logMalformedResponse(ctx context.Context, data []byte, contentType string, err error) {
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) {
+		return
+	}
+	mediaType, _, parseErr := mime.ParseMediaType(contentType)
+	if parseErr != nil {
+		mediaType = "invalid"
+	}
+	fingerprint := sha256.Sum256(data)
+	observability.Error(ctx, "agent.llm.response.malformed", err,
+		"response_bytes", len(data),
+		"media_type", mediaType,
+		"json_offset", syntaxErr.Offset,
+		"body_sha256", fmt.Sprintf("%x", fingerprint),
+	)
 }
 func httpError(status int, data []byte) *llm.LlmError {
 	var payload struct {
