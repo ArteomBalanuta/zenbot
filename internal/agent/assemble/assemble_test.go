@@ -162,6 +162,27 @@ func TestSystemPromptAllowsDirectRegularAnswersWithoutQuoteOnlyPersona(t *testin
 	}
 }
 
+func TestSystemPromptRequiresTerseOptionRepliesToContinuePriorExchange(t *testing.T) {
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := []Message{
+		llm.NewLlmMessage("user", "offer me two approaches", nil, ""),
+		llm.NewLlmMessage("assistant", "1. Direct answer\n2. Detailed answer", nil, ""),
+	}
+	request, err := testAssembler(t, catalog).Assemble(context.Background(), invocation(runtime.DIRECT, "1"), history, "", nil, Talk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := strings.ToLower(request.Messages()[0].Content())
+	for _, required := range []string{"bare number", "immediately preceding assistant", "without asking for clarification"} {
+		if !strings.Contains(system, required) {
+			t.Fatalf("system prompt does not require option follow-up resolution %q", required)
+		}
+	}
+}
+
 func TestAssembleExposesAuthorizedCommandToolsForNaturalLanguageRequests(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {
