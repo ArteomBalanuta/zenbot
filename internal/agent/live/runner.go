@@ -56,6 +56,9 @@ func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string,
 	if containsInternalToolEvidence(content) {
 		return "", false, fmt.Errorf("agent response exposed internal tool evidence")
 	}
+	if turn.ContainsToolProtocolArtifact(content) {
+		return "", false, fmt.Errorf("agent response exposed tool protocol markup")
+	}
 	content = trimASCIIControlWhitespace(strings.ReplaceAll(content, f.NoReplyMarker, ""))
 	if content == "" {
 		return "", false, fmt.Errorf("agent returned an empty response")

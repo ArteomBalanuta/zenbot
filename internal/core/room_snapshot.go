@@ -51,6 +51,24 @@ func (e *credentialedRoomSnapshotMaster) SubmitCredentialedRoomSnapshot(request 
 	if len(request.WorkflowID) < 8 || request.TargetChannel == "" {
 		return errors.New("credentialed room snapshot request is invalid")
 	}
-	request.TemporaryJoin = &snapshot.TemporaryJoin{Channel: request.TargetChannel, Nick: "msg_" + request.WorkflowID[:8], Password: e.Password}
+	request.TemporaryJoin = &snapshot.TemporaryJoin{Channel: request.TargetChannel, Nick: temporarySnapshotNick(request.WorkflowID), Password: e.Password}
 	return e.snapshotCoordinator.Submit(request)
+}
+
+func temporarySnapshotNick(workflowID string) string {
+	const suffixLength = 8
+	suffix := []byte(workflowID[:suffixLength])
+	for i, character := range suffix {
+		if !isSnapshotNickCharacter(character) {
+			suffix[i] = '_'
+		}
+	}
+	return "msg_" + string(suffix)
+}
+
+func isSnapshotNickCharacter(character byte) bool {
+	return character >= 'a' && character <= 'z' ||
+		character >= 'A' && character <= 'Z' ||
+		character >= '0' && character <= '9' ||
+		character == '_'
 }

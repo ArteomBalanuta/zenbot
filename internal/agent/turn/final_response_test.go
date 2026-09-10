@@ -17,6 +17,7 @@ func TestFinalResponseValidatorRejectsInvalidTerminalResponses(t *testing.T) {
 		{name: "empty", response: llm.NewLlmResponse(" ", nil, "stop")},
 		{name: "truncated", response: llm.NewLlmResponse("partial", nil, "length")},
 		{name: "still calling tools", response: llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("1", "lookup", map[string]any{})}, "tool_calls")},
+		{name: "textual native tool call", response: llm.NewLlmResponse(`<|tool_call>call:run_command{arguments:<|\"|>lounge<|\"|>,command:<|\"|>room_users<|\"|>}<tool_call|>`, nil, "stop")},
 		{name: "repeats prior answer", response: llm.NewLlmResponse("same", nil, "stop"), input: FinalResponseInput{PriorAssistant: "same"}},
 		{name: "missing required evidence", response: llm.NewLlmResponse("answer", nil, "stop"), input: FinalResponseInput{RequiredTool: "history"}},
 	}

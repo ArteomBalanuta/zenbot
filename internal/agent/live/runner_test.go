@@ -117,6 +117,17 @@ func TestOutputFinalizerRejectsInternalToolEvidenceBeforeTruncation(t *testing.T
 	}
 }
 
+func TestOutputFinalizerRejectsTextualToolProtocolBeforeDelivery(t *testing.T) {
+	f := OutputFinalizer{NoReplyMarker: "[[SATURN_NO_REPLY]]", MaxOutputChars: 8000}
+	inv := runtime.NewInvocation("direct", runtime.NewContext("r", "n", "", "", false, nil), "list lounge", runtime.DIRECT, "l list lounge", true)
+	raw := `<|tool_call>call:run_command{arguments:<|\"|>lounge<|\"|>,command:<|\"|>room_users<|\"|>}<tool_call|>`
+
+	_, _, err := f.Finalize(inv, raw)
+	if err == nil || err.Error() != "agent response exposed tool protocol markup" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestMarkerFinalizerUsesSafeDefaultOutputBound(t *testing.T) {
 	f := MarkerFinalizer{NoReplyMarker: "none"}
 	inv := runtime.NewInvocation("id", runtime.NewContext("r", "n", "", "", false, nil), "p", runtime.MENTION, "", true)

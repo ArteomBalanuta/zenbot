@@ -159,6 +159,19 @@ func resolveCurrentEngine(source any) (func() common.Engine, error) {
 	}
 }
 
+func resolveAgentCommandEngine(resolve func() common.Engine) func() common.Engine {
+	return func() common.Engine {
+		if resolve == nil {
+			return nil
+		}
+		engine := resolve()
+		if master, ok := engine.(*core.EngineImpl); ok {
+			return core.BindCredentialedRoomSnapshotMaster(master)
+		}
+		return engine
+	}
+}
+
 func trustedAgentSnapshot(engine common.Engine, creatorTrip string, adminTrips []string) participation.TrustedSnapshot {
 	snapshot := participation.TrustedSnapshot{CreatorTrip: creatorTrip, AdminTrips: append([]string(nil), adminTrips...), Roles: map[string]participation.Role{}}
 	if engine == nil {
@@ -224,7 +237,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
-	toolLoop, err := newAgentToolLoop(resolved, conversationRepository, assembler, client, directory, command.NewResolvingAgentCommandGateway(resolveEngine))
+	toolLoop, err := newAgentToolLoop(resolved, conversationRepository, assembler, client, directory, command.NewResolvingAgentCommandGateway(resolveAgentCommandEngine(resolveEngine)))
 	if err != nil {
 		return nil, fmt.Errorf("agent history tool: %w", err)
 	}

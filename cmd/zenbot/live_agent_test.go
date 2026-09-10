@@ -18,6 +18,7 @@ import (
 	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/common"
 	"zenbot/internal/config"
+	"zenbot/internal/core"
 	"zenbot/internal/listener/message"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
@@ -95,6 +96,29 @@ func TestTrustedAgentSnapshotToleratesUnavailableActiveUserSet(t *testing.T) {
 	snapshot := trustedAgentSnapshot(trustedSnapshotEngine{nilUsers: true}, "creator", []string{"admin"})
 	if snapshot.Room != "programming" || len(snapshot.Users) != 0 || snapshot.CreatorTrip != "creator" {
 		t.Fatalf("snapshot=%#v", snapshot)
+	}
+}
+
+func TestAgentCommandEngineResolverBindsCredentialedSnapshotCapability(t *testing.T) {
+	first := &core.EngineImpl{Type: model.MASTER, Channel: "first"}
+	binding := newMasterBinding(first)
+	resolve, err := resolveCurrentEngine(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandEngine := resolveAgentCommandEngine(resolve)
+	if _, ok := commandEngine().(common.CredentialedRoomSnapshotSubmitter); !ok {
+		t.Fatalf("resolved command engine %T lacks credentialed snapshot capability", commandEngine())
+	}
+
+	second := &core.EngineImpl{Type: model.MASTER, Channel: "second"}
+	binding.Rebind(second)
+	resolved := commandEngine()
+	if resolved.GetChannel() != "second" {
+		t.Fatalf("resolver retained retired master: %#v", resolved)
+	}
+	if _, ok := resolved.(common.CredentialedRoomSnapshotSubmitter); !ok {
+		t.Fatalf("rebound command engine %T lacks credentialed snapshot capability", resolved)
 	}
 }
 

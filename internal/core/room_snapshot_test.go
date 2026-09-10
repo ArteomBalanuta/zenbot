@@ -89,7 +89,7 @@ func TestCredentialedRoomSnapshotUsesProtocolValidTemporaryNick(t *testing.T) {
 	engine.InstallRoomSnapshotCoordinator(coordinator)
 	submitter := BindCredentialedRoomSnapshotMaster(engine).(common.CredentialedRoomSnapshotSubmitter)
 	request := validRoomSnapshotRequest()
-	request.WorkflowID = "12345678-abcd"
+	request.WorkflowID = "list-abcdef0123"
 	request.TargetChannel = "lounge"
 
 	if err := submitter.SubmitCredentialedRoomSnapshot(request); err != nil {
@@ -100,7 +100,7 @@ func TestCredentialedRoomSnapshotUsesProtocolValidTemporaryNick(t *testing.T) {
 	if captured.TemporaryJoin == nil {
 		t.Fatal("credentialed snapshot did not receive a temporary join")
 	}
-	if captured.TemporaryJoin.Channel != "lounge" || captured.TemporaryJoin.Nick != "msg_12345678" || captured.TemporaryJoin.Password != "secret" {
+	if captured.TemporaryJoin.Channel != "lounge" || captured.TemporaryJoin.Nick != "msg_list_abc" || captured.TemporaryJoin.Password != "secret" {
 		t.Fatalf("temporary join = %#v", captured.TemporaryJoin)
 	}
 }
