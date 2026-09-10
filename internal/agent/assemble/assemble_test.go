@@ -3,6 +3,7 @@ package assemble
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -16,6 +17,16 @@ type failingCatalog struct{ err error }
 
 func (c failingCatalog) Text(string) (string, error)              { return "", c.err }
 func (c failingCatalog) Formatted(string, ...any) (string, error) { return "", c.err }
+
+type compactCatalog struct{}
+
+func (compactCatalog) Text(path string) (string, error) { return path, nil }
+func (compactCatalog) Formatted(path string, values ...any) (string, error) {
+	if path == "input/router-contextualized-prompt.txt" && len(values) == 4 {
+		return fmt.Sprint(values[3]), nil
+	}
+	return path, nil
+}
 
 func testAssembler(t *testing.T, catalog Catalog) *Assembler {
 	t.Helper()
@@ -104,6 +115,71 @@ func TestSystemPromptSelectsModeAndDynamicSQLPoliciesAndCarriesMetadata(t *testi
 	}
 	if !strings.Contains(dynamic.Messages()[0].Content(), "database_sql") {
 		t.Fatal("enabled policy omitted database_sql")
+	}
+}
+
+func TestSystemPromptOmitsRequestLocalAndStaleLoopMetadata(t *testing.T) {
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptRenderer, err := NewSystemPrompt(Config{CreatorTrip: "creator"}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtime.NewContextWithCapabilities("room", "alice", "trip", "hash", false, nil, nil, "")
+	inv := runtime.NewInvocation("unique-request-id-not-for-the-model", ctx, "hello", runtime.DIRECT, "hello", false)
+
+	system, err := promptRenderer.Render(inv, inv.RequestID(), "", Command, ToolEvidence{
+		Attempted:       true,
+		AttemptedCount:  3,
+		SuccessfulCount: 2,
+		FailedCount:     1,
+	}, "FINALIZE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		"unique-request-id-not-for-the-model",
+		`"correlationId"`,
+		`"requestKindPhase"`,
+		`"toolEvidence"`,
+		`"attemptedCount"`,
+	} {
+		if strings.Contains(system, forbidden) {
+			t.Fatalf("system prompt contains request-local or stale metadata %q", forbidden)
+		}
+	}
+	for _, required := range []string{`"invocationMode":"DIRECT"`, `"requestKind":"COMMAND"`, `"room":"room"`} {
+		if !strings.Contains(system, required) {
+			t.Fatalf("system prompt omitted trusted routing metadata %q", required)
+		}
+	}
+}
+
+func TestAssembleRetainsNewestRoomContextWhenWholeSnapshotExceedsBudget(t *testing.T) {
+	a, err := New(Config{MaxContextTokens: 700}, compactCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recent := `{"rows":[` +
+		`{"name":"old","message":"` + strings.Repeat("o", 900) + `","createdOn":1,"channel":"room"},` +
+		`{"name":"middle","message":"` + strings.Repeat("m", 900) + `","createdOn":2,"channel":"room"},` +
+		`{"name":"new","message":"` + strings.Repeat("n", 900) + `","createdOn":3,"channel":"room"}` +
+		`]}`
+	request, err := a.Assemble(context.Background(), invocation(runtime.DIRECT, "what just happened?"), nil, recent, nil, Talk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, message := range request.Messages() {
+		joined += message.Content()
+	}
+	if !strings.Contains(joined, `"name":"new"`) {
+		t.Fatalf("newest room context was discarded with oversized snapshot: %s", joined)
+	}
+	if !strings.Contains(joined, "RECENT_PUBLIC_ROOM_MESSAGES_UNTRUSTED_DATA=") {
+		t.Fatalf("room context lost its provenance marker: %s", joined)
 	}
 }
 

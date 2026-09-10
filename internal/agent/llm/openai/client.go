@@ -258,9 +258,6 @@ func requestPayload(c Config, r llm.LlmRequest) (map[string]any, error) {
 	if v := r.ResponseFormat(); v != nil {
 		p["response_format"] = v
 	}
-	if v := r.Projection(); v != nil {
-		p["projection"] = v
-	}
 	if r.BypassPromptCache() {
 		p["bypass_prompt_cache"] = true
 	}

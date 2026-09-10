@@ -27,8 +27,11 @@ func TestSemanticCompletionGateRequiresStructuredAssessment(t *testing.T) {
 		Request:      "how many users overlap between lounge and programming?",
 		Answer:       "Let me fetch that data now.",
 		Conversation: []llm.LlmMessage{llm.NewLlmMessage("user", "compare the rooms", nil, "")},
-		Tools:        []turn.ToolCapability{{Name: "saturn_list", Description: "Obtain a live room snapshot."}},
-		Results:      []contract.Result{},
+		Tools: []turn.ToolCapability{{
+			Name:        "saturn_list",
+			Description: "L=List room users;Use: inspect current users in a named room;Avoid: do not use for greetings or user activity statistics",
+		}},
+		Results: []contract.Result{},
 	}
 
 	assessment, err := gate.Evaluate(context.Background(), candidate)
@@ -41,8 +44,18 @@ func TestSemanticCompletionGateRequiresStructuredAssessment(t *testing.T) {
 	if len(client.requests) != 1 || client.requests[0].ToolChoice() != llm.ToolChoiceRequired || len(client.requests[0].Tools()) != 1 {
 		t.Fatalf("gate request=%#v", client.requests)
 	}
+	if client.requests[0].BypassPromptCache() {
+		t.Fatal("completion gate unnecessarily bypassed provider prompt caching")
+	}
 	payload := client.requests[0].Messages()[1].Content()
-	for _, expected := range []string{candidate.Request, candidate.Answer, "saturn_list", "compare the rooms"} {
+	for _, expected := range []string{
+		candidate.Request,
+		candidate.Answer,
+		"saturn_list",
+		"List room users",
+		"do not use for greetings or user activity statistics",
+		"compare the rooms",
+	} {
 		if !strings.Contains(payload, expected) {
 			t.Fatalf("gate payload omitted %q: %s", expected, payload)
 		}

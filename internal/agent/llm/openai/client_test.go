@@ -90,6 +90,23 @@ func TestRequestPayloadPropagatesThinkingModeWithoutDroppingProviderOptions(t *t
 	}
 }
 
+func TestRequestPayloadDoesNotSendInternalProjectionMetadata(t *testing.T) {
+	request := llm.NewLlmRequest(
+		[]llm.LlmMessage{llm.NewLlmMessage("user", "hello", nil, "")},
+		nil,
+		false,
+		nil,
+		map[string]any{"fingerprint": "internal-only", "estimatedTokens": 42},
+	)
+	payload, err := requestPayload(Config{}, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := payload["projection"]; found {
+		t.Fatalf("internal context projection leaked onto provider wire payload: %#v", payload["projection"])
+	}
+}
+
 func TestNewClientClonesNestedOptions(t *testing.T) {
 	nested := map[string]string{"region": "west"}
 	options := map[string]any{"provider": nested}

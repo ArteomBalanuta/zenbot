@@ -51,7 +51,7 @@ func (g *SemanticCompletionGate) Evaluate(ctx context.Context, candidate turn.Co
 			llm.NewLlmMessage("user", "COMPLETION_CANDIDATE_JSON="+string(payload), nil, ""),
 		},
 		[]any{completionAssessmentDefinition()},
-		true,
+		false,
 		nil,
 		nil,
 	).WithToolChoice(llm.ToolChoiceRequired)
@@ -125,12 +125,20 @@ type gateObservation struct {
 
 func completionGatePayload(candidate turn.CompletionCandidate) gatePayload {
 	tools := make([]turn.ToolCapability, 0, len(candidate.Tools))
+	seenTools := make(map[string]struct{}, len(candidate.Tools))
 	for _, capability := range candidate.Tools {
 		name := strings.TrimSpace(capability.Name)
 		if name == "" {
 			continue
 		}
-		tools = append(tools, turn.ToolCapability{Name: name, Description: truncateText(strings.TrimSpace(capability.Description), completionGateToolChars)})
+		if _, found := seenTools[name]; found {
+			continue
+		}
+		seenTools[name] = struct{}{}
+		tools = append(tools, turn.ToolCapability{
+			Name:        name,
+			Description: truncateText(strings.TrimSpace(capability.Description), completionGateToolChars),
+		})
 	}
 	observations := make([]gateObservation, 0, len(candidate.Results))
 	for _, result := range candidate.Results {
