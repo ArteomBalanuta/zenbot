@@ -280,13 +280,23 @@ func (contract commaListArgumentContract) Encode(raw json.RawMessage) (string, e
 type kickArgumentContract struct{ schema json.RawMessage }
 
 func kickArguments() AgentArgumentContract {
-	return kickArgumentContract{schema: objectSchema(map[string]json.RawMessage{
-		"mode": enumStringSchema("How targets are matched.", []string{"exact", "multiple", "contains"}),
+	singleTargets := func(mode string) json.RawMessage {
+		return objectSchema(map[string]json.RawMessage{
+			"mode": constStringSchema("How the target is matched.", mode),
+			"targets": json.RawMessage(mustJSON(map[string]any{
+				"type": "array", "description": "Exactly one nickname or containment fragment.",
+				"items": map[string]any{"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 1,
+			})),
+		}, []string{"mode", "targets"})
+	}
+	multiple := objectSchema(map[string]json.RawMessage{
+		"mode": constStringSchema("Match multiple exact nicknames.", "multiple"),
 		"targets": json.RawMessage(mustJSON(map[string]any{
-			"type": "array", "description": "Nicknames or one containment fragment.",
+			"type": "array", "description": "One or more exact nicknames.",
 			"items": map[string]any{"type": "string", "minLength": 1}, "minItems": 1,
 		})),
-	}, []string{"mode", "targets"})}
+	}, []string{"mode", "targets"})
+	return kickArgumentContract{schema: oneOfSchema(singleTargets("exact"), multiple, singleTargets("contains"))}
 }
 
 func (contract kickArgumentContract) Schema() json.RawMessage { return cloneJSON(contract.schema) }
@@ -363,11 +373,17 @@ func (contract shadowBanArgumentContract) Encode(raw json.RawMessage) (string, e
 type automoveArgumentContract struct{ schema json.RawMessage }
 
 func automoveArguments() AgentArgumentContract {
-	return automoveArgumentContract{schema: objectSchema(map[string]json.RawMessage{
-		"operation":   enumStringSchema("Auto-move operation.", []string{"enable", "disable", "configure"}),
+	stateBranch := func(operation string) json.RawMessage {
+		return objectSchema(map[string]json.RawMessage{
+			"operation": constStringSchema("Auto-move operation.", operation),
+		}, []string{"operation"})
+	}
+	configure := objectSchema(map[string]json.RawMessage{
+		"operation":   constStringSchema("Configure auto-move rooms.", "configure"),
 		"source":      stringSchema("Source room for configure.", true),
 		"destination": stringSchema("Destination room for configure.", true),
-	}, []string{"operation"})}
+	}, []string{"operation", "source", "destination"})
+	return automoveArgumentContract{schema: oneOfSchema(stateBranch("enable"), stateBranch("disable"), configure)}
 }
 
 func (contract automoveArgumentContract) Schema() json.RawMessage { return cloneJSON(contract.schema) }
@@ -459,6 +475,16 @@ func enumStringSchema(description string, values []string) json.RawMessage {
 	return json.RawMessage(mustJSON(map[string]any{
 		"type": "string", "description": description, "enum": append([]string(nil), values...),
 	}))
+}
+
+func constStringSchema(description, value string) json.RawMessage {
+	return json.RawMessage(mustJSON(map[string]any{
+		"type": "string", "description": description, "const": value,
+	}))
+}
+
+func oneOfSchema(branches ...json.RawMessage) json.RawMessage {
+	return json.RawMessage(mustJSON(map[string]any{"oneOf": append([]json.RawMessage(nil), branches...)}))
 }
 
 func objectSchema(properties map[string]json.RawMessage, required []string) json.RawMessage {

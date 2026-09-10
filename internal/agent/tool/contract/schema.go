@@ -46,6 +46,30 @@ func validateSchemaNode(raw json.RawMessage, path string) (string, error) {
 			return "", fmt.Errorf("%s contains unsupported keyword %s", path, keyword)
 		}
 	}
+	if rawOneOf, conditional := schema["oneOf"]; conditional {
+		for keyword := range schema {
+			if keyword != "oneOf" && keyword != "description" {
+				return "", fmt.Errorf("%s oneOf cannot be combined with %s", path, keyword)
+			}
+		}
+		var branches []json.RawMessage
+		if err := json.Unmarshal(rawOneOf, &branches); err != nil || len(branches) < 2 {
+			return "", fmt.Errorf("%s oneOf must contain at least two branches", path)
+		}
+		commonType := ""
+		for index, branch := range branches {
+			branchType, err := validateSchemaNode(branch, fmt.Sprintf("%s.oneOf[%d]", path, index))
+			if err != nil {
+				return "", err
+			}
+			if commonType == "" {
+				commonType = branchType
+			} else if commonType != branchType {
+				commonType = "any"
+			}
+		}
+		return commonType, nil
+	}
 	var typ string
 	if err := json.Unmarshal(schema["type"], &typ); err != nil || !supported(typ) {
 		return "", fmt.Errorf("%s has invalid schema type", path)
@@ -127,12 +151,17 @@ func validateSchemaNode(raw json.RawMessage, path string) (string, error) {
 			}
 		}
 	}
+	if rawConst, ok := schema["const"]; ok {
+		if err := validateJSONType(typ, rawConst); err != nil {
+			return "", fmt.Errorf("%s const value does not match %s type", path, typ)
+		}
+	}
 	return typ, nil
 }
 
 func supportedSchemaKeyword(keyword string) bool {
 	switch keyword {
-	case "type", "description", "enum", "required", "additionalProperties", "properties", "items", "minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum":
+	case "type", "description", "enum", "const", "oneOf", "required", "additionalProperties", "properties", "items", "minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum":
 		return true
 	default:
 		return false
@@ -219,6 +248,22 @@ func validateValue(n string, raw, v json.RawMessage) error {
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return fmt.Errorf("invalid schema for parameter: %s", n)
 	}
+	if rawOneOf, conditional := s["oneOf"]; conditional {
+		var branches []json.RawMessage
+		if json.Unmarshal(rawOneOf, &branches) != nil {
+			return fmt.Errorf("invalid conditional schema for parameter: %s", n)
+		}
+		matches := 0
+		for _, branch := range branches {
+			if validateValue(n, branch, v) == nil {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("parameter must match exactly one schema branch: %s (matched %d)", n, matches)
+		}
+		return nil
+	}
 	var t string
 	json.Unmarshal(s["type"], &t)
 	var x any
@@ -229,6 +274,9 @@ func validateValue(n string, raw, v json.RawMessage) error {
 	}
 	if err := validateDecodedType(t, x); err != nil {
 		return fmt.Errorf("invalid type for parameter: %s", n)
+	}
+	if rawConst, constrained := s["const"]; constrained && !bytes.Equal(CanonicalJSON(rawConst), CanonicalJSON(v)) {
+		return fmt.Errorf("invalid constant value for parameter: %s", n)
 	}
 	var enum []json.RawMessage
 	if json.Unmarshal(s["enum"], &enum) == nil && len(enum) > 0 {
@@ -358,6 +406,9 @@ func ValidateResult(schema, value json.RawMessage) error {
 	json.Unmarshal(schema, &s)
 	var t string
 	json.Unmarshal(s["type"], &t)
+	if t == "" {
+		t = "conditional"
+	}
 	if err := validateValue("result", schema, value); err != nil {
 		return fmt.Errorf("tool result does not match declared %s schema", t)
 	}

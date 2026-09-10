@@ -18,7 +18,6 @@ func (d *Database) ExecuteAgentQuery(ctx context.Context, name string, raw json.
 	var args struct {
 		Limit int    `json:"limit"`
 		Room  string `json:"room"`
-		Trip  string `json:"trip"`
 	}
 	if len(raw) != 0 && json.Unmarshal(raw, &args) != nil {
 		return nil, fmt.Errorf("invalid agent query arguments")
@@ -32,9 +31,6 @@ func (d *Database) ExecuteAgentQuery(ctx context.Context, name string, raw json.
 	}
 	if strings.TrimSpace(args.Room) != "" {
 		room = strings.TrimSpace(args.Room)
-	}
-	if strings.TrimSpace(args.Trip) != "" {
-		trip = strings.TrimSpace(args.Trip)
 	}
 	count := func(sql string) (json.RawMessage, error) {
 		var n int64

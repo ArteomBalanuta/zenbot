@@ -527,7 +527,7 @@ func providerToolDefinition(definition contract.Definition) (any, error) {
 	if err := json.Unmarshal(definition.Parameters, &parameters); err != nil {
 		return nil, err
 	}
-	return map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters}}, nil
+	return map[string]any{"type": "function", "function": map[string]any{"name": definition.Name, "description": definition.Description, "parameters": parameters, "strict": true}}, nil
 }
 
 func containsAllowed(values []string, want string) bool {

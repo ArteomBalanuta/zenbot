@@ -454,8 +454,18 @@ func TestCreatorProviderManifestFitsConfiguredContextBudget(t *testing.T) {
 	if len(encoded) > 32*1024 {
 		t.Fatalf("creator provider manifest = %d bytes, want at most %d", len(encoded), 32*1024)
 	}
-	if strings.Contains(string(encoded), `"strict"`) {
-		t.Fatal("provider manifest unexpectedly enabled strict mode")
+	var providerDefinitions []struct {
+		Function struct {
+			Strict bool `json:"strict"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(encoded, &providerDefinitions); err != nil {
+		t.Fatal(err)
+	}
+	for index, definition := range providerDefinitions {
+		if !definition.Function.Strict {
+			t.Fatalf("provider definition %d did not enable strict argument generation", index)
+		}
 	}
 }
 

@@ -22,7 +22,12 @@ type DatabaseQuery struct {
 
 func (t DatabaseQuery) Name() string { return databaseQueryName }
 func (t DatabaseQuery) Descriptor(api.Context) (contract.Descriptor, error) {
-	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","enum":["message_count","registered_user_count","recent_messages_for_requester","recent_messages_for_room"]},"limit":{"type":"integer","minimum":1,"maximum":60},"room":{"type":"string","minLength":1,"maxLength":100},"trip":{"type":"string","minLength":1,"maxLength":100},"nick":{"type":"string","minLength":1,"maxLength":100}},"required":["query"]}`)
+	parameters := json.RawMessage(`{"oneOf":[
+		{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","const":"message_count"}},"required":["query"]},
+		{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","const":"registered_user_count"}},"required":["query"]},
+		{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","const":"recent_messages_for_requester"},"limit":{"type":"integer","minimum":1,"maximum":60}},"required":["query"]},
+		{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","const":"recent_messages_for_room"},"room":{"type":"string","minLength":1,"maxLength":100},"limit":{"type":"integer","minimum":1,"maximum":60}},"required":["query","room"]}
+	]}`)
 	return contract.NewDescriptor(databaseQueryName, "Approved database query", "Run one fixed read-only database query.", "database", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, json.RawMessage(`{"type":"any"}`), []string{"database"}, nil, []string{"Do not use for generated SQL or private data."}, contract.WithPrimaryIntent("approved_database_query"))
 }
 func (t DatabaseQuery) Execute(ctx context.Context, agent api.Context, raw json.RawMessage) (contract.Result, error) {

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	agentcontract "zenbot/internal/agent/tool/contract"
 	"zenbot/internal/model"
 )
 
@@ -245,13 +246,8 @@ func validateAgentToolSpec(canonical string, spec AgentToolSpec) error {
 		return fmt.Errorf("actionable command %q has no argument contract", canonical)
 	}
 	schema := spec.Arguments.Schema()
-	var schemaObject map[string]json.RawMessage
-	if !json.Valid(schema) || json.Unmarshal(schema, &schemaObject) != nil {
-		return fmt.Errorf("actionable command %q has an invalid parameter schema", canonical)
-	}
-	var schemaType string
-	if json.Unmarshal(schemaObject["type"], &schemaType) != nil || schemaType != "object" {
-		return fmt.Errorf("actionable command %q parameter schema is not an object", canonical)
+	if err := agentcontract.ValidateSchema(schema, true); err != nil {
+		return fmt.Errorf("actionable command %q has an invalid parameter schema: %w", canonical, err)
 	}
 	if len(spec.Examples) == 0 {
 		return fmt.Errorf("actionable command %q has no examples", canonical)
@@ -259,6 +255,9 @@ func validateAgentToolSpec(canonical string, spec AgentToolSpec) error {
 	for _, example := range spec.Examples {
 		if strings.TrimSpace(example.Prompt) == "" || !json.Valid(example.Arguments) {
 			return fmt.Errorf("actionable command %q has a malformed example", canonical)
+		}
+		if err := agentcontract.ValidateArguments(schema, example.Arguments); err != nil {
+			return fmt.Errorf("actionable command %q schema rejects example arguments: %w", canonical, err)
 		}
 		tail, err := spec.Arguments.Encode(example.Arguments)
 		if err != nil {

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	agentcontract "zenbot/internal/agent/tool/contract"
 )
 
 func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
@@ -56,6 +58,44 @@ func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
 	}
 }
 
+func TestConditionalAgentSchemasMatchEncoderBranches(t *testing.T) {
+	tests := []struct {
+		name     string
+		contract AgentArgumentContract
+		input    string
+		want     string
+		valid    bool
+	}{
+		{name: "automove enable", contract: automoveArguments(), input: `{"operation":"enable"}`, want: "on", valid: true},
+		{name: "automove enable rejects rooms", contract: automoveArguments(), input: `{"operation":"enable","source":"a","destination":"b"}`},
+		{name: "automove configure", contract: automoveArguments(), input: `{"operation":"configure","source":"a","destination":"b"}`, want: "a b", valid: true},
+		{name: "automove configure requires both rooms", contract: automoveArguments(), input: `{"operation":"configure","source":"a"}`},
+		{name: "kick exact", contract: kickArguments(), input: `{"mode":"exact","targets":["alice"]}`, want: "alice", valid: true},
+		{name: "kick exact rejects two", contract: kickArguments(), input: `{"mode":"exact","targets":["alice","bob"]}`},
+		{name: "kick contains rejects two", contract: kickArguments(), input: `{"mode":"contains","targets":["a","b"]}`},
+		{name: "kick multiple accepts two", contract: kickArguments(), input: `{"mode":"multiple","targets":["alice","bob"]}`, want: "-m alice bob", valid: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := json.RawMessage(tc.input)
+			schemaErr := agentcontract.ValidateArguments(tc.contract.Schema(), raw)
+			if !tc.valid {
+				if schemaErr == nil {
+					t.Fatalf("schema accepted encoder-invalid arguments %s", raw)
+				}
+				return
+			}
+			if schemaErr != nil {
+				t.Fatalf("schema rejected valid arguments: %v", schemaErr)
+			}
+			encoded, err := tc.contract.Encode(raw)
+			if err != nil || encoded != tc.want {
+				t.Fatalf("encoded=%q err=%v, want %q", encoded, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestAgentArgumentContractSchemaIsDefensivelyCopied(t *testing.T) {
 	arguments := positionalArguments(requiredString("nick", "Target nick."))
 	first := arguments.Schema()
@@ -78,6 +118,9 @@ func TestAgentCatalogHasCompleteSingleSourceContracts(t *testing.T) {
 				t.Fatalf("actionable command %q has no examples", entry.Canonical)
 			}
 			for _, example := range entry.Agent.Examples {
+				if err := agentcontract.ValidateArguments(entry.Agent.Arguments.Schema(), example.Arguments); err != nil {
+					t.Fatalf("%s schema rejects catalog example %q: %v", entry.Canonical, example.Prompt, err)
+				}
 				tail, err := entry.Agent.Arguments.Encode(example.Arguments)
 				if err != nil {
 					t.Fatalf("%s example %q is invalid: %v", entry.Canonical, example.Prompt, err)

@@ -139,11 +139,70 @@ func TestRecursiveSchemaValidationRejectsInvalidNestedSchemas(t *testing.T) {
 }
 
 func TestSchemaRejectsUnsupportedKeywordsInsteadOfSilentlyDrifting(t *testing.T) {
-	if err := ValidateSchema(json.RawMessage(`{"type":"object","properties":{},"oneOf":[]}`), true); err == nil {
-		t.Fatal("unsupported oneOf keyword was silently accepted")
+	if err := ValidateSchema(json.RawMessage(`{"type":"object","properties":{},"pattern":".*"}`), true); err == nil {
+		t.Fatal("unsupported pattern keyword was silently accepted")
 	}
 	if err := ValidateSchema(json.RawMessage(`{"type":"string","description":"supported annotation"}`), false); err != nil {
 		t.Fatalf("description annotation rejected: %v", err)
+	}
+}
+
+func TestConstValidationRequiresMatchingTypedLiteral(t *testing.T) {
+	schema := json.RawMessage(`{"type":"string","const":"configure"}`)
+	if err := ValidateSchema(schema, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateResult(schema, json.RawMessage(`"configure"`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateResult(schema, json.RawMessage(`"enable"`)); err == nil {
+		t.Fatal("non-constant value was accepted")
+	}
+	if err := ValidateSchema(json.RawMessage(`{"type":"integer","const":"one"}`), false); err == nil {
+		t.Fatal("const with the wrong declared type was accepted")
+	}
+}
+
+func TestOneOfValidationRequiresExactlyOneMatchingBranch(t *testing.T) {
+	schema := json.RawMessage(`{"oneOf":[
+		{"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","const":"exact"},"target":{"type":"string"}},"required":["mode","target"]},
+		{"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","const":"multiple"},"targets":{"type":"array","items":{"type":"string"},"minItems":1}},"required":["mode","targets"]}
+	]}`)
+	if err := ValidateSchema(schema, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateArguments(schema, json.RawMessage(`{"mode":"exact","target":"alice"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, arguments := range []string{
+		`{"mode":"contains","target":"alice"}`,
+		`{"mode":"exact","target":"alice","targets":["alice"]}`,
+	} {
+		if err := ValidateArguments(schema, json.RawMessage(arguments)); err == nil {
+			t.Fatalf("arguments %s did not match exactly one branch", arguments)
+		}
+	}
+	ambiguous := json.RawMessage(`{"oneOf":[{"type":"string","minLength":1},{"type":"string","maxLength":5}]}`)
+	if err := ValidateResult(ambiguous, json.RawMessage(`"x"`)); err == nil {
+		t.Fatal("value matching more than one branch was accepted")
+	}
+}
+
+func TestOneOfSchemaRejectsMalformedBranchesAndRetainsNestedPath(t *testing.T) {
+	for _, schema := range []string{
+		`{"oneOf":[]}`,
+		`{"oneOf":[{"type":"string"}]}`,
+		`{"oneOf":[{"type":"string"},{"type":"unsupported"}]}`,
+		`{"type":"object","oneOf":[{"type":"object"},{"type":"object"}]}`,
+	} {
+		if err := ValidateSchema(json.RawMessage(schema), false); err == nil {
+			t.Fatalf("malformed oneOf schema accepted: %s", schema)
+		}
+	}
+	nested := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"selection":{"oneOf":[{"type":"string","const":"one"},{"type":"string","const":"two"}]}},"required":["selection"]}`)
+	err := ValidateArguments(nested, json.RawMessage(`{"selection":"three"}`))
+	if err == nil || !strings.Contains(err.Error(), "arguments.selection") {
+		t.Fatalf("nested conditional error lost its path: %v", err)
 	}
 }
 
