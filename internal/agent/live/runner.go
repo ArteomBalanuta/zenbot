@@ -83,7 +83,7 @@ func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string,
 }
 
 func quoteOnlyRequired(inv runtime.Invocation, meta FinalizationContext) bool {
-	return !inv.Context().Whisper() && !inv.CommandOriginated() && inv.Mode() != runtime.MODERATION && !meta.ToolAttempted && (meta.CandidateKind == participation.Talk || meta.CandidateKind == participation.Unclassified)
+	return !inv.Context().Whisper() && inv.Mode() != runtime.MODERATION && !meta.ToolAttempted && (meta.CandidateKind == participation.Talk || meta.CandidateKind == participation.Unclassified)
 }
 
 func finalizeWithContext(f Finalizer, inv runtime.Invocation, raw string, meta FinalizationContext) (string, bool, error) {

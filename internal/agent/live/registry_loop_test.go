@@ -30,6 +30,19 @@ type failingReadTool struct{ calls atomic.Int32 }
 
 type invalidDescriptorTool struct{}
 
+type roomDeliveryTool struct {
+	name   string
+	result contract.Result
+}
+
+func (t roomDeliveryTool) Name() string { return t.name }
+func (t roomDeliveryTool) Descriptor(api.Context) (contract.Descriptor, error) {
+	return contract.NewDescriptor(t.name, t.name, "Deliver one command result directly to the room.", "test", contract.AccessUser, contract.Action, contract.RoomDelivery, json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`), nil, nil, false, time.Second, json.RawMessage(`{"type":"object"}`), nil, []string{"room_delivery"}, []string{"Do not use for model-only data."})
+}
+func (t roomDeliveryTool) Execute(context.Context, api.Context, json.RawMessage) (contract.Result, error) {
+	return t.result, nil
+}
+
 func (invalidDescriptorTool) Name() string { return "invalid_descriptor" }
 func (invalidDescriptorTool) Descriptor(api.Context) (contract.Descriptor, error) {
 	return contract.Descriptor{}, errors.New("broken descriptor")
@@ -89,6 +102,71 @@ func TestRegistryToolLoopRecordsReadEvidenceAndAttempt(t *testing.T) {
 	}
 	if completion.Response.Content() != "answer from evidence" || !completion.ToolAttempted || directory.calls != 1 || len(completion.Evidence()) != 1 || completion.Evidence()[0].Tool != roomUsersTool || len(client.requests) != 2 || client.requests[1].Messages()[len(client.requests[1].Messages())-2].ToolCalls()[0].ID() != "room-call" {
 		t.Fatalf("completion=%#v roomCalls=%d", completion, directory.calls)
+	}
+}
+
+func TestRegistryToolLoopSuppressesFinalReplyAfterSuccessfulRoomDelivery(t *testing.T) {
+	delivery := roomDeliveryTool{name: "delivered_command", result: contract.SuccessResult("", "delivered_command", map[string]any{"messages": []string{"already visible"}, "deliveredCount": 1})}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("delivery-call", delivery.Name(), map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse("already visible", nil, "stop"),
+	}}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{delivery}, []string{delivery.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := runtime.NewInvocation("registry-delivery", runtime.NewContext("room", "caller", "", "", false, nil), "run it", runtime.MENTION, "", false)
+	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+	if err != nil || !completion.SuppressReply || len(client.requests) != 2 {
+		t.Fatalf("completion=%#v requests=%d err=%v", completion, len(client.requests), err)
+	}
+}
+
+func TestRegistryToolLoopKeepsSynthesisForMixedOrFailedDeliveryResults(t *testing.T) {
+	tests := []struct {
+		name  string
+		tools []agenttool.Tool
+		calls []llm.LlmToolCall
+	}{
+		{
+			name: "mixed model data",
+			tools: []agenttool.Tool{
+				roomDeliveryTool{name: "delivered_command", result: contract.SuccessResult("", "delivered_command", map[string]any{"deliveredCount": 1})},
+				&correctingReadTool{},
+			},
+			calls: []llm.LlmToolCall{
+				llm.NewLlmToolCall("delivery-call", "delivered_command", map[string]any{}),
+				llm.NewLlmToolCall("read-call", "correcting_read", map[string]any{"value": "yes"}),
+			},
+		},
+		{
+			name: "failed delivery",
+			tools: []agenttool.Tool{
+				roomDeliveryTool{name: "delivered_command", result: contract.ErrorResult("", "delivered_command", "COMMAND_REJECTED", "not delivered")},
+			},
+			calls: []llm.LlmToolCall{llm.NewLlmToolCall("delivery-call", "delivered_command", map[string]any{})},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			allowed := make([]string, 0, len(tc.tools))
+			for _, registered := range tc.tools {
+				allowed = append(allowed, registered.Name())
+			}
+			client := &scriptedToolClient{responses: []llm.LlmResponse{
+				llm.NewLlmResponse(nil, tc.calls, "tool_calls"),
+				llm.NewLlmResponse("synthesis required", nil, "stop"),
+			}}
+			loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, tc.tools, allowed, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv := runtime.NewInvocation("registry-delivery-control", runtime.NewContext("room", "caller", "", "", false, nil), "run it", runtime.MENTION, "", false)
+			completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+			if err != nil || completion.SuppressReply || completion.Response.Content() != "synthesis required" {
+				t.Fatalf("completion=%#v err=%v", completion, err)
+			}
+		})
 	}
 }
 

@@ -14,15 +14,15 @@ import (
 	"zenbot/internal/repository"
 )
 
-func TestDirectInvokerKeepsOrdinaryCommandResponseOutsideQuoteOnlyPolicy(t *testing.T) {
+func TestDirectInvokerCanonicalizesCommandOriginatedProseToOneVerifiedQuote(t *testing.T) {
 	catalog, err := loadVerifiedQuoteCatalog(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse("ordinary command answer", nil, "stop")}}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse("- one invented quote\n- another invented quote", nil, "stop")}}
 	invoker := DirectInvoker{Assembler: testLiveAssembler(t), Client: client, Finalizer: OutputFinalizer{Catalog: &catalog}}
 	completion, err := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller", Text: "l hello?"}, "hello?")
-	if err != nil || completion.Text() != "ordinary command answer" {
+	if err != nil || completion.Text() != catalog.fallback() {
 		t.Fatalf("completion=%#v err=%v", completion, err)
 	}
 }

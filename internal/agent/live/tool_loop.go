@@ -164,7 +164,11 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 				evidence = append(evidence, candidate)
 			}
 		}
-		return Completion{Response: response, DurableEvidence: evidence}, nil
+		return Completion{
+			Response:        response,
+			DurableEvidence: evidence,
+			SuppressReply:   suppressRegistryReply(l.Registry, agent, batch),
+		}, nil
 	}
 	calls := first.ToolCalls()
 	if len(calls) == 0 {
@@ -256,6 +260,28 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		}
 		return []turn.PersistableEvidence{candidate}
 	}()}, nil
+}
+
+// suppressRegistryReply honors the tool delivery contract without discarding
+// model synthesis needed for failed calls or successful MODEL_DATA results.
+func suppressRegistryReply(registry *tool.Registry, agent api.Context, batch []toolBatchResult) bool {
+	if registry == nil || len(batch) == 0 {
+		return false
+	}
+	for _, item := range batch {
+		if item.Result.IsError {
+			return false
+		}
+		registered, ok := registry.Lookup(item.Call.Name)
+		if !ok {
+			return false
+		}
+		descriptor, err := registered.Descriptor(agent)
+		if err != nil || descriptor.ResultMode() != contract.RoomDelivery {
+			return false
+		}
+	}
+	return true
 }
 
 // completeRequiredHistory is router-owned: the provider cannot choose its one call.

@@ -65,7 +65,7 @@ func TestOutputFinalizerUsesVerifiedQuoteForEligiblePublicResponse(t *testing.T)
 	}
 }
 
-func TestOutputFinalizerDoesNotRequireQuotesForWhispersOrCommandsOrModeration(t *testing.T) {
+func TestOutputFinalizerDoesNotRequireQuotesForWhispersOrModeration(t *testing.T) {
 	catalog, err := loadVerifiedQuoteCatalog(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,6 @@ func TestOutputFinalizerDoesNotRequireQuotesForWhispersOrCommandsOrModeration(t 
 	f := OutputFinalizer{Catalog: &catalog}
 	for name, inv := range map[string]runtime.Invocation{
 		"whisper":    testWhisperInvocation(),
-		"command":    runtime.NewInvocation("direct", runtime.NewContext("r", "n", "", "", false, nil), "hello?", runtime.DIRECT, "", true),
 		"moderation": runtime.NewInvocation("mod", runtime.NewContext("r", "n", "", "", false, nil), "hello?", runtime.MODERATION, "", false),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -82,6 +81,19 @@ func TestOutputFinalizerDoesNotRequireQuotesForWhispersOrCommandsOrModeration(t 
 				t.Fatalf("result = %q, %v, %v", got, reply, err)
 			}
 		})
+	}
+}
+
+func TestOutputFinalizerRequiresOneVerifiedQuoteForCommandOriginatedProse(t *testing.T) {
+	catalog, err := loadVerifiedQuoteCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := OutputFinalizer{Catalog: &catalog}
+	inv := runtime.NewInvocation("direct", runtime.NewContext("r", "n", "", "", false, nil), "do you know any AGIs around?", runtime.DIRECT, "l do you know any AGIs around?", true)
+	got, reply, err := f.FinalizeWithContext(inv, "- invented quote one\n- invented quote two", FinalizationContext{CandidateKind: participation.Unclassified})
+	if err != nil || !reply || got != catalog.fallback() {
+		t.Fatalf("result = %q, %v, %v", got, reply, err)
 	}
 }
 
