@@ -117,6 +117,10 @@ func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUs
 	if err != nil {
 		return nil, fmt.Errorf("agent completion gate: %w", err)
 	}
+	taskPlanner, err := live.NewSemanticTaskPlanner(client, live.DefaultTaskPlannerInstructions)
+	if err != nil {
+		return nil, fmt.Errorf("agent task planner: %w", err)
+	}
 	if err := commandcatalog.ValidateAgentContracts(); err != nil {
 		return nil, fmt.Errorf("agent command catalog: %w", err)
 	}
@@ -141,7 +145,7 @@ func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUs
 		tools = append(tools, tool.DatabaseQuery{Repository: queries}, tool.DatabaseSchema{Repository: schema, Enabled: true}, tool.DatabaseSQL{Schema: schema, Repository: sqlRepo, Config: resolved.SQL})
 		allowed = append(allowed, "database_query", "database_schema", "database_sql")
 	}
-	return live.NewRegistryToolLoop(assembler, client, completionGate, tools, allowed, turn.ExecutionLimits{
+	return live.NewRegistryToolLoopWithPlanner(assembler, client, completionGate, taskPlanner, tools, allowed, turn.ExecutionLimits{
 		MaxSteps:        resolved.MaxSteps,
 		MaxToolCalls:    resolved.MaxTools,
 		MaxCallsPerTool: resolved.MaxCallsPerTool,

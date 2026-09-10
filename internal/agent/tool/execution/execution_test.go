@@ -105,6 +105,23 @@ func TestLedgerDuplicateLimitAndFailure(t *testing.T) {
 		t.Fatal("disabled")
 	}
 }
+
+func TestLedgerAvailabilityReflectsCallAndFailureBudgets(t *testing.T) {
+	ledger := NewLedger(map[string]int{"limited": 1}, 1)
+	if !ledger.Available("limited") || !ledger.Available("failing") {
+		t.Fatal("fresh tools should be available")
+	}
+	if code := ledger.Reserve("one", "limited"); code != "" {
+		t.Fatalf("reserve failed: %s", code)
+	}
+	if ledger.Available("limited") {
+		t.Fatal("call-limited tool remained available")
+	}
+	ledger.Failure("failing")
+	if ledger.Available("failing") {
+		t.Fatal("failure-limited tool remained available")
+	}
+}
 func TestExecutorStableAuthorizationAndFailures(t *testing.T) {
 	c := ctx(t)
 	d := desc(t, "x", contract.ReadOnly, []string{"r"}, nil, true, 0, []string{"CAP"})

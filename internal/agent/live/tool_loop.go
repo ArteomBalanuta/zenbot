@@ -36,6 +36,7 @@ type ToolLoop struct {
 	Limits    turn.ExecutionLimits
 	Interrupt turn.InterruptHook
 	Gate      turn.CompletionGate
+	Planner   TaskPlanner
 }
 
 func ToolLoopLimits() turn.ExecutionLimits { return turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1} }
@@ -131,10 +132,30 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		"tool_definition_count", len(prepared.Tools()),
 	)
 	state = turn.NewState(l.Limits)
+	var taskState *turn.TaskState
+	if l.general {
+		planner := l.Planner
+		if planner == nil {
+			planner = ObjectiveOnlyTaskPlanner{}
+		}
+		taskContract, planErr := planner.Plan(ctx, TaskPlanInput{
+			RequestID: inv.RequestID(), Objective: inv.Prompt(), Tools: planningTools(l.Registry, agent, definitions),
+		})
+		if planErr != nil {
+			return Completion{}, fmt.Errorf("plan agent task: %w", planErr)
+		}
+		taskState = turn.NewTaskState(taskContract)
+	}
 	if !state.AdvanceStep() {
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
 	initialRequest := prepared.LlmRequest()
+	if taskState != nil {
+		initialRequest = llm.NewLlmRequest(
+			withTaskState(initialRequest.Messages(), taskState), initialRequest.Tools(),
+			initialRequest.BypassPromptCache(), initialRequest.ResponseFormat(), initialRequest.Projection(),
+		).WithToolChoice(initialRequest.ToolChoice())
+	}
 	first, err := l.Client.Complete(observability.WithStage(ctx, "llm.initial"), initialRequest)
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete agent request: %w", err)
@@ -162,7 +183,7 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		return Completion{}, errors.New("agent response was truncated")
 	}
 	if l.general {
-		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state, l.Interrupt, l.Gate, inv.Prompt())
+		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, initialRequest.Messages(), initialRequest.Tools(), first, l.allowed, l.Limits, state, l.Interrupt, l.Gate, taskState, inv.Prompt())
 		if loopErr != nil {
 			return Completion{}, loopErr
 		}
@@ -357,15 +378,46 @@ func NewBoundedToolLoop(assembler *assemble.Assembler, client llm.LlmClient, too
 }
 
 func NewRegistryToolLoop(assembler *assemble.Assembler, client llm.LlmClient, gate turn.CompletionGate, tools []tool.Tool, allowed []string, limits turn.ExecutionLimits) (*ToolLoop, error) {
+	return NewRegistryToolLoopWithPlanner(assembler, client, gate, ObjectiveOnlyTaskPlanner{}, tools, allowed, limits)
+}
+
+func NewRegistryToolLoopWithPlanner(assembler *assemble.Assembler, client llm.LlmClient, gate turn.CompletionGate, planner TaskPlanner, tools []tool.Tool, allowed []string, limits turn.ExecutionLimits) (*ToolLoop, error) {
 	loop, err := newFrozenToolLoop(assembler, client, tools, allowed, false)
 	if err != nil {
 		return nil, err
 	}
-	if gate == nil || limits.MaxSteps < 2 || limits.MaxToolCalls < 1 {
+	if gate == nil || planner == nil || limits.MaxSteps < 2 || limits.MaxToolCalls < 1 {
 		return nil, errors.New("registry tool loop limits are insufficient")
 	}
-	loop.Limits, loop.general, loop.Gate = limits, true, gate
+	loop.Limits, loop.general, loop.Gate, loop.Planner = limits, true, gate, planner
 	return loop, nil
+}
+
+func planningTools(registry *tool.Registry, agent api.Context, providerTools []any) []PlanningTool {
+	tools := make([]PlanningTool, 0, len(providerTools))
+	for _, raw := range providerTools {
+		definition, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		function, ok := definition["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := function["name"].(string)
+		registered, ok := registry.Lookup(name)
+		if !ok {
+			continue
+		}
+		descriptor, err := registered.Descriptor(agent)
+		if err != nil {
+			continue
+		}
+		tools = append(tools, PlanningTool{
+			Name: descriptor.Name(), Description: descriptor.Description(), Effect: descriptor.Effect(), ResultMode: descriptor.ResultMode(),
+		})
+	}
+	return tools
 }
 
 // frozenPublicTools prevents callers from replacing a public tool by reusing

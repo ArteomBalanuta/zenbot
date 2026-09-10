@@ -279,6 +279,9 @@ func TestNewAgentToolLoopRegistersEveryAgentCommandWithContextualVisibility(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := loop.Planner.(*live.SemanticTaskPlanner); !ok {
+		t.Fatalf("production loop planner=%T, want *live.SemanticTaskPlanner", loop.Planner)
+	}
 	for _, definition := range commandcatalog.AgentEntries() {
 		if _, ok := loop.Registry.Lookup("saturn_" + definition.Canonical); !ok {
 			t.Fatalf("missing agent command tool for %q", definition.Canonical)

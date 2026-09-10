@@ -61,8 +61,8 @@ func appendRegistryProtocol(messages []llm.LlmMessage, response llm.LlmResponse,
 	return messages, nil
 }
 
-func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *tool.Registry, agent api.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, allowed []string, limits turn.ExecutionLimits, state *turn.State, interrupt turn.InterruptHook, gate turn.CompletionGate, prompt string) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
-	return (TurnEngine{Client: client, Registry: registry, Agent: agent, Allowed: allowed, Limits: limits, Interrupt: interrupt, Gate: gate, Prompt: prompt}).Complete(ctx, messages, providerTools, initial, state)
+func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *tool.Registry, agent api.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, allowed []string, limits turn.ExecutionLimits, state *turn.State, interrupt turn.InterruptHook, gate turn.CompletionGate, task *turn.TaskState, prompt string) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
+	return (TurnEngine{Client: client, Registry: registry, Agent: agent, Allowed: allowed, Limits: limits, Interrupt: interrupt, Gate: gate, Task: task, Prompt: prompt}).Complete(ctx, messages, providerTools, initial, state)
 }
 
 type toolBatchResult struct {

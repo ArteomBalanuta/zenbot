@@ -115,9 +115,20 @@ func TestRegistryToolLoopRecordsReadEvidenceAndAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completion.Response.Content() != "answer from evidence" || !completion.ToolAttempted || directory.calls != 1 || len(completion.Evidence()) != 1 || completion.Evidence()[0].Tool != roomUsersTool || len(client.requests) != 2 || client.requests[1].Messages()[len(client.requests[1].Messages())-2].ToolCalls()[0].ID() != "room-call" {
+	if completion.Response.Content() != "answer from evidence" || !completion.ToolAttempted || directory.calls != 1 || len(completion.Evidence()) != 1 || completion.Evidence()[0].Tool != roomUsersTool || len(client.requests) != 2 || !requestContainsToolCallID(client.requests[1], "room-call") {
 		t.Fatalf("completion=%#v roomCalls=%d", completion, directory.calls)
 	}
+}
+
+func requestContainsToolCallID(request llm.LlmRequest, id string) bool {
+	for _, message := range request.Messages() {
+		for _, call := range message.ToolCalls() {
+			if call.ID() == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestRegistryToolLoopAcceptsPlainFinalAnswerWithAutoToolChoice(t *testing.T) {
@@ -506,7 +517,7 @@ func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing
 		t.Fatalf("tool manifest disappeared during correction: second=%d third=%d", len(client.requests[1].Tools()), len(client.requests[2].Tools()))
 	}
 	secondMessages := client.requests[1].Messages()
-	if secondMessages[len(secondMessages)-1].Role() != "tool" || !strings.Contains(secondMessages[len(secondMessages)-1].Content(), "INVALID_ARGUMENTS") {
+	if !messagesContain(secondMessages, "INVALID_ARGUMENTS") {
 		t.Fatalf("invalid-argument observation missing: %#v", secondMessages)
 	}
 }
@@ -535,9 +546,8 @@ func TestRegistryToolLoopCorrectsTypedSaturnArgumentsWithoutInventingCommandText
 	if len(client.requests) != 3 || len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 1 {
 		t.Fatalf("typed manifest was not retained across correction: requests=%d", len(client.requests))
 	}
-	observation := client.requests[1].Messages()[len(client.requests[1].Messages())-1]
-	if observation.Role() != "tool" || !strings.Contains(observation.Content(), "INVALID_ARGUMENTS") {
-		t.Fatalf("correctable observation missing: %#v", observation)
+	if !messagesContain(client.requests[1].Messages(), "INVALID_ARGUMENTS") {
+		t.Fatalf("correctable observation missing: %#v", client.requests[1].Messages())
 	}
 }
 
@@ -561,8 +571,8 @@ func TestRegistryToolLoopHonorsPerToolCallBudget(t *testing.T) {
 		t.Fatalf("tool executions=%d, want 1", read.calls.Load())
 	}
 	messages := client.requests[2].Messages()
-	if !strings.Contains(messages[len(messages)-1].Content(), "TOOL_CALL_LIMIT_REACHED") {
-		t.Fatalf("limit observation missing: %#v", messages[len(messages)-1])
+	if !messagesContain(messages, "TOOL_CALL_LIMIT_REACHED") {
+		t.Fatalf("limit observation missing: %#v", messages)
 	}
 }
 
@@ -586,8 +596,8 @@ func TestRegistryToolLoopHonorsConfiguredFailureBudget(t *testing.T) {
 		t.Fatalf("tool executions=%d, want 1", read.calls.Load())
 	}
 	messages := client.requests[2].Messages()
-	if !strings.Contains(messages[len(messages)-1].Content(), "TOOL_DISABLED") {
-		t.Fatalf("disabled observation missing: %#v", messages[len(messages)-1])
+	if !messagesContain(messages, "TOOL_DISABLED") {
+		t.Fatalf("disabled observation missing: %#v", messages)
 	}
 	if len(client.requests[2].Tools()) != 0 {
 		t.Fatalf("disabled tool remained available during degradation: %#v", client.requests[2].Tools())

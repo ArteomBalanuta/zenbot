@@ -30,6 +30,7 @@ type TurnEngine struct {
 	Recovery  turn.RecoveryPolicy
 	Gate      turn.CompletionGate
 	Prompt    string
+	Task      *turn.TaskState
 }
 
 func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
@@ -51,6 +52,15 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 	}
 	response := initial
 	all := make([]toolBatchResult, 0)
+	task := e.Task
+	if task == nil {
+		fallback, err := turn.NewTaskContract("turn", e.Prompt, nil, []turn.Obligation{{ID: "obligation-1", Kind: turn.ObligationAnswer, Required: true}})
+		if err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		task = turn.NewTaskState(fallback)
+		e.Task = task
+	}
 	cycle := 0
 	for {
 		cycle++
@@ -92,6 +102,11 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 			}
 		}
 		observability.Info(ctx, "agent.tool.batch_completed", "cycle", cycle, "tool_call_count", len(batch), "failure_count", failures)
+		for _, item := range batch {
+			if err := task.Observe(item.Call.Name, item.Call, item.Result); err != nil {
+				return llm.LlmResponse{}, nil, nil, fmt.Errorf("reduce task observation: %w", err)
+			}
+		}
 		all = append(all, batch...)
 		messages, err = appendRegistryProtocol(messages, response, batch)
 		if err != nil {
@@ -100,6 +115,7 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 		if err := phase.Transition(turn.PhaseObserve); err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}
+		providerTools = availableProviderTools(providerTools, executor.Ledger)
 
 		tools := providerTools
 		stage := fmt.Sprintf("llm.tool_follow_up.%d", cycle)
@@ -115,6 +131,7 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 		} else if err := phase.Transition(turn.PhaseModel); err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}
+		messages = withTaskState(messages, task)
 		nextRequest := llm.NewLlmRequest(messages, tools, false, nil, nil)
 		response, err = e.Client.Complete(observability.WithStage(ctx, stage), nextRequest)
 		if err != nil {
@@ -140,6 +157,39 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 	results := make([]contract.Result, 0, len(all))
 	for _, item := range all {
 		results = append(results, item.Result)
+	}
+	if e.Task != nil {
+		e.Task.ObserveAnswer(response.Content())
+		pending := e.Task.Pending()
+		if len(pending) > 0 && continuationAllowed {
+			if !state.AdvanceStep() {
+				return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic task obligations remain unsatisfied at step limit")
+			}
+			feedback, err := json.Marshal(map[string]any{
+				"decision":           string(turn.CompletionContinue),
+				"reason":             "required task obligations remain unsatisfied",
+				"pendingObligations": pending,
+			})
+			if err != nil {
+				return llm.LlmResponse{}, nil, false, fmt.Errorf("encode task obligation feedback: %w", err)
+			}
+			messages = append(messages,
+				llm.NewLlmMessage("assistant", response.Content(), nil, ""),
+				llm.NewLlmMessage("user", "TASK_OBLIGATION_FEEDBACK="+string(feedback), nil, ""),
+			)
+			messages = withTaskState(messages, e.Task)
+			if err := phase.Transition(turn.PhaseModel); err != nil {
+				return llm.LlmResponse{}, nil, false, err
+			}
+			next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.task_obligation_retry.%d", cycle)), llm.NewLlmRequest(messages, toolsForPending(providerTools, pending), false, nil, nil))
+			if err != nil {
+				return llm.LlmResponse{}, nil, false, err
+			}
+			return next, messages, false, ctx.Err()
+		}
+		if len(pending) > 0 && !continuationAllowed && !e.Task.HasUnknownActionOutcome() {
+			return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic task obligations remain unsatisfied during terminal synthesis")
+		}
 	}
 	observability.Info(ctx, "agent.completion_gate.started", "cycle", cycle, "candidate_chars", len([]rune(response.Content())), "observation_count", len(results))
 	assessment, err := e.Gate.Evaluate(ctx, turn.CompletionCandidate{
@@ -172,6 +222,7 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 		llm.NewLlmMessage("assistant", response.Content(), nil, ""),
 		llm.NewLlmMessage("user", "SEMANTIC_COMPLETION_FEEDBACK="+string(feedback), nil, ""),
 	)
+	messages = withTaskState(messages, e.Task)
 	if err := phase.Transition(turn.PhaseModel); err != nil {
 		return llm.LlmResponse{}, nil, false, err
 	}
@@ -311,6 +362,7 @@ func (e TurnEngine) finalize(ctx context.Context, phase *turn.PhaseMachine, mess
 			llm.NewLlmMessage("assistant", response.Content(), response.ToolCalls(), ""),
 			llm.NewLlmMessage("user", "Produce one complete final answer to the newest request using the available observations. Do not call tools, repeat an earlier answer, or return an empty response.", nil, ""),
 		)
+		reflectionMessages = withTaskState(reflectionMessages, e.Task)
 		corrected, correctionErr := e.Client.Complete(observability.WithStage(ctx, "llm.final_reflection"), llm.NewLlmRequest(reflectionMessages, nil, false, nil, nil))
 		if correctionErr != nil {
 			return llm.LlmResponse{}, nil, correctionErr
@@ -328,6 +380,92 @@ func (e TurnEngine) finalize(ctx context.Context, phase *turn.PhaseMachine, mess
 		return llm.LlmResponse{}, nil, err
 	}
 	return response, messages, nil
+}
+
+func withTaskState(messages []llm.LlmMessage, state *turn.TaskState) []llm.LlmMessage {
+	if state == nil {
+		return append([]llm.LlmMessage(nil), messages...)
+	}
+	filtered := make([]llm.LlmMessage, 0, len(messages)+1)
+	for _, message := range messages {
+		if message.Role() == "system" && strings.HasPrefix(message.Content(), "TASK_STATE_JSON=") {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	task := state.Contract()
+	satisfiedEvidence := make([]string, 0)
+	for _, evidence := range state.Evidence() {
+		if evidence.ObligationID != "" {
+			satisfiedEvidence = append(satisfiedEvidence, evidence.ObligationID+":"+evidence.CallID)
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"requestId":            task.RequestID,
+		"requestHash":          task.RequestHash,
+		"objective":            task.Objective,
+		"constraints":          task.Constraints(),
+		"pendingObligations":   state.Pending(),
+		"satisfiedEvidence":    satisfiedEvidence,
+		"unknownActionOutcome": state.HasUnknownActionOutcome(),
+		"prohibitedActionRetries": func() []string {
+			if state.HasUnknownActionOutcome() {
+				return []string{"all action retries for this turn"}
+			}
+			return []string{}
+		}(),
+	})
+	return append(filtered, llm.NewLlmMessage("system", "TASK_STATE_JSON="+string(payload), nil, ""))
+}
+
+func toolsForPending(providerTools []any, pending []turn.Obligation) []any {
+	wanted := make(map[string]struct{}, len(pending))
+	for _, obligation := range pending {
+		if obligation.Kind == turn.ObligationTool && obligation.ProviderTool != "" {
+			wanted[obligation.ProviderTool] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	filtered := make([]any, 0, len(wanted))
+	for _, raw := range providerTools {
+		definition, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		function, ok := definition["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := function["name"].(string)
+		if _, found := wanted[name]; found {
+			filtered = append(filtered, raw)
+		}
+	}
+	return filtered
+}
+
+func availableProviderTools(providerTools []any, ledger *execution.Ledger) []any {
+	if ledger == nil {
+		return append([]any(nil), providerTools...)
+	}
+	available := make([]any, 0, len(providerTools))
+	for _, raw := range providerTools {
+		definition, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		function, ok := definition["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := function["name"].(string)
+		if ledger.Available(name) {
+			available = append(available, raw)
+		}
+	}
+	return available
 }
 
 func toolBudgets(allowed []string, limits turn.ExecutionLimits) map[string]int {

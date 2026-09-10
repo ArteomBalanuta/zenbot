@@ -89,6 +89,17 @@ func (l *Ledger) Missing(prerequisites []string) bool {
 	}
 	return false
 }
+func (l *Ledger) Available(name string) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if limit := l.limits[name]; limit > 0 && l.counts[name] >= limit {
+		return false
+	}
+	return l.maxFailures <= 0 || l.failures[name] < l.maxFailures
+}
 
 type Cancellation struct {
 	ctx    context.Context
