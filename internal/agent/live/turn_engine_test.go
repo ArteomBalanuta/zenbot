@@ -20,6 +20,7 @@ import (
 type engineActionTool struct {
 	calls        atomic.Int32
 	capabilities []string
+	errorCode    string
 }
 
 func (t *engineActionTool) Name() string { return "engine_action" }
@@ -28,6 +29,9 @@ func (t *engineActionTool) Descriptor(api.Context) (contract.Descriptor, error) 
 }
 func (t *engineActionTool) Execute(context.Context, api.Context, json.RawMessage) (contract.Result, error) {
 	t.calls.Add(1)
+	if t.errorCode != "" {
+		return contract.ErrorResult("", t.Name(), t.errorCode, "action outcome is unknown after cancellation"), nil
+	}
 	return contract.SuccessResult("", t.Name(), map[string]any{"executed": true}), nil
 }
 
@@ -157,6 +161,44 @@ func TestTurnEngineFeedsDeniedActionBackAsObservation(t *testing.T) {
 	requestMessages := client.requests[0].Messages()
 	if !strings.Contains(requestMessages[len(requestMessages)-1].Content(), "ACTION_DENIED") {
 		t.Fatalf("denial observation missing: %#v", requestMessages)
+	}
+}
+
+func TestTurnEngineUnknownActionOutcomeDisablesToolsAndDoesNotRetry(t *testing.T) {
+	action := &engineActionTool{errorCode: "ACTION_OUTCOME_UNKNOWN"}
+	registry := agenttool.NewRegistry([]agenttool.Tool{action}, []string{action.Name()})
+	agent, _ := api.NewContext("room", "caller", "", "", false, nil)
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse("The action was cancelled and its outcome cannot be verified.", nil, "stop"),
+	}}
+	limits := turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 3, MaxCallsPerTool: 3}
+	state := turn.NewState(limits)
+	state.AdvanceStep()
+	engine := TurnEngine{
+		Client:    client,
+		Registry:  registry,
+		Agent:     agent,
+		Allowed:   []string{action.Name()},
+		Limits:    limits,
+		Interrupt: fixedInterruptHook{decision: turn.InterruptDecision{Outcome: turn.InterruptAllow}},
+		Gate:      acceptingCompletionGate{},
+		Prompt:    "perform the action",
+	}
+	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls")
+	providerTools := []any{map[string]any{"type": "function", "function": map[string]any{"name": action.Name()}}}
+
+	response, _, batch, err := engine.Complete(context.Background(), nil, providerTools, initial, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Content() == "" || len(batch) != 1 || batch[0].Result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" {
+		t.Fatalf("response=%q batch=%#v", response.Content(), batch)
+	}
+	if action.calls.Load() != 1 {
+		t.Fatalf("action executions=%d, want 1", action.calls.Load())
+	}
+	if len(client.requests) != 1 || len(client.requests[0].Tools()) != 0 {
+		t.Fatalf("terminal synthesis retained action tools: requests=%#v", client.requests)
 	}
 }
 

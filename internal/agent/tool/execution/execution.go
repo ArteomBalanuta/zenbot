@@ -116,26 +116,29 @@ type Executor struct {
 
 var errNilResult = errors.New("nil tool result")
 
-func invoke(t tool.Tool, ctx context.Context, agent api.Context, args json.RawMessage) (contract.Result, error) {
+func invokeDirect(t tool.Tool, ctx context.Context, agent api.Context, args json.RawMessage) (result contract.Result, err error) {
+	defer func() {
+		if recover() != nil {
+			result = contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "tool execution failed")
+			err = nil
+		}
+	}()
+	result, err = t.Execute(ctx, agent, args)
+	if err == nil && result.ToolName == "" {
+		err = errNilResult
+	}
+	return result, err
+}
+
+func invokeRead(t tool.Tool, ctx context.Context, agent api.Context, args json.RawMessage) (contract.Result, error) {
 	type outcome struct {
 		r   contract.Result
 		err error
 	}
 	result := make(chan outcome, 1)
 	go func() {
-		var r contract.Result
-		var err error
-		defer func() {
-			if recover() != nil {
-				r = contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "tool execution failed")
-				err = nil
-			}
-			result <- outcome{r, err}
-		}()
-		r, err = t.Execute(ctx, agent, args)
-		if err == nil && r.ToolName == "" {
-			err = errNilResult
-		}
+		r, err := invokeDirect(t, ctx, agent, args)
+		result <- outcome{r, err}
 	}()
 	select {
 	case completed := <-result:
@@ -214,7 +217,12 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	r, err := invoke(t, ctx, agent, c.Arguments)
+	var r contract.Result
+	if d.Effect() == contract.Action {
+		r, err = invokeDirect(t, ctx, agent, c.Arguments)
+	} else {
+		r, err = invokeRead(t, ctx, agent, c.Arguments)
+	}
 	if r.IsError {
 		if e.Ledger != nil {
 			e.Ledger.Failure(c.Name)
@@ -224,6 +232,9 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 	if err != nil {
 		if e.Ledger != nil {
 			e.Ledger.Failure(c.Name)
+		}
+		if d.Effect() == contract.Action && ctx.Err() != nil {
+			return contract.ErrorResult(c.ID, c.Name, "ACTION_OUTCOME_UNKNOWN", "action outcome is unknown after cancellation")
 		}
 		if ctx.Err() == context.DeadlineExceeded {
 			return contract.ErrorResult(c.ID, c.Name, "TOOL_TIMEOUT", "tool timed out")

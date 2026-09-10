@@ -1,6 +1,10 @@
 package turn
 
-import "testing"
+import (
+	"testing"
+
+	"zenbot/internal/agent/tool/contract"
+)
 
 func TestRecoveryPolicyChoosesBoundedCorrectionOrDegradation(t *testing.T) {
 	policy := RecoveryPolicy{}
@@ -11,6 +15,7 @@ func TestRecoveryPolicyChoosesBoundedCorrectionOrDegradation(t *testing.T) {
 	}{
 		{name: "invalid arguments can self correct", in: RecoveryInput{ErrorCode: "INVALID_ARGUMENTS", ToolRoundsRemaining: 1}, want: RecoveryRetryModel},
 		{name: "failed tool can self correct", in: RecoveryInput{ErrorCode: "TOOL_EXECUTION_FAILED", ToolRoundsRemaining: 1}, want: RecoveryRetryModel},
+		{name: "unknown action outcome never retries", in: RecoveryInput{ErrorCode: "ACTION_OUTCOME_UNKNOWN", Effect: contract.Action, Idempotent: false, ToolRoundsRemaining: 3}, want: RecoveryFinalize},
 		{name: "exhausted failure degrades", in: RecoveryInput{ErrorCode: "TOOL_DISABLED", ToolRoundsRemaining: 2}, want: RecoveryDegrade},
 		{name: "observations reserve synthesis", in: RecoveryInput{HasObservations: true}, want: RecoveryFinalize},
 		{name: "nothing usable fails", in: RecoveryInput{}, want: RecoveryFail},

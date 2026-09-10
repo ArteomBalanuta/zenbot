@@ -136,6 +136,48 @@ func TestExecutorTimeoutAndCancellation(t *testing.T) {
 	}
 }
 
+func TestExecutorCancelledActionDoesNotReturnBeforeActionStops(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	action := &fake{
+		name: "action",
+		d:    desc(t, "action", contract.Action, nil, []string{"state"}, false, 0, nil),
+		fn: func(ctx context.Context) (contract.Result, error) {
+			close(started)
+			<-release
+			close(finished)
+			return contract.Result{}, ctx.Err()
+		},
+	}
+	executor := &Executor{Registry: tool.NewRegistry([]tool.Tool{action}, []string{"action"})}
+	agentCtx := ctx(t)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	result := make(chan contract.Result, 1)
+	go func() {
+		result <- executor.Execute(requestCtx, agentCtx, Call{"call-1", "action", json.RawMessage(`{}`)})
+	}()
+
+	<-started
+	cancel()
+	select {
+	case got := <-result:
+		t.Fatalf("Execute returned before action stopped: %#v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+	got := <-result
+	select {
+	case <-finished:
+	default:
+		t.Fatal("Execute returned before action signaled completion")
+	}
+	if got.ErrorCode != "ACTION_OUTCOME_UNKNOWN" {
+		t.Fatalf("ErrorCode=%q, want ACTION_OUTCOME_UNKNOWN", got.ErrorCode)
+	}
+}
+
 func TestExecutorUsesConfiguredDefaultTimeoutWhenDescriptorHasNone(t *testing.T) {
 	c := ctx(t)
 	d := desc(t, "x", contract.ReadOnly, []string{"r"}, nil, true, 0, nil)

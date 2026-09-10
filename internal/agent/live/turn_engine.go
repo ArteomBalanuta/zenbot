@@ -215,8 +215,18 @@ func (e TurnEngine) recoveryDecision(batch []toolBatchResult, roundsRemaining in
 		if !item.Result.IsError {
 			continue
 		}
+		effect := contract.ReadOnly
+		idempotent := true
+		if registered, ok := e.Registry.Lookup(item.Call.Name); ok {
+			if descriptor, err := registered.Descriptor(e.Agent); err == nil {
+				effect = descriptor.Effect()
+				idempotent = descriptor.Idempotent()
+			}
+		}
 		candidate := e.Recovery.Decide(turn.RecoveryInput{
 			ErrorCode:           item.Result.ErrorCode,
+			Effect:              effect,
+			Idempotent:          idempotent,
 			ToolRoundsRemaining: roundsRemaining,
 			HasObservations:     true,
 		})
