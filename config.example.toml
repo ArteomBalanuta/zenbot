@@ -13,6 +13,17 @@ autoReconnect = true
 healthCheckInterval = 5
 autorunCommands = ""
 
+# Opt-in diagnostics for regular commands. The direct *l agent path is excluded.
+[profiling]
+enabled = false
+listenAddress = "0.0.0.0:6060"
+slowCommandThresholdMillis = 250
+slowStageThresholdMillis = 25
+slowTransportThresholdMillis = 25
+# Runtime block sampling period in nanoseconds and mutex sampling fraction.
+blockProfileRate = 1000000
+mutexProfileFraction = 5
+
 [agent]
 enabled = false
 # Environment variables take precedence. The client appends /v1/chat/completions.

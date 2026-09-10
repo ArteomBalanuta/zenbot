@@ -16,10 +16,14 @@ DATABASE_BACKUP_DIR ?= $(DATABASE_DIR)/backups
 CONTAINER_DATABASE_STEM ?= $(APP_DIR)/database/$(notdir $(DATABASE_STEM))
 H2_CHECK_URL ?= jdbc:h2:file:$(CONTAINER_DATABASE_STEM);ACCESS_MODE_DATA=r;IFEXISTS=TRUE
 AGENT_API_KEY_ENV ?= SATURN_AGENT_API_KEY
+PROFILING_HOST ?= 127.0.0.1
+PROFILING_PORT ?= 6060
+CONTAINER_PROFILING_PORT ?= 6060
+PROFILE_SECONDS ?= 30
 STOP_TIMEOUT ?= 30
 TARGET_DIR ?= $(CURDIR)/target
 
-.PHONY: help fmt format-check vet test check compile build prepare run start stop restart rm rmi clean rebuild logs shell ps status fresh-db db-check backup-db
+.PHONY: help fmt format-check vet test check compile build prepare run start stop restart rm rmi clean rebuild logs shell ps status fresh-db db-check backup-db profile-goroutines profile-block profile-mutex profile-cpu
 
 help:
 	@printf "%s\n" \
@@ -42,7 +46,11 @@ help:
 		"make logs      - Follow container logs" \
 		"make shell     - Open a shell in the running container" \
 		"make ps        - Show matching containers" \
-		"make status    - Show container status"
+		"make status    - Show container status" \
+		"make profile-goroutines - Print the current goroutine profile" \
+		"make profile-block      - Open the blocking profile in pprof" \
+		"make profile-mutex      - Open the mutex profile in pprof" \
+		"make profile-cpu        - Capture and open a CPU profile (PROFILE_SECONDS=30)"
 
 fmt:
 	$(GO) fmt ./...
@@ -81,6 +89,7 @@ run: prepare rm
 		--init \
 		--name "$(CONTAINER_NAME)" \
 		"$$@" \
+		-p "$(PROFILING_HOST):$(PROFILING_PORT):$(CONTAINER_PROFILING_PORT)" \
 		-v "$(CONFIG_FILE):$(APP_DIR)/config.toml:ro" \
 		-v "$(DATABASE_DIR):$(APP_DIR)/database" \
 		"$(IMAGE_NAME)"
@@ -155,3 +164,15 @@ ps:
 
 status:
 	$(DOCKER) inspect --format '{{.Name}} {{.State.Status}}' "$(CONTAINER_NAME)"
+
+profile-goroutines:
+	curl --fail --silent --show-error "http://$(PROFILING_HOST):$(PROFILING_PORT)/debug/pprof/goroutine?debug=2"
+
+profile-block:
+	$(GO) tool pprof -http=:0 "http://$(PROFILING_HOST):$(PROFILING_PORT)/debug/pprof/block"
+
+profile-mutex:
+	$(GO) tool pprof -http=:0 "http://$(PROFILING_HOST):$(PROFILING_PORT)/debug/pprof/mutex"
+
+profile-cpu:
+	$(GO) tool pprof -http=:0 "http://$(PROFILING_HOST):$(PROFILING_PORT)/debug/pprof/profile?seconds=$(PROFILE_SECONDS)"

@@ -13,6 +13,7 @@ The intentionally excluded parity scope is `mine`, `whiskey`, `ws`, and `wsa`. S
 - OpenAI-compatible agent with shared public-room memory, private whisper memory, contextual tools, bounded generated SQL, and command execution
 - Deterministic flood and raid detection plus optional semantic moderation
 - Self-contained Docker image and idempotent Make targets for deployment and database operations
+- Opt-in regular-command latency tracing and Go runtime profiles for diagnosing websocket, listener, database, and command stalls
 
 ## Quick Start
 
@@ -29,6 +30,38 @@ make logs
 ```
 
 `make run` mounts `config.toml` read-only at `/app/config.toml` and mounts `database/` at `/app/database`. If `config.toml` is absent it uses the sanitized `config.example.toml`. If an ignored `.env` exists, Docker loads it after the TOML values; otherwise the host `SATURN_AGENT_API_KEY` is forwarded when set.
+
+### Regular Command Profiling
+
+Structured command tracing is disabled by default and deliberately excludes the `*l` agent command. Enable it in the ignored production `config.toml` while reproducing slow regular commands:
+
+```toml
+[profiling]
+enabled = true
+listenAddress = "0.0.0.0:6060"
+slowCommandThresholdMillis = 250
+slowStageThresholdMillis = 25
+slowTransportThresholdMillis = 25
+blockProfileRate = 1000000
+mutexProfileFraction = 5
+```
+
+`make run` publishes the profiler only on host loopback at `127.0.0.1:6060`. After rebuilding, reproduce a slow command and inspect the structured timing records:
+
+```sh
+make rebuild
+docker logs zenbot 2>&1 | grep -E 'command\.profile|transport\.profile'
+make profile-goroutines
+make profile-block
+make profile-mutex
+make profile-cpu PROFILE_SECONDS=30
+```
+
+`command.profile.started` reports `ws_queue_ms`, JSON `parse_ms`, and the inbound queue depth. Stage events identify slow listener handlers such as message audit, pending mail, YouTube preview, agent participation, command lookup, authorization, concrete handler execution, and command audit. `transport.profile.inbound_enqueue` proves websocket-reader backpressure; `transport.profile.write` separates writer-lock delay from the network write. A high `ws_queue_ms` with a slow earlier handler indicates head-of-line blocking in the synchronous message consumer.
+
+Go runtime profiles are process-wide, but regular command execution carries `zenbot.command` and `zenbot.room` pprof labels. Reproduce without concurrent `*l` requests and use those labels when filtering samples so agent work does not distort the diagnosis.
+
+The complete environment override surface is listed in `.env.example`. Override `PROFILING_PORT` when the host port is occupied; keep `profiling.listenAddress` and `CONTAINER_PROFILING_PORT` aligned if changing the in-container port.
 
 Useful lifecycle commands:
 

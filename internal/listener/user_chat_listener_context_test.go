@@ -2,11 +2,16 @@ package listener
 
 import (
 	"context"
+	"log/slog"
+	"runtime/pprof"
+	"sync"
 	"testing"
+	"time"
 
 	"zenbot/internal/common"
 	"zenbot/internal/listener/message"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 )
 
 type observedChatContext struct {
@@ -61,9 +66,68 @@ func TestUserChatListenerNotifyRetainsBackgroundCompatibility(t *testing.T) {
 	}
 }
 
-type chatContextEngine struct{ common.Engine }
+type chatContextEngine struct {
+	common.Engine
+	profiler *profiling.Profiler
+}
 
 func (*chatContextEngine) GetActiveUsers() *map[*model.User]struct{} {
 	users := map[*model.User]struct{}{}
 	return &users
+}
+func (*chatContextEngine) GetPrefix() string  { return "*" }
+func (*chatContextEngine) GetChannel() string { return "programming" }
+func (e *chatContextEngine) PerformanceProfiler() *profiling.Profiler {
+	return e.profiler
+}
+
+type profilingEventHandler struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (*profilingEventHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *profilingEventHandler) Handle(_ context.Context, record slog.Record) error {
+	h.mu.Lock()
+	h.events = append(h.events, record.Message)
+	h.mu.Unlock()
+	return nil
+}
+func (h *profilingEventHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *profilingEventHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestUserChatListenerProfilesRegularCommandChainButExcludesAgentCommand(t *testing.T) {
+	handler := &profilingEventHandler{}
+	profiler := profiling.New(profiling.Settings{
+		Enabled:              true,
+		SlowCommandThreshold: time.Millisecond,
+		SlowStageThreshold:   time.Millisecond,
+	}, slog.New(handler))
+	engine := &chatContextEngine{profiler: profiler}
+	var commandLabels []string
+	chain := message.NewChain(message.HandlerFunc(func(ctx context.Context, _ *message.Context) (bool, error) {
+		label, _ := pprof.Label(ctx, "zenbot.command")
+		commandLabels = append(commandLabels, label)
+		time.Sleep(2 * time.Millisecond)
+		return false, nil
+	}))
+	listener := NewUserChatListenerWithChain(engine, chain)
+
+	listener.NotifyContext(context.Background(), `{"cmd":"chat","nick":"alice","text":"*ping"}`)
+	listener.NotifyContext(context.Background(), `{"cmd":"chat","nick":"alice","text":"*l explain"}`)
+
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	want := []string{"command.profile.started", "command.profile.stage", "command.profile.completed"}
+	if len(handler.events) != len(want) {
+		t.Fatalf("profiling events=%v, want %v", handler.events, want)
+	}
+	for index := range want {
+		if handler.events[index] != want[index] {
+			t.Fatalf("profiling events=%v, want %v", handler.events, want)
+		}
+	}
+	if len(commandLabels) != 2 || commandLabels[0] != "ping" || commandLabels[1] != "" {
+		t.Fatalf("pprof command labels=%v, want [ping <empty>]", commandLabels)
+	}
 }

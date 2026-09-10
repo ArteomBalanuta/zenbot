@@ -3,11 +3,14 @@ package transport
 import (
 	"context"
 	"github.com/gorilla/websocket"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
+	"zenbot/internal/profiling"
 )
 
 func TestConnectionLocalRoundTripAndConcurrentWrites(t *testing.T) {
@@ -33,7 +36,8 @@ func TestConnectionLocalRoundTripAndConcurrentWrites(t *testing.T) {
 	defer s.Close()
 	u, _ := url.Parse(s.URL)
 	u.Scheme = "ws"
-	c := NewConnection(Config{URL: u.String(), PingInterval: time.Millisecond * 20})
+	profiler := profiling.New(profiling.Settings{Enabled: true}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewConnection(Config{URL: u.String(), PingInterval: time.Millisecond * 20, Profiler: profiler})
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +55,11 @@ func TestConnectionLocalRoundTripAndConcurrentWrites(t *testing.T) {
 	}
 	select {
 	case m := <-c.Messages():
-		if string(m) != "reply" {
+		if string(m.Payload) != "reply" {
 			t.Fatalf("message=%q", m)
+		}
+		if m.ReceivedAt.IsZero() {
+			t.Fatal("inbound message does not retain its websocket receive timestamp")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("reply timeout")

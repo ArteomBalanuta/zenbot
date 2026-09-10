@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"zenbot/internal/profiling"
 
 	"github.com/gorilla/websocket"
 )
@@ -22,7 +23,16 @@ type Config struct {
 	URL                                      string
 	Dialer                                   Dialer
 	PingInterval, WriteTimeout, CloseTimeout time.Duration
+	Profiler                                 *profiling.Profiler
 }
+
+// InboundMessage preserves the point at which a frame left the websocket so
+// consumers can distinguish transport backlog from downstream processing.
+type InboundMessage struct {
+	Payload    []byte
+	ReceivedAt time.Time
+}
+
 type Connection struct {
 	cfg       Config
 	connMu    sync.RWMutex
@@ -31,7 +41,7 @@ type Connection struct {
 	startOnce sync.Once
 	closeOnce sync.Once
 	done      chan struct{}
-	messages  chan []byte
+	messages  chan InboundMessage
 	errs      chan error
 	connected atomic.Bool
 	started   atomic.Bool
@@ -50,11 +60,11 @@ func NewConnection(cfg Config) *Connection {
 	if cfg.CloseTimeout <= 0 {
 		cfg.CloseTimeout = 5 * time.Second
 	}
-	return &Connection{cfg: cfg, done: make(chan struct{}), messages: make(chan []byte, 32), errs: make(chan error, 8)}
+	return &Connection{cfg: cfg, done: make(chan struct{}), messages: make(chan InboundMessage, 32), errs: make(chan error, 8)}
 }
-func (c *Connection) Messages() <-chan []byte { return c.messages }
-func (c *Connection) Errors() <-chan error    { return c.errs }
-func (c *Connection) Connected() bool         { return c.connected.Load() }
+func (c *Connection) Messages() <-chan InboundMessage { return c.messages }
+func (c *Connection) Errors() <-chan error            { return c.errs }
+func (c *Connection) Connected() bool                 { return c.connected.Load() }
 func (c *Connection) Start(ctx context.Context) error {
 	if c.isClosed() {
 		return ErrClosed
@@ -117,8 +127,20 @@ func (c *Connection) readLoop() {
 			}
 			return
 		}
+		var receivedAt time.Time
+		if c.cfg.Profiler.Enabled() {
+			receivedAt = time.Now()
+		}
+		received := InboundMessage{Payload: append([]byte(nil), msg...), ReceivedAt: receivedAt}
+		var enqueueStarted time.Time
+		if c.cfg.Profiler.Enabled() {
+			enqueueStarted = time.Now()
+		}
 		select {
-		case c.messages <- append([]byte(nil), msg...):
+		case c.messages <- received:
+			if !enqueueStarted.IsZero() {
+				c.cfg.Profiler.ObserveInboundEnqueue(time.Since(enqueueStarted), len(c.messages))
+			}
 		case <-c.done:
 			return
 		}
@@ -145,16 +167,53 @@ func (c *Connection) getConn() *websocket.Conn {
 	return c.conn
 }
 func (c *Connection) write(kind int, payload []byte) error {
+	profileEnabled := c.cfg.Profiler.Enabled()
+	var lockStarted time.Time
+	if profileEnabled {
+		lockStarted = time.Now()
+	}
 	c.writeMu.Lock()
+	var lockWait time.Duration
+	if profileEnabled {
+		lockWait = time.Since(lockStarted)
+	}
 	defer c.writeMu.Unlock()
 	c.connMu.RLock()
 	ws := c.conn
 	c.connMu.RUnlock()
 	if ws == nil || !c.Connected() {
+		if profileEnabled {
+			c.cfg.Profiler.ObserveWrite(lockWait, 0, len(payload), frameKind(kind), ErrClosed)
+		}
 		return ErrClosed
 	}
+	var writeStarted time.Time
+	if profileEnabled {
+		writeStarted = time.Now()
+	}
 	_ = ws.SetWriteDeadline(time.Now().Add(c.cfg.WriteTimeout))
-	return ws.WriteMessage(kind, payload)
+	err := ws.WriteMessage(kind, payload)
+	if profileEnabled {
+		c.cfg.Profiler.ObserveWrite(lockWait, time.Since(writeStarted), len(payload), frameKind(kind), err)
+	}
+	return err
+}
+
+func frameKind(kind int) string {
+	switch kind {
+	case websocket.TextMessage:
+		return "text"
+	case websocket.BinaryMessage:
+		return "binary"
+	case websocket.CloseMessage:
+		return "close"
+	case websocket.PingMessage:
+		return "ping"
+	case websocket.PongMessage:
+		return "pong"
+	default:
+		return fmt.Sprintf("unknown(%d)", kind)
+	}
 }
 func (c *Connection) SendText(ctx context.Context, payload string) error {
 	return c.SendRaw(ctx, []byte(payload))

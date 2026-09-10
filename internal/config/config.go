@@ -9,21 +9,22 @@ import (
 )
 
 type Config struct {
-	WebsocketUrl                      string      `toml:"url"`
-	WsUrl                             string      `toml:"wsUrl"`
-	Nick                              string      `toml:"nick"`
-	CmdPrefix                         string      `toml:"cmdPrefix"`
-	Name                              string      `toml:"name"`
-	Password                          string      `toml:"password"`
-	BotTrip                           string      `toml:"trip"`
-	Channel                           string      `toml:"channel"`
-	AdminTrips                        []string    `toml:"adminTrips"`
-	UserTrips                         []string    `toml:"userTrips"`
-	AutoReconnect                     bool        `toml:"autoReconnect"`
-	ConnectionHeartbitIntervalMinutes int         `toml:"healthCheckInterval"`
-	AutorunCommands                   []string    `toml:"autorunCommands"`
-	DbPath                            string      `toml:"dbPath"`
-	Agent                             AgentConfig `toml:"agent"`
+	WebsocketUrl                      string          `toml:"url"`
+	WsUrl                             string          `toml:"wsUrl"`
+	Nick                              string          `toml:"nick"`
+	CmdPrefix                         string          `toml:"cmdPrefix"`
+	Name                              string          `toml:"name"`
+	Password                          string          `toml:"password"`
+	BotTrip                           string          `toml:"trip"`
+	Channel                           string          `toml:"channel"`
+	AdminTrips                        []string        `toml:"adminTrips"`
+	UserTrips                         []string        `toml:"userTrips"`
+	AutoReconnect                     bool            `toml:"autoReconnect"`
+	ConnectionHeartbitIntervalMinutes int             `toml:"healthCheckInterval"`
+	AutorunCommands                   []string        `toml:"autorunCommands"`
+	DbPath                            string          `toml:"dbPath"`
+	Agent                             AgentConfig     `toml:"agent"`
+	Profiling                         ProfilingConfig `toml:"profiling"`
 }
 
 // UnmarshalTOML accepts both Zenbot arrays and Saturn's comma-separated list

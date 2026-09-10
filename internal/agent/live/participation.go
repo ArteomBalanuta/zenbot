@@ -30,6 +30,7 @@ func (p RoomParticipation) Handle(ctx context.Context, c *message.Context) (bool
 			candidate = true
 		}
 	}
-	out := p.Pipeline.Handle(participation.Event{Message: *c.Message, Snapshot: p.Snapshot(c), BotNick: c.Engine.GetName(), Prefix: c.Engine.GetPrefix(), AuthorIsBot: c.Author != nil && c.Author.IsBot, AmbientEnabled: p.AmbientEnabled, AmbientEvery: p.AmbientEvery, ModerationCandidate: candidate, ModerationTarget: target})
+	event := participation.Event{Message: *c.Message, BotNick: c.Engine.GetName(), Prefix: c.Engine.GetPrefix(), AuthorIsBot: c.Author != nil && c.Author.IsBot, AmbientEnabled: p.AmbientEnabled, AmbientEvery: p.AmbientEvery, ModerationCandidate: candidate, ModerationTarget: target}
+	out := p.Pipeline.HandleDeferred(event, func() participation.TrustedSnapshot { return p.Snapshot(c) })
 	return out.Decision == participation.Claimed, out.Err
 }

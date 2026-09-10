@@ -2,9 +2,16 @@ package core
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"zenbot/internal/listener"
+	"zenbot/internal/listener/message"
+	"zenbot/internal/profiling"
+	"zenbot/internal/transport"
 )
 
 type contextualChatNotifier struct {
@@ -65,7 +72,7 @@ func TestDispatchMessageContextFallsBackToLegacyChatNotifier(t *testing.T) {
 }
 
 type lifecycleTransport struct {
-	messages chan []byte
+	messages chan transport.InboundMessage
 	errors   chan error
 	mu       sync.Mutex
 	started  bool
@@ -78,9 +85,9 @@ func (t *lifecycleTransport) Start(context.Context) error {
 	t.started = true
 	return nil
 }
-func (t *lifecycleTransport) Messages() <-chan []byte { return t.messages }
-func (t *lifecycleTransport) Errors() <-chan error    { return t.errors }
-func (t *lifecycleTransport) Connected() bool         { return true }
+func (t *lifecycleTransport) Messages() <-chan transport.InboundMessage { return t.messages }
+func (t *lifecycleTransport) Errors() <-chan error                      { return t.errors }
+func (t *lifecycleTransport) Connected() bool                           { return true }
 func (t *lifecycleTransport) SendText(context.Context, string) error {
 	return nil
 }
@@ -106,7 +113,7 @@ func (n *blockingContextualChatNotifier) NotifyContext(ctx context.Context, _ st
 }
 
 func TestStartContextCancelsSynchronousChatDispatchOnLifecycleStop(t *testing.T) {
-	transport := &lifecycleTransport{messages: make(chan []byte, 1), errors: make(chan error)}
+	transport := &lifecycleTransport{messages: make(chan transport.InboundMessage, 1), errors: make(chan error)}
 	notifier := &blockingContextualChatNotifier{started: make(chan struct{}), cancelled: make(chan struct{})}
 	engine := &EngineImpl{Channel: "room", Name: "bot", Transport: transport, UserChatListener: notifier}
 	parent, cancel := context.WithCancel(context.Background())
@@ -114,7 +121,7 @@ func TestStartContextCancelsSynchronousChatDispatchOnLifecycleStop(t *testing.T)
 	if err := engine.StartContext(parent); err != nil {
 		t.Fatal(err)
 	}
-	transport.messages <- []byte(`{"cmd":"chat","nick":"alice","text":"!l question"}`)
+	transport.messages <- transportpkgMessage(`{"cmd":"chat","nick":"alice","text":"!l question"}`)
 	select {
 	case <-notifier.started:
 	case <-time.After(time.Second):
@@ -133,5 +140,115 @@ func TestStartContextCancelsSynchronousChatDispatchOnLifecycleStop(t *testing.T)
 	defer transport.mu.Unlock()
 	if !transport.started || !transport.closed {
 		t.Fatalf("transport started=%v closed=%v", transport.started, transport.closed)
+	}
+}
+
+func transportpkgMessage(payload string) transport.InboundMessage {
+	return transport.InboundMessage{Payload: []byte(payload), ReceivedAt: time.Now()}
+}
+
+type headOfLineHandler struct {
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+	secondSeen   chan struct{}
+}
+
+func (h *headOfLineHandler) Handle(_ context.Context, state *message.Context) (bool, error) {
+	switch {
+	case strings.Contains(state.Message.Text, "first"):
+		close(h.firstStarted)
+		<-h.releaseFirst
+	case strings.Contains(state.Message.Text, "second"):
+		close(h.secondSeen)
+	}
+	return false, nil
+}
+
+type headOfLineProfileHandler struct {
+	mu      sync.Mutex
+	records []map[string]any
+}
+
+func (*headOfLineProfileHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *headOfLineProfileHandler) Handle(_ context.Context, record slog.Record) error {
+	if record.Message != "command.profile.started" {
+		return nil
+	}
+	attributes := map[string]any{"event": record.Message}
+	record.Attrs(func(attribute slog.Attr) bool {
+		attributes[attribute.Key] = attribute.Value.Any()
+		return true
+	})
+	h.mu.Lock()
+	h.records = append(h.records, attributes)
+	h.mu.Unlock()
+	return nil
+}
+func (h *headOfLineProfileHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *headOfLineProfileHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestRegularCommandProfilerExposesSynchronousInboundHeadOfLineDelay(t *testing.T) {
+	transportStub := &lifecycleTransport{messages: make(chan transport.InboundMessage, 2), errors: make(chan error)}
+	logHandler := &headOfLineProfileHandler{}
+	profiler := profiling.New(profiling.Settings{
+		Enabled:              true,
+		SlowCommandThreshold: time.Millisecond,
+		SlowStageThreshold:   time.Hour,
+	}, slog.New(logHandler))
+	blocking := &headOfLineHandler{
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+		secondSeen:   make(chan struct{}),
+	}
+	engine := &EngineImpl{
+		Channel:         "programming",
+		Name:            "bot",
+		Prefix:          "*",
+		Transport:       transportStub,
+		CommandProfiler: profiler,
+	}
+	engine.UserChatListener = listener.NewUserChatListenerWithChain(engine, message.NewChain(blocking))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := engine.StartContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	transportStub.messages <- transport.InboundMessage{
+		Payload:    []byte(`{"cmd":"chat","nick":"alice","text":"*ping first"}`),
+		ReceivedAt: time.Now(),
+	}
+	select {
+	case <-blocking.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first command did not start")
+	}
+	transportStub.messages <- transport.InboundMessage{
+		Payload:    []byte(`{"cmd":"chat","nick":"alice","text":"*ping second"}`),
+		ReceivedAt: time.Now(),
+	}
+	select {
+	case <-blocking.secondSeen:
+		t.Fatal("second command bypassed the blocked synchronous handler")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(blocking.releaseFirst)
+	select {
+	case <-blocking.secondSeen:
+	case <-time.After(time.Second):
+		t.Fatal("second command did not resume after the first handler completed")
+	}
+	cancel()
+	if err := engine.StopContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	logHandler.mu.Lock()
+	defer logHandler.mu.Unlock()
+	if len(logHandler.records) != 2 {
+		t.Fatalf("started records=%#v, want two commands", logHandler.records)
+	}
+	queueDelay, ok := logHandler.records[1]["ws_queue_ms"].(float64)
+	if !ok || queueDelay < 25 {
+		t.Fatalf("second ws_queue_ms=%v, want head-of-line delay >=25ms", logHandler.records[1]["ws_queue_ms"])
 	}
 }

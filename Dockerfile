@@ -37,5 +37,6 @@ COPY --from=h2 /opt/h2/h2.jar /opt/h2/h2.jar
 COPY config.example.toml /app/config.toml
 RUN mkdir -p /app/database
 VOLUME ["/app/database"]
+EXPOSE 6060
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/app/zenbot"]

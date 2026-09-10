@@ -16,6 +16,7 @@ import (
 	"zenbot/internal/listener"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 	"zenbot/internal/relay"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
@@ -30,6 +31,7 @@ type EngineOptions struct {
 	LifecycleErrors     chan<- error
 	SnapshotCoordinator *snapshot.RoomSnapshotCoordinator
 	SessionRegistry     *snapshot.TemporarySessionRegistry
+	Profiler            *profiling.Profiler
 	// HostRelay is required only for an AGENT child and is installed once at creation.
 	HostRelay relay.HostRelay
 }
@@ -56,9 +58,12 @@ func NewEngineWithOptions(etype model.EngineType, c *config.Config, repo reposit
 	if opts.Transport.URL == "" {
 		opts.Transport.URL = c.WebsocketUrl
 	}
+	if opts.Transport.Profiler == nil {
+		opts.Transport.Profiler = opts.Profiler
+	}
 	e := core.NewEngineImpl(&core.EngineImpl{Type: etype, Prefix: c.CmdPrefix, Channel: c.Channel, Name: c.Name, Password: c.Password,
 		EngineWg: new(sync.WaitGroup), EnabledCommands: make(map[string]common.CommandMetadata), OutMessageQueue: make(chan string, 256),
-		ActiveUsers: make(map[*model.User]struct{}), AfkUsers: make(map[*model.User]string), Transport: transport.NewConnection(opts.Transport), Profile: opts.ListenerProfile, LifecycleErrors: opts.LifecycleErrors}, opts.HostRelay)
+		ActiveUsers: make(map[*model.User]struct{}), AfkUsers: make(map[*model.User]string), Transport: transport.NewConnection(opts.Transport), Profile: opts.ListenerProfile, LifecycleErrors: opts.LifecycleErrors, CommandProfiler: opts.Profiler}, opts.HostRelay)
 	e.InstallRoomSnapshotCoordinator(opts.SnapshotCoordinator)
 	if opts.ListenerProfile == core.Permanent {
 		e.SetAutoMoveState(opts.AutoMoveState)

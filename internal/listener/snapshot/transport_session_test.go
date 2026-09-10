@@ -14,22 +14,22 @@ import (
 )
 
 type proofTransport struct {
-	msgs   chan []byte
+	msgs   chan transport.InboundMessage
 	errs   chan error
 	raws   []string
 	closed int
 }
 
-func (p *proofTransport) Start(context.Context) error { return nil }
-func (p *proofTransport) Messages() <-chan []byte     { return p.msgs }
-func (p *proofTransport) Errors() <-chan error        { return p.errs }
+func (p *proofTransport) Start(context.Context) error               { return nil }
+func (p *proofTransport) Messages() <-chan transport.InboundMessage { return p.msgs }
+func (p *proofTransport) Errors() <-chan error                      { return p.errs }
 func (p *proofTransport) SendRaw(_ context.Context, raw []byte) error {
 	p.raws = append(p.raws, string(raw))
 	return nil
 }
 func (p *proofTransport) Close(context.Context) error { p.closed++; return nil }
 func TestTransportSessionCredentialedRemoteMessageJoin(t *testing.T) {
-	transport := &proofTransport{msgs: make(chan []byte), errs: make(chan error)}
+	transport := &proofTransport{msgs: make(chan transport.InboundMessage), errs: make(chan error)}
 	factory := &CoordinatedSessionFactory{Registry: NewTemporarySessionRegistry(), NewTransport: func(context.Context, RoomSnapshotRequest) (TemporaryTransport, error) { return transport, nil }}
 	session, err := factory.Create(RoomSnapshotRequest{SourceChannel: "source", TemporaryJoin: &TemporaryJoin{Channel: "remote\" room", Nick: "msg-12345678", Password: "test-\\password"}}, nil)
 	if err != nil {
@@ -53,7 +53,7 @@ func TestTransportSessionCredentialedRemoteMessageJoin(t *testing.T) {
 }
 
 func TestTransportSessionLegacyJoinRemainsCredentialFree(t *testing.T) {
-	transport := &proofTransport{msgs: make(chan []byte), errs: make(chan error)}
+	transport := &proofTransport{msgs: make(chan transport.InboundMessage), errs: make(chan error)}
 	factory := &CoordinatedSessionFactory{Registry: NewTemporarySessionRegistry(), NewTransport: func(context.Context, RoomSnapshotRequest) (TemporaryTransport, error) { return transport, nil }}
 	session, err := factory.Create(RoomSnapshotRequest{SourceChannel: "legacy-source"}, nil)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestTransportSessionLegacyJoinRemainsCredentialFree(t *testing.T) {
 
 func TestCoordinatedTransportSessionRoutesSnapshotAndErrorOnce(t *testing.T) {
 	r := NewTemporarySessionRegistry()
-	p := &proofTransport{msgs: make(chan []byte, 1), errs: make(chan error, 2)}
+	p := &proofTransport{msgs: make(chan transport.InboundMessage, 1), errs: make(chan error, 2)}
 	payloads := make(chan string, 1)
 	errorSeen := make(chan error, 2)
 	closedSeen := make(chan struct{}, 2)
@@ -85,7 +85,7 @@ func TestCoordinatedTransportSessionRoutesSnapshotAndErrorOnce(t *testing.T) {
 	if err = s.Start(); err != nil {
 		t.Fatal(err)
 	}
-	p.msgs <- []byte(`{"cmd":"onlineSet","users":[{"nick":"a"}]}`)
+	p.msgs <- transport.InboundMessage{Payload: []byte(`{"cmd":"onlineSet","users":[{"nick":"a"}]}`), ReceivedAt: time.Now()}
 	select {
 	case got := <-payloads:
 		if got == "" {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"zenbot/internal/common"
+	"zenbot/internal/transport"
 )
 
 func TestRawModerationOperationsEmitExactSaturnPayloads(t *testing.T) {
@@ -130,10 +131,10 @@ func TestRawModerationOperationsSendNothingWhenCancelled(t *testing.T) {
 
 type moderationFailingTransport struct{ calls int }
 
-func (t *moderationFailingTransport) Start(context.Context) error { return nil }
-func (t *moderationFailingTransport) Messages() <-chan []byte     { return nil }
-func (t *moderationFailingTransport) Errors() <-chan error        { return nil }
-func (t *moderationFailingTransport) Connected() bool             { return true }
+func (t *moderationFailingTransport) Start(context.Context) error               { return nil }
+func (t *moderationFailingTransport) Messages() <-chan transport.InboundMessage { return nil }
+func (t *moderationFailingTransport) Errors() <-chan error                      { return nil }
+func (t *moderationFailingTransport) Connected() bool                           { return true }
 func (t *moderationFailingTransport) SendText(context.Context, string) error {
 	t.calls++
 	return errors.New("send failed")

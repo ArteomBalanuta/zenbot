@@ -41,6 +41,11 @@ func TestExampleConfigDocumentsAndResolvesProductionAgentSurface(t *testing.T) {
 			t.Errorf("config.example.toml does not define %s", key)
 		}
 	}
+	for _, key := range []string{"enabled", "listenAddress", "slowCommandThresholdMillis", "slowStageThresholdMillis", "slowTransportThresholdMillis", "blockProfileRate", "mutexProfileFraction"} {
+		if !metadata.IsDefined("profiling", key) {
+			t.Errorf("config.example.toml does not define profiling.%s", key)
+		}
+	}
 	cfg.Normalize()
 	resolved, err := cfg.Agent.Resolve(ValueReader{})
 	if err != nil {
@@ -77,6 +82,13 @@ func TestEnvironmentExampleDocumentsEveryAgentRuntimeOverride(t *testing.T) {
 		"SATURN_AGENT_NO_REPLY_MARKER",
 		"SATURN_AGENT_MAX_RETRIES",
 		"SATURN_AGENT_RETRY_BACKOFF_MILLIS",
+		"ZENBOT_PROFILING_ENABLED",
+		"ZENBOT_PROFILING_LISTEN_ADDRESS",
+		"ZENBOT_PROFILING_SLOW_COMMAND_THRESHOLD_MILLIS",
+		"ZENBOT_PROFILING_SLOW_STAGE_THRESHOLD_MILLIS",
+		"ZENBOT_PROFILING_SLOW_TRANSPORT_THRESHOLD_MILLIS",
+		"ZENBOT_PROFILING_BLOCK_PROFILE_RATE",
+		"ZENBOT_PROFILING_MUTEX_PROFILE_FRACTION",
 	} {
 		if !defined[name] {
 			t.Errorf(".env.example does not define %s", name)

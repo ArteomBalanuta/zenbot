@@ -9,6 +9,7 @@ import (
 	"zenbot/internal/factory"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 )
 
 func TestMasterBindingSnapshotReplyUsesReboundMaster(t *testing.T) {
@@ -54,9 +55,13 @@ func TestRoomSnapshotReplySinkPreservesRequestWhisperMode(t *testing.T) {
 
 func TestRoomSnapshotEngineOptionsInstallsCoordinatorOnMaster(t *testing.T) {
 	cfg := &config.Config{Channel: "source", Name: "bot", WebsocketUrl: "ws://example.test"}
-	opts := newRoomSnapshotEngineOptions(cfg, nil, func(snapshot.RoomSnapshotRequest, string) {})
+	profiler := profiling.New(profiling.Settings{Enabled: true}, nil)
+	opts := newRoomSnapshotEngineOptions(cfg, nil, func(snapshot.RoomSnapshotRequest, string) {}, profiler)
 	if opts.SessionRegistry == nil || opts.SnapshotCoordinator == nil {
 		t.Fatalf("snapshot options = %#v, want registry and coordinator", opts)
+	}
+	if opts.Profiler != profiler || opts.Transport.Profiler != profiler {
+		t.Fatal("snapshot engine options did not propagate the process profiler")
 	}
 
 	engine, err := factory.NewEngineWithOptions(model.MASTER, cfg, nil, opts)
@@ -68,6 +73,9 @@ func TestRoomSnapshotEngineOptionsInstallsCoordinatorOnMaster(t *testing.T) {
 	}
 	if _, ok := any(engine).(common.LiveRoomMover); !ok {
 		t.Fatal("master is missing live room mover")
+	}
+	if engine.PerformanceProfiler() != profiler {
+		t.Fatal("master engine did not retain the process profiler")
 	}
 	request := snapshot.RoomSnapshotRequest{WorkflowID: "workflow", Author: "author", SourceChannel: "source", TargetChannel: "target"}
 	if err := engine.SubmitRoomSnapshot(request); err == nil || err.Error() != "operation cannot be nil" {

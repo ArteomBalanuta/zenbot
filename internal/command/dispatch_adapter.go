@@ -9,6 +9,7 @@ import (
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 )
 
 // legacyAdapter bridges Saturn's context-aware command contract to Zenbot's
@@ -33,12 +34,19 @@ func (a *legacyAdapter) execute(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	profiling.SetCommandName(ctx, a.def.Canonical)
+	handlerDone := profiling.Measure(ctx, "command.handler")
 	status, err := a.def.New(a.engine, a.msg).Execute(ctx)
+	handlerDone()
+	auditDone := profiling.Measure(ctx, "command.audit")
 	a.audit(ctx, status)
+	auditDone()
 	if err != nil {
 		log.Printf("Saturn command %q failed with status %s: %v", a.def.Canonical, status, err)
 	}
 }
+
+func (a *legacyAdapter) CanonicalName() string { return a.def.Canonical }
 
 var userTripWhitelistedCommands = map[string]struct{}{
 	"access": {}, "memory": {}, "prefix": {}, "register": {}, "remove": {},

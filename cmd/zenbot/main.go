@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sort"
@@ -33,6 +34,7 @@ import (
 	"zenbot/internal/listener/message"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 	"zenbot/internal/repository"
 	"zenbot/internal/repository/h2"
 	"zenbot/internal/transport"
@@ -54,15 +56,25 @@ type agentRepositories interface {
 	repository.AgentMemorySummaryRepository
 }
 
-func newRoomSnapshotEngineOptions(c *config.Config, lifecycleErrors chan<- error, reply snapshot.ReplySink) factory.EngineOptions {
-	transportConfig := transport.Config{}
+func newRoomSnapshotEngineOptions(c *config.Config, lifecycleErrors chan<- error, reply snapshot.ReplySink, profiler *profiling.Profiler) factory.EngineOptions {
+	transportConfig := transport.Config{Profiler: profiler}
 	if c != nil {
 		transportConfig.URL = c.WebsocketUrl
 	}
 	registry := snapshot.NewTemporarySessionRegistry()
 	sessions := factory.NewCoordinatedSessionFactory(transportConfig, registry, nil)
 	coordinator := snapshot.NewRoomSnapshotCoordinator(sessions, reply, func(raw string) (snapshot.Snapshot, error) { return snapshot.Parse(raw, false) }, 30*time.Second)
-	return factory.EngineOptions{Transport: transportConfig, LifecycleErrors: lifecycleErrors, SnapshotCoordinator: coordinator, SessionRegistry: registry}
+	return factory.EngineOptions{Transport: transportConfig, LifecycleErrors: lifecycleErrors, SnapshotCoordinator: coordinator, SessionRegistry: registry, Profiler: profiler}
+}
+
+func environmentValues() map[string]string {
+	values := make(map[string]string)
+	for _, item := range os.Environ() {
+		if key, value, ok := strings.Cut(item, "="); ok {
+			values[key] = value
+		}
+	}
+	return values
 }
 
 func roomSnapshotReplySink(send func(string, string, bool) (string, error)) snapshot.ReplySink {
@@ -182,13 +194,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if c == nil || resolveErr != nil {
 		return nil, fmt.Errorf("live agent configuration is incomplete")
 	}
-	values := map[string]string{}
-	for _, item := range os.Environ() {
-		if key, value, ok := strings.Cut(item, "="); ok {
-			values[key] = value
-		}
-	}
-	resolved, err := c.Agent.Resolve(config.ValueReader{Environment: values})
+	resolved, err := c.Agent.Resolve(config.ValueReader{Environment: environmentValues()})
 	if err != nil {
 		return nil, fmt.Errorf("agent configuration: %w", err)
 	}
@@ -298,14 +304,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if c == nil {
 		return nil, fmt.Errorf("application config is nil")
 	}
-	values := make(map[string]string)
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			values[key] = value
-		}
-	}
-	resolved, err := c.Agent.Resolve(config.ValueReader{Environment: values})
+	resolved, err := c.Agent.Resolve(config.ValueReader{Environment: environmentValues()})
 	if err != nil {
 		return nil, fmt.Errorf("agent configuration: %w", err)
 	}
@@ -352,7 +351,11 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 func newAutoMoveProductionOptions(c *config.Config, master factory.EngineOptions) (*core.AutoMoveState, factory.EngineOptions, factory.EngineOptions) {
 	state := core.NewAutoMoveState()
 	master.AutoMoveState = state
-	return state, master, factory.EngineOptions{Transport: master.Transport, LifecycleErrors: master.LifecycleErrors, AutoMoveState: state}
+	replicaTransport := master.Transport
+	if replicaTransport.Profiler == nil {
+		replicaTransport.Profiler = master.Profiler
+	}
+	return state, master, factory.EngineOptions{Transport: replicaTransport, LifecycleErrors: master.LifecycleErrors, AutoMoveState: state, Profiler: master.Profiler}
 }
 
 func lifecyclePolicy(c *config.Config) core.RetryPolicy {
@@ -388,6 +391,39 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	c := config.SetupConfig()
+	resolvedProfiling, err := c.Profiling.Resolve(config.ValueReader{Environment: environmentValues()})
+	if err != nil {
+		log.Fatal("Invalid profiling configuration: ", err)
+	}
+	performanceProfiler := profiling.New(profiling.Settings{
+		Enabled:                resolvedProfiling.Enabled,
+		SlowCommandThreshold:   resolvedProfiling.SlowCommandThreshold,
+		SlowStageThreshold:     resolvedProfiling.SlowStageThreshold,
+		SlowTransportThreshold: resolvedProfiling.SlowTransportThreshold,
+	}, slog.Default())
+	if resolvedProfiling.Enabled {
+		slog.Info("profiling.regular_commands.enabled",
+			"slow_command_ms", resolvedProfiling.SlowCommandThresholdMillis,
+			"slow_stage_ms", resolvedProfiling.SlowStageThresholdMillis,
+			"slow_transport_ms", resolvedProfiling.SlowTransportThresholdMillis,
+			"excluded_command", "l",
+		)
+		profileServer, profileErr := profiling.StartServer(ctx, profiling.ServerConfig{
+			Address:              resolvedProfiling.ListenAddress,
+			BlockProfileRate:     resolvedProfiling.BlockProfileRate,
+			MutexProfileFraction: resolvedProfiling.MutexProfileFraction,
+		}, slog.Default())
+		if profileErr != nil {
+			log.Fatal("Can't start profiling endpoint: ", profileErr)
+		}
+		defer func() {
+			shutdownCtx, shutdown := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdown()
+			if closeErr := profileServer.Close(shutdownCtx); closeErr != nil {
+				log.Printf("profiling shutdown: %v", closeErr)
+			}
+		}()
+	}
 	db, err := h2.Open(ctx, h2.Config{DatabaseStem: c.DbPath, H2Jar: os.Getenv("H2_JAR"), Java: os.Getenv("JAVA"), Port: 5435})
 	if err != nil {
 		log.Fatal("Can't connect to db: ", err)
@@ -405,7 +441,7 @@ func main() {
 
 	transportErrors := make(chan error, 16)
 	binding := newMasterBinding(nil)
-	snapshotOptions := newRoomSnapshotEngineOptions(c, transportErrors, roomSnapshotReplySink(masterReplySender(binding)))
+	snapshotOptions := newRoomSnapshotEngineOptions(c, transportErrors, roomSnapshotReplySink(masterReplySender(binding)), performanceProfiler)
 	_, snapshotOptions, replicaOptions := newAutoMoveProductionOptions(c, snapshotOptions)
 	manager := core.NewReplicaManager(c.Channel)
 	directory := core.NewEngineRoomUserDirectory(nil, manager)

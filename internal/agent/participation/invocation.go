@@ -131,12 +131,26 @@ type Outcome struct {
 }
 
 func (p *Pipeline) Handle(e Event) Outcome {
+	return p.handle(e, func() TrustedSnapshot { return e.Snapshot })
+}
+
+// HandleDeferred postpones trusted room-state collection until the event has
+// passed the pipeline's inexpensive eligibility checks. Monitor callbacks run
+// before collection and must rely on the message metadata in Event.
+func (p *Pipeline) HandleDeferred(e Event, snapshot func() TrustedSnapshot) Outcome {
+	return p.handle(e, snapshot)
+}
+
+func (p *Pipeline) handle(e Event, snapshotProvider func() TrustedSnapshot) Outcome {
 	if p.Monitor != nil {
 		p.Monitor(e)
 	}
 	text := strings.TrimSpace(e.Message.Text)
 	if text == "" || e.Message.Whisper || e.Message.IsWhisper || strings.EqualFold(e.Message.Name, e.BotNick) || e.AuthorIsBot || isConventionalBot(e.Message.Name) || (e.Prefix != "" && strings.HasPrefix(text, e.Prefix)) {
 		return Outcome{Decision: Pass}
+	}
+	if snapshotProvider != nil {
+		e.Snapshot = snapshotProvider()
 	}
 	ctx, e1 := api.NewContext(e.Snapshot.Room, e.Message.Name, e.Message.Trip, e.Message.Hash, false, e.Snapshot.Users)
 	if e1 != nil {

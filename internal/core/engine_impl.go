@@ -13,6 +13,7 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 	"zenbot/internal/relay"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
@@ -21,7 +22,7 @@ import (
 
 type EngineTransport interface {
 	Start(context.Context) error
-	Messages() <-chan []byte
+	Messages() <-chan transport.InboundMessage
 	Errors() <-chan error
 	Connected() bool
 	SendText(context.Context, string) error
@@ -64,6 +65,7 @@ type EngineImpl struct {
 	HcConnection    *Connection
 	Transport       EngineTransport
 	Repository      repository.Repository
+	CommandProfiler *profiling.Profiler
 
 	//TODO: use a proper collection.
 	CoreListener       common.Listener
@@ -204,13 +206,22 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 	}
 	go func() {
 		defer close(done)
+		messages := e.Transport.Messages()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg := <-e.Transport.Messages():
-				if msg != nil {
-					e.DispatchMessageContext(ctx, string(msg))
+			case msg := <-messages:
+				if msg.Payload != nil {
+					messageCtx := ctx
+					if e.CommandProfiler.Enabled() {
+						messageCtx = profiling.WithIngress(ctx, profiling.Ingress{
+							ReceivedAt: msg.ReceivedAt,
+							DequeuedAt: time.Now(),
+							QueueDepth: len(messages),
+						})
+					}
+					e.DispatchMessageContext(messageCtx, string(msg.Payload))
 				}
 			case err := <-e.Transport.Errors():
 				if err != nil {
@@ -249,6 +260,9 @@ func (e *EngineImpl) StopContext(ctx context.Context) error {
 }
 func (e *EngineImpl) Healthy() bool                { return e.Transport != nil && e.Transport.Connected() }
 func (e *EngineImpl) EngineType() model.EngineType { return e.Type }
+
+// PerformanceProfiler exposes process-owned latency diagnostics to listener boundaries.
+func (e *EngineImpl) PerformanceProfiler() *profiling.Profiler { return e.CommandProfiler }
 
 // SetAutoMoveState installs the process-shared state during permanent engine composition.
 func (e *EngineImpl) SetAutoMoveState(state *AutoMoveState) { e.autoMove = state }

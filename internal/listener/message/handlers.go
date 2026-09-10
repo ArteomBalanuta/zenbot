@@ -8,6 +8,7 @@ import (
 	"time"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
+	"zenbot/internal/profiling"
 	"zenbot/internal/relay"
 	"zenbot/internal/service"
 )
@@ -187,6 +188,10 @@ type contextCommand interface {
 	ExecuteContext(context.Context)
 }
 
+type canonicalCommand interface {
+	CanonicalName() string
+}
+
 type lifecycleDispatchController interface {
 	BeginDispatch() func()
 }
@@ -220,18 +225,32 @@ func (DispatchUserCommand) Handle(ctx context.Context, c *Context) (bool, error)
 	if len(fields) == 0 {
 		return false, nil
 	}
+	lookupDone := profiling.Measure(ctx, "command.lookup")
 	cmd := common.BuildCommand(fields[0], c.Engine, c.Message)
+	lookupDone()
 	if cmd == nil {
 		return false, nil
 	}
-	if c.Author == nil || !isCommandAuthorized(c.Engine, cmd, c.Author) {
+	if named, ok := cmd.(canonicalCommand); ok {
+		profiling.SetCommandName(ctx, named.CanonicalName())
+	}
+	authorizationDone := profiling.Measure(ctx, "command.authorization")
+	authorized := c.Author != nil && isCommandAuthorized(c.Engine, cmd, c.Author)
+	authorizationDone()
+	if !authorized {
 		if c.Author != nil {
+			replyDone := profiling.Measure(ctx, "command.unauthorized_reply")
 			_, _ = c.Engine.SendChatMessage(c.Author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", fields[0]), c.Message.IsWhisper)
+			replyDone()
 		}
 		return false, nil
 	}
+	lifecycleDone := profiling.Measure(ctx, "command.lifecycle_gate")
 	releaseDispatch := releaseLifecycleDispatch(c.Engine)
+	lifecycleDone()
 	defer releaseDispatch()
+	executionDone := profiling.Measure(ctx, "command.execute")
+	defer executionDone()
 	if contextual, ok := cmd.(contextCommand); ok {
 		contextual.ExecuteContext(ctx)
 	} else {

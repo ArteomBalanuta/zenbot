@@ -105,6 +105,36 @@ func TestRoomParticipationPassesNonMentionAndClaimsSubmissionError(t *testing.T)
 	}
 }
 
+func TestRoomParticipationDoesNotBuildTrustedSnapshotForCommand(t *testing.T) {
+	snapshotCalls := 0
+	monitorCalls := 0
+	p := RoomParticipation{
+		Pipeline: &participation.Pipeline{
+			Parser:  participation.MentionParser{},
+			Monitor: func(participation.Event) { monitorCalls++ },
+		},
+		Snapshot: func(*message.Context) participation.TrustedSnapshot {
+			snapshotCalls++
+			return participation.TrustedSnapshot{Room: "room", Users: []string{"alice"}}
+		},
+	}
+
+	claimed, err := p.Handle(context.Background(), &message.Context{
+		Engine:  participationEngine{},
+		Message: &model.ChatMessage{Name: "alice", Text: "!ping"},
+	})
+
+	if err != nil || claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	if snapshotCalls != 0 {
+		t.Fatalf("trusted snapshot calls = %d, want 0", snapshotCalls)
+	}
+	if monitorCalls != 1 {
+		t.Fatalf("monitor calls = %d, want 1", monitorCalls)
+	}
+}
+
 func TestRoomParticipationAmbientCadenceSkipsMentionAndQuiet(t *testing.T) {
 	submitter := &recordingSubmitter{}
 	p := RoomParticipation{

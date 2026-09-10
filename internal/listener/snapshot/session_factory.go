@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"zenbot/internal/transport"
 )
 
 type TemporarySessionRegistry struct {
@@ -62,7 +63,7 @@ func (r *TemporarySessionRegistry) Len() int {
 // snapshot session. Keeping it here avoids coupling the workflow to the engine.
 type TemporaryTransport interface {
 	Start(context.Context) error
-	Messages() <-chan []byte
+	Messages() <-chan transport.InboundMessage
 	Errors() <-chan error
 	SendRaw(context.Context, []byte) error
 	Close(context.Context) error
@@ -180,8 +181,8 @@ func (s *transportSession) loop() {
 		case <-s.ctx.Done():
 			return
 		case msg := <-s.transport.Messages():
-			if msg != nil && s.sink != nil {
-				s.sink(string(msg))
+			if msg.Payload != nil && s.sink != nil {
+				s.sink(string(msg.Payload))
 			}
 		case err := <-s.transport.Errors():
 			if err != nil {
