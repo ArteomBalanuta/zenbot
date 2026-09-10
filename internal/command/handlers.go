@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
 )
 
 type commandBase struct {
@@ -245,6 +247,9 @@ func (c *kickCommand) Execute(ctx context.Context) (model.Status, error) {
 	case "-m":
 		for _, rawTarget := range arguments[1:] {
 			if err := kickActiveUser(ctx, c.engine, operations, rawTarget); err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					continue
+				}
 				return model.FAILED, err
 			}
 		}
@@ -273,8 +278,11 @@ func (c *kickCommand) Execute(ctx context.Context) (model.Status, error) {
 
 func kickActiveUser(ctx context.Context, engine common.Engine, operations common.ModerationOperations, rawTarget string) error {
 	target, err := activeModerationTarget(engine, rawTarget)
-	if err != nil || target == nil {
+	if err != nil {
 		return err
+	}
+	if target == nil {
+		return repository.ErrNotFound
 	}
 	return operations.KickNick(ctx, common.NickTarget(target.Name))
 }

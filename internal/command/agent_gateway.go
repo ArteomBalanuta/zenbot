@@ -99,9 +99,12 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, nil
 	}
 	execution := CommandExecution{
-		Status:           commandgateway.OutcomeSucceeded,
-		EffectsCommitted: true,
-		Messages:         append([]string(nil), capturing.messages...),
+		Status:   commandgateway.OutcomeSucceeded,
+		Messages: append([]string(nil), capturing.messages...),
+	}
+	if capturing.actionCount > 0 {
+		execution.EffectsCommitted = true
+		execution.Action = &commandgateway.ActionReceipt{Count: capturing.actionCount}
 	}
 	if capturing.deliveryCount > 0 {
 		execution.Delivery = &commandgateway.DeliveryReceipt{Count: capturing.deliveryCount}

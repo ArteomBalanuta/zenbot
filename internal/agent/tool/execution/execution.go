@@ -65,6 +65,9 @@ func (l *Ledger) Reserve(k, n string) string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.seen[k] {
+		if lim := l.limits[n]; lim <= 0 || l.counts[n] < lim {
+			l.counts[n]++
+		}
 		return "DUPLICATE_TOOL_CALL"
 	}
 	if lim := l.limits[n]; lim > 0 && l.counts[n] >= lim {
@@ -211,16 +214,21 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 			return contract.ErrorResult(c.ID, c.Name, "TOOL_NOT_AUTHORIZED", "tool is not authorized")
 		}
 	}
+	if e.Ledger != nil {
+		if code := e.Ledger.Reserve(Key(c), c.Name); code != "" {
+			e.Ledger.Failure(c.Name)
+			return contract.ErrorResult(c.ID, c.Name, code, "tool call rejected")
+		}
+	}
 	if err := contract.ValidateArguments(d.Parameters(), c.Arguments); err != nil {
+		if e.Ledger != nil {
+			e.Ledger.Failure(c.Name)
+		}
 		return contract.ErrorResult(c.ID, c.Name, "INVALID_ARGUMENTS", err.Error())
 	}
 	if e.Ledger != nil && e.Ledger.Missing(d.RequiredSuccessfulTools()) {
+		e.Ledger.Failure(c.Name)
 		return contract.ErrorResult(c.ID, c.Name, "MISSING_PREREQUISITE", "required tool must succeed first")
-	}
-	if e.Ledger != nil {
-		if code := e.Ledger.Reserve(Key(c), c.Name); code != "" {
-			return contract.ErrorResult(c.ID, c.Name, code, "tool call rejected")
-		}
 	}
 	timeout := d.Timeout()
 	if timeout <= 0 {
@@ -263,6 +271,18 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 			e.Ledger.Failure(c.Name)
 		}
 		return contract.ErrorResult(c.ID, c.Name, "INVALID_TOOL_RESULT", "tool result failed validation")
+	}
+	if d.Effect() == contract.Action && !r.EffectsCommitted {
+		if e.Ledger != nil {
+			e.Ledger.Failure(c.Name)
+		}
+		return contract.ErrorResult(c.ID, c.Name, "UNVERIFIED_ACTION_OUTCOME", "action completion was not verified")
+	}
+	if d.ResultMode() == contract.RoomDelivery && !r.VerifiedRoomDelivery() {
+		if e.Ledger != nil {
+			e.Ledger.Failure(c.Name)
+		}
+		return contract.ErrorResult(c.ID, c.Name, "UNVERIFIED_ROOM_DELIVERY", "room delivery was not verified")
 	}
 	if e.Ledger != nil {
 		e.Ledger.Success(c.Name)

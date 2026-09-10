@@ -10,6 +10,7 @@ import (
 	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/observability"
+	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/agent/turn"
 )
 
@@ -75,10 +76,11 @@ func completionAssessmentDefinition() any {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"decision": map[string]any{"type": "string", "enum": []string{string(turn.CompletionFinal), string(turn.CompletionContinue)}},
-					"feedback": map[string]any{"type": "string", "minLength": 1},
+					"decision":  map[string]any{"type": "string", "enum": []string{string(turn.CompletionFinal), string(turn.CompletionContinue)}},
+					"feedback":  map[string]any{"type": "string", "minLength": 1},
+					"replyMode": map[string]any{"type": "string", "enum": []string{string(turn.CompletionSend), string(turn.CompletionSuppress)}},
 				},
-				"required": []string{"decision", "feedback"},
+				"required": []string{"decision", "feedback", "replyMode"},
 			},
 		},
 	}
@@ -93,13 +95,20 @@ func parseCompletionAssessment(response llm.LlmResponse) (turn.CompletionAssessm
 		return turn.CompletionAssessment{}, errors.New("provider did not return one structured completion assessment")
 	}
 	arguments := calls[0].Arguments()
-	if len(arguments) != 2 {
+	if len(arguments) != 3 {
 		return turn.CompletionAssessment{}, errors.New("structured completion assessment has invalid fields")
 	}
 	decision, decisionOK := arguments["decision"].(string)
 	feedback, feedbackOK := arguments["feedback"].(string)
-	assessment := turn.CompletionAssessment{Decision: turn.CompletionDecision(strings.ToUpper(strings.TrimSpace(decision))), Feedback: strings.TrimSpace(feedback)}
-	if !decisionOK || !feedbackOK || assessment.Feedback == "" || (assessment.Decision != turn.CompletionFinal && assessment.Decision != turn.CompletionContinue) {
+	replyMode, replyModeOK := arguments["replyMode"].(string)
+	assessment := turn.CompletionAssessment{
+		Decision:  turn.CompletionDecision(strings.ToUpper(strings.TrimSpace(decision))),
+		Feedback:  strings.TrimSpace(feedback),
+		ReplyMode: turn.CompletionReplyMode(strings.ToUpper(strings.TrimSpace(replyMode))),
+	}
+	if !decisionOK || !feedbackOK || !replyModeOK || assessment.Feedback == "" ||
+		(assessment.Decision != turn.CompletionFinal && assessment.Decision != turn.CompletionContinue) ||
+		(assessment.ReplyMode != turn.CompletionSend && assessment.ReplyMode != turn.CompletionSuppress) {
 		return turn.CompletionAssessment{}, errors.New("structured completion assessment is invalid")
 	}
 	return assessment, nil
@@ -120,13 +129,19 @@ type gateMessage struct {
 }
 
 type gateObservation struct {
-	Tool           string `json:"tool"`
-	Status         string `json:"status"`
-	Content        string `json:"content"`
-	ErrorCode      string `json:"errorCode,omitempty"`
-	ReturnedCount  int    `json:"returnedCount"`
-	Truncated      bool   `json:"truncated"`
-	ContinuationID string `json:"continuationId,omitempty"`
+	Tool                 string              `json:"tool"`
+	Arguments            string              `json:"arguments,omitempty"`
+	Effect               contract.Effect     `json:"effect,omitempty"`
+	ResultMode           contract.ResultMode `json:"resultMode,omitempty"`
+	Status               string              `json:"status"`
+	Content              string              `json:"content"`
+	ErrorCode            string              `json:"errorCode,omitempty"`
+	EffectsCommitted     bool                `json:"effectsCommitted"`
+	DeliveryCount        int                 `json:"deliveryCount"`
+	VerifiedRoomDelivery bool                `json:"verifiedRoomDelivery"`
+	ReturnedCount        int                 `json:"returnedCount"`
+	Truncated            bool                `json:"truncated"`
+	ContinuationID       string              `json:"continuationId,omitempty"`
 }
 
 func completionGatePayload(candidate turn.CompletionCandidate) gatePayload {
@@ -152,9 +167,11 @@ func completionGatePayload(candidate turn.CompletionCandidate) gatePayload {
 	for index := len(candidate.Results) - 1; index >= 0; index-- {
 		result := candidate.Results[index]
 		view := store.Store(result, completionGateResultChars)
+		call := completionCallEvidence(candidate.Calls, result)
 		observation := gateObservation{
-			Tool: view.Tool, Status: view.Status, Content: view.Summary,
-			ErrorCode: result.ErrorCode, ReturnedCount: view.ReturnedCount,
+			Tool: view.Tool, Arguments: truncateText(strings.TrimSpace(call.Arguments), completionGateMessageChars), Effect: call.Effect, ResultMode: call.ResultMode,
+			Status: view.Status, Content: view.Summary, ErrorCode: result.ErrorCode,
+			EffectsCommitted: result.EffectsCommitted, DeliveryCount: result.DeliveryCount, VerifiedRoomDelivery: result.VerifiedRoomDelivery(), ReturnedCount: view.ReturnedCount,
 			Truncated: view.Truncated, ContinuationID: view.ContinuationID,
 		}
 		encoded, _ := json.Marshal(observation)
@@ -172,6 +189,15 @@ func completionGatePayload(candidate turn.CompletionCandidate) gatePayload {
 		AvailableTools: tools,
 		Observations:   observations,
 	}
+}
+
+func completionCallEvidence(calls []turn.ToolCallEvidence, result contract.Result) turn.ToolCallEvidence {
+	for _, call := range calls {
+		if call.CallID == result.CallID && call.Tool == result.ToolName {
+			return call
+		}
+	}
+	return turn.ToolCallEvidence{}
 }
 
 func completionGateConversation(messages []llm.LlmMessage) []gateMessage {

@@ -20,6 +20,7 @@ func verifiedCommandExecution(messages ...string) commandgateway.Execution {
 	return commandgateway.Execution{
 		Status:           commandgateway.OutcomeSucceeded,
 		EffectsCommitted: true,
+		Action:           &commandgateway.ActionReceipt{Count: 1},
 		Messages:         append([]string(nil), messages...),
 		Delivery:         &commandgateway.DeliveryReceipt{Count: len(messages)},
 	}
@@ -58,12 +59,12 @@ func TestRunCommandDescriptorIsClosedBoundedAction(t *testing.T) {
 	if json.Unmarshal(d.Parameters(), &parameters) != nil || !slices.Contains(parameters.Properties["command"].Enum, "lastseen") || slices.Contains(parameters.Properties["command"].Enum, "mute") {
 		t.Fatalf("parameters=%s", d.Parameters())
 	}
-	if string(d.ResultSchema()) != `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"}},"required":["messages","deliveredCount"]}` {
+	if string(d.ResultSchema()) != `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}` {
 		t.Fatalf("result=%s", d.ResultSchema())
 	}
 }
 
-func TestRunCommandDescriptorAddsModerationAndPermanentBanAliasesByCapability(t *testing.T) {
+func TestRunCommandDescriptorAddsModerationWithoutDuplicatingDedicatedKickSurface(t *testing.T) {
 	moderator, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
 	d, err := (agenttool.RunCommand{}).Descriptor(moderator)
 	if err != nil {
@@ -74,7 +75,7 @@ func TestRunCommandDescriptorAddsModerationAndPermanentBanAliasesByCapability(t 
 			Enum []string `json:"enum"`
 		} `json:"properties"`
 	}
-	if json.Unmarshal(d.Parameters(), &schema) != nil || !slices.Contains(schema.Properties["command"].Enum, "kick") || slices.Contains(schema.Properties["command"].Enum, "ban") {
+	if json.Unmarshal(d.Parameters(), &schema) != nil || !slices.Contains(schema.Properties["command"].Enum, "mute") || slices.Contains(schema.Properties["command"].Enum, "kick") || slices.Contains(schema.Properties["command"].Enum, "k") || slices.Contains(schema.Properties["command"].Enum, "out") || slices.Contains(schema.Properties["command"].Enum, "ban") {
 		t.Fatalf("moderator schema=%s", d.Parameters())
 	}
 	creator, _ := api.NewContextWithCapabilities("room", "creator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands, api.PermanentBan})
@@ -91,8 +92,9 @@ func TestRunCommandNormalizesCallsGatewayOnceAndRejectsFailure(t *testing.T) {
 	var body struct {
 		Messages       []string `json:"messages"`
 		DeliveredCount int      `json:"deliveredCount"`
+		ActionCount    int      `json:"actionCount"`
 	}
-	if json.Unmarshal([]byte(result.Content), &body) != nil || len(body.Messages) != 1 || body.Messages[0] != "forecast" || body.DeliveredCount != 1 {
+	if json.Unmarshal([]byte(result.Content), &body) != nil || len(body.Messages) != 1 || body.Messages[0] != "forecast" || body.DeliveredCount != 1 || body.ActionCount != 1 {
 		t.Fatalf("result content=%s", result.Content)
 	}
 	if err != nil || result.IsError || gateway.calls != 1 || gateway.command != "w" || gateway.arguments != "Tokyo" {
@@ -117,8 +119,24 @@ func TestRunCommandTurnsGatewayRejectionIntoCorrectableObservation(t *testing.T)
 func TestRunCommandModerationAliasCannotRetargetReviewedAuthor(t *testing.T) {
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("moderation complete")}
-	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), moderator, json.RawMessage(`{"command":"k","arguments":"bob"}`))
+	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), moderator, json.RawMessage(`{"command":"mute","arguments":"bob"}`))
 	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 0 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
+	}
+}
+
+func TestRunCommandRejectsDedicatedKickAliasesBeforeGateway(t *testing.T) {
+	moderator, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	gateway := &runCommandGatewayStub{result: commandgateway.Execution{
+		Status:           commandgateway.OutcomeSucceeded,
+		EffectsCommitted: true,
+		Action:           &commandgateway.ActionReceipt{Count: 1},
+	}}
+
+	for _, alias := range []string{"kick", "k", "out"} {
+		result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), moderator, json.RawMessage(`{"command":"`+alias+`","arguments":"raider"}`))
+		if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 0 {
+			t.Fatalf("alias=%q result=%#v err=%v gateway=%#v", alias, result, err, gateway)
+		}
 	}
 }

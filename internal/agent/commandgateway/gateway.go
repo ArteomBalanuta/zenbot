@@ -19,9 +19,17 @@ type DeliveryReceipt struct {
 	Count int
 }
 
+// ActionReceipt verifies that the command caused one or more outward effects.
+// It is independent from room delivery because moderation actions can be
+// intentionally silent.
+type ActionReceipt struct {
+	Count int
+}
+
 type Execution struct {
 	Status           OutcomeStatus
 	EffectsCommitted bool
+	Action           *ActionReceipt
 	Messages         []string
 	Delivery         *DeliveryReceipt
 }

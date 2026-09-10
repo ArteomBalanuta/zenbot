@@ -73,8 +73,10 @@ func appendRegistryProtocol(messages []llm.LlmMessage, response llm.LlmResponse,
 	return messages, nil
 }
 
-func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *tool.Registry, agent api.Context, projector *assemble.Assembler, newestRequest llm.LlmMessage, observations *assemble.ObservationStore, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, allowed []string, limits turn.ExecutionLimits, state *turn.State, interrupt turn.InterruptHook, gate turn.CompletionGate, task *turn.TaskState, prompt string) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
-	return (TurnEngine{Client: client, Registry: registry, Agent: agent, Projector: projector, NewestRequest: newestRequest, Observations: observations, Allowed: allowed, Limits: limits, Interrupt: interrupt, Gate: gate, Task: task, Prompt: prompt}).Complete(ctx, messages, providerTools, initial, state)
+func completeRegistryLoop(ctx context.Context, client llm.LlmClient, registry *tool.Registry, agent api.Context, projector *assemble.Assembler, newestRequest llm.LlmMessage, observations *assemble.ObservationStore, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, allowed []string, limits turn.ExecutionLimits, state *turn.State, interrupt turn.InterruptHook, gate turn.CompletionGate, prompt string) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, bool, error) {
+	control := &CompletionControl{}
+	response, completedMessages, batch, err := (TurnEngine{Client: client, Registry: registry, Agent: agent, Projector: projector, NewestRequest: newestRequest, Observations: observations, Allowed: allowed, Limits: limits, Interrupt: interrupt, Gate: gate, Prompt: prompt, Control: control}).Complete(ctx, messages, providerTools, initial, state)
+	return response, completedMessages, batch, control.SuppressReply, err
 }
 
 type toolBatchResult struct {

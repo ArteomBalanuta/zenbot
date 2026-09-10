@@ -18,12 +18,21 @@ type agentCaptureEngine struct {
 	common.Engine
 	messages            []string
 	deliveryCount       int
+	actionCount         int
 	snapshotCompletions []<-chan snapshot.OperationResult
 }
 
 func (e *agentCaptureEngine) recordDelivery(message string) {
 	e.messages = append(e.messages, message)
 	e.deliveryCount++
+	e.actionCount++
+}
+
+func (e *agentCaptureEngine) recordAction(err error) error {
+	if err == nil {
+		e.actionCount++
+	}
+	return err
 }
 
 func requiredAgentCapability[T any](engine common.Engine, name string) (T, error) {
@@ -80,7 +89,7 @@ func (e *agentCaptureEngine) BanNick(ctx context.Context, target common.NickTarg
 	if err != nil {
 		return err
 	}
-	return operations.BanNick(ctx, target)
+	return e.recordAction(operations.BanNick(ctx, target))
 }
 
 func (e *agentCaptureEngine) UnbanHash(ctx context.Context, hash common.BanHash) error {
@@ -88,7 +97,7 @@ func (e *agentCaptureEngine) UnbanHash(ctx context.Context, hash common.BanHash)
 	if err != nil {
 		return err
 	}
-	return operations.UnbanHash(ctx, hash)
+	return e.recordAction(operations.UnbanHash(ctx, hash))
 }
 
 func (e *agentCaptureEngine) UnbanAllContext(ctx context.Context) error {
@@ -96,7 +105,7 @@ func (e *agentCaptureEngine) UnbanAllContext(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return operations.UnbanAllContext(ctx)
+	return e.recordAction(operations.UnbanAllContext(ctx))
 }
 
 func (e *agentCaptureEngine) LockRoom(ctx context.Context) error {
@@ -104,7 +113,7 @@ func (e *agentCaptureEngine) LockRoom(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return operations.LockRoom(ctx)
+	return e.recordAction(operations.LockRoom(ctx))
 }
 
 func (e *agentCaptureEngine) UnlockRoom(ctx context.Context) error {
@@ -112,7 +121,7 @@ func (e *agentCaptureEngine) UnlockRoom(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return operations.UnlockRoom(ctx)
+	return e.recordAction(operations.UnlockRoom(ctx))
 }
 
 func (e *agentCaptureEngine) EnableCaptcha(ctx context.Context) error {
@@ -120,7 +129,7 @@ func (e *agentCaptureEngine) EnableCaptcha(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return operations.EnableCaptcha(ctx)
+	return e.recordAction(operations.EnableCaptcha(ctx))
 }
 
 func (e *agentCaptureEngine) DisableCaptcha(ctx context.Context) error {
@@ -128,7 +137,7 @@ func (e *agentCaptureEngine) DisableCaptcha(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return operations.DisableCaptcha(ctx)
+	return e.recordAction(operations.DisableCaptcha(ctx))
 }
 
 func (e *agentCaptureEngine) AuthorizeTrip(ctx context.Context, trip common.Trip) error {
@@ -136,7 +145,7 @@ func (e *agentCaptureEngine) AuthorizeTrip(ctx context.Context, trip common.Trip
 	if err != nil {
 		return err
 	}
-	return operations.AuthorizeTrip(ctx, trip)
+	return e.recordAction(operations.AuthorizeTrip(ctx, trip))
 }
 
 func (e *agentCaptureEngine) DeauthorizeTrip(ctx context.Context, trip common.Trip) error {
@@ -144,7 +153,7 @@ func (e *agentCaptureEngine) DeauthorizeTrip(ctx context.Context, trip common.Tr
 	if err != nil {
 		return err
 	}
-	return operations.DeauthorizeTrip(ctx, trip)
+	return e.recordAction(operations.DeauthorizeTrip(ctx, trip))
 }
 
 func (e *agentCaptureEngine) MuteNick(ctx context.Context, target common.NickTarget) error {
@@ -152,7 +161,7 @@ func (e *agentCaptureEngine) MuteNick(ctx context.Context, target common.NickTar
 	if err != nil {
 		return err
 	}
-	return operations.MuteNick(ctx, target)
+	return e.recordAction(operations.MuteNick(ctx, target))
 }
 
 func (e *agentCaptureEngine) UnmuteHash(ctx context.Context, hash common.BanHash) error {
@@ -160,7 +169,7 @@ func (e *agentCaptureEngine) UnmuteHash(ctx context.Context, hash common.BanHash
 	if err != nil {
 		return err
 	}
-	return operations.UnmuteHash(ctx, hash)
+	return e.recordAction(operations.UnmuteHash(ctx, hash))
 }
 
 func (e *agentCaptureEngine) ForceFlair(ctx context.Context, target common.NickTarget, flair common.Flair) error {
@@ -168,7 +177,7 @@ func (e *agentCaptureEngine) ForceFlair(ctx context.Context, target common.NickT
 	if err != nil {
 		return err
 	}
-	return operations.ForceFlair(ctx, target, flair)
+	return e.recordAction(operations.ForceFlair(ctx, target, flair))
 }
 
 func (e *agentCaptureEngine) ForceColor(ctx context.Context, target common.NickTarget, color common.Color) error {
@@ -176,7 +185,7 @@ func (e *agentCaptureEngine) ForceColor(ctx context.Context, target common.NickT
 	if err != nil {
 		return err
 	}
-	return operations.ForceColor(ctx, target, color)
+	return e.recordAction(operations.ForceColor(ctx, target, color))
 }
 
 func (e *agentCaptureEngine) KickNick(ctx context.Context, target common.NickTarget) error {
@@ -184,7 +193,7 @@ func (e *agentCaptureEngine) KickNick(ctx context.Context, target common.NickTar
 	if err != nil {
 		return err
 	}
-	return operations.KickNick(ctx, target)
+	return e.recordAction(operations.KickNick(ctx, target))
 }
 
 func (e *agentCaptureEngine) KickNickTo(ctx context.Context, target common.NickTarget, channel common.Channel) error {
@@ -192,7 +201,7 @@ func (e *agentCaptureEngine) KickNickTo(ctx context.Context, target common.NickT
 	if err != nil {
 		return err
 	}
-	return operations.KickNickTo(ctx, target, channel)
+	return e.recordAction(operations.KickNickTo(ctx, target, channel))
 }
 
 func (e *agentCaptureEngine) OverflowNick(ctx context.Context, target common.NickTarget) error {
@@ -200,7 +209,7 @@ func (e *agentCaptureEngine) OverflowNick(ctx context.Context, target common.Nic
 	if err != nil {
 		return err
 	}
-	return operations.OverflowNick(ctx, target)
+	return e.recordAction(operations.OverflowNick(ctx, target))
 }
 
 func (e *agentCaptureEngine) SubmitRoomSnapshot(request snapshot.RoomSnapshotRequest) error {

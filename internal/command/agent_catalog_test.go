@@ -30,11 +30,11 @@ func TestAgentRunCommandAliasesExpandFromCapabilities(t *testing.T) {
 		t.Fatalf("public aliases = %#v", got)
 	}
 	moderator, _ := api.NewContextWithCapabilities("room", "mod", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
-	if got := AgentRunCommandAliases(moderator); !slices.Contains(got, "kick") || slices.Contains(got, "ban") {
+	if got := AgentRunCommandAliases(moderator); !slices.Contains(got, "mute") || slices.Contains(got, "kick") || slices.Contains(got, "ban") {
 		t.Fatalf("moderator aliases = %#v", got)
 	}
 	creator, _ := api.NewContextWithCapabilities("room", "creator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands, api.PermanentBan, api.AdminCommands})
-	if got := AgentRunCommandAliases(creator); !slices.Contains(got, "kick") || !slices.Contains(got, "ban") || slices.Contains(got, "prefix") {
+	if got := AgentRunCommandAliases(creator); slices.Contains(got, "kick") || !slices.Contains(got, "ban") || slices.Contains(got, "prefix") {
 		t.Fatalf("creator aliases = %#v", got)
 	}
 }

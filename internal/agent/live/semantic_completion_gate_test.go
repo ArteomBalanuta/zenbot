@@ -14,8 +14,9 @@ func TestSemanticCompletionGateRequiresStructuredAssessment(t *testing.T) {
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{
 			llm.NewLlmToolCall("assessment-1", completionAssessmentTool, map[string]any{
-				"decision": "CONTINUE",
-				"feedback": "Call saturn_list for both rooms and compare the returned users.",
+				"decision":  "CONTINUE",
+				"feedback":  "Call saturn_list for both rooms and compare the returned users.",
+				"replyMode": "SEND",
 			}),
 		}, "tool_calls"),
 	}}
@@ -38,7 +39,7 @@ func TestSemanticCompletionGateRequiresStructuredAssessment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assessment.Decision != turn.CompletionContinue || !strings.Contains(assessment.Feedback, "saturn_list") {
+	if assessment.Decision != turn.CompletionContinue || assessment.ReplyMode != turn.CompletionSend || !strings.Contains(assessment.Feedback, "saturn_list") {
 		t.Fatalf("assessment=%#v", assessment)
 	}
 	if len(client.requests) != 1 || client.requests[0].ToolChoice() != llm.ToolChoiceRequired || len(client.requests[0].Tools()) != 1 {
@@ -72,5 +73,25 @@ func TestSemanticCompletionGateRejectsUnstructuredProviderResponse(t *testing.T)
 	_, err = gate.Evaluate(context.Background(), turn.CompletionCandidate{Request: "do it", Answer: "I will do it"})
 	if err == nil || !strings.Contains(err.Error(), "structured completion assessment") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestCompletionGatePayloadBindsSuccessfulActionToExactArguments(t *testing.T) {
+	payload := completionGatePayload(turn.CompletionCandidate{
+		Calls: []turn.ToolCallEvidence{{
+			CallID: "kick-call", Tool: "saturn_kick", Arguments: `{"nick":"tajweed"}`,
+			Effect: contract.Action, ResultMode: contract.ModelData,
+		}},
+		Results: []contract.Result{{
+			CallID: "kick-call", ToolName: "saturn_kick", Content: `{"messages":[],"deliveredCount":0,"actionCount":1}`, EffectsCommitted: true,
+		}},
+	})
+
+	if len(payload.Observations) != 1 {
+		t.Fatalf("observations=%#v", payload.Observations)
+	}
+	observation := payload.Observations[0]
+	if observation.Tool != "saturn_kick" || observation.Arguments != `{"nick":"tajweed"}` || observation.Effect != contract.Action || observation.ResultMode != contract.ModelData || !observation.EffectsCommitted || observation.DeliveryCount != 0 || observation.VerifiedRoomDelivery {
+		t.Fatalf("observation=%#v", observation)
 	}
 }

@@ -277,66 +277,6 @@ func (contract commaListArgumentContract) Encode(raw json.RawMessage) (string, e
 	return boundedTail(strings.Join(values, ",") + " " + trailing)
 }
 
-type kickArgumentContract struct{ schema json.RawMessage }
-
-func kickArguments() AgentArgumentContract {
-	singleTargets := func(mode string) json.RawMessage {
-		return objectSchema(map[string]json.RawMessage{
-			"mode": constStringSchema("How the target is matched.", mode),
-			"targets": json.RawMessage(mustJSON(map[string]any{
-				"type": "array", "description": "Exactly one nickname or containment fragment.",
-				"items": map[string]any{"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 1,
-			})),
-		}, []string{"mode", "targets"})
-	}
-	multiple := objectSchema(map[string]json.RawMessage{
-		"mode": constStringSchema("Match multiple exact nicknames.", "multiple"),
-		"targets": json.RawMessage(mustJSON(map[string]any{
-			"type": "array", "description": "One or more exact nicknames.",
-			"items": map[string]any{"type": "string", "minLength": 1}, "minItems": 1,
-		})),
-	}, []string{"mode", "targets"})
-	return kickArgumentContract{schema: oneOfSchema(singleTargets("exact"), multiple, singleTargets("contains"))}
-}
-
-func (contract kickArgumentContract) Schema() json.RawMessage { return cloneJSON(contract.schema) }
-
-func (contract kickArgumentContract) Encode(raw json.RawMessage) (string, error) {
-	var arguments struct {
-		Mode    string   `json:"mode"`
-		Targets []string `json:"targets"`
-	}
-	if err := decodeStrict(raw, &arguments); err != nil {
-		return "", err
-	}
-	if len(arguments.Targets) == 0 {
-		return "", fmt.Errorf("targets must not be empty")
-	}
-	for index, target := range arguments.Targets {
-		target = strings.TrimSpace(target)
-		if err := validateToken(target); err != nil {
-			return "", fmt.Errorf("invalid targets[%d]: %w", index, err)
-		}
-		arguments.Targets[index] = target
-	}
-	switch arguments.Mode {
-	case "exact":
-		if len(arguments.Targets) != 1 {
-			return "", fmt.Errorf("exact mode requires exactly one target")
-		}
-		return boundedTail(arguments.Targets[0])
-	case "multiple":
-		return boundedTail("-m " + strings.Join(arguments.Targets, " "))
-	case "contains":
-		if len(arguments.Targets) != 1 {
-			return "", fmt.Errorf("contains mode requires exactly one fragment")
-		}
-		return boundedTail("-c " + arguments.Targets[0])
-	default:
-		return "", fmt.Errorf("unsupported kick mode %q", arguments.Mode)
-	}
-}
-
 type shadowBanArgumentContract struct{ schema json.RawMessage }
 
 func shadowBanArguments() AgentArgumentContract {

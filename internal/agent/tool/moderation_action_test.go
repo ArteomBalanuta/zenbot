@@ -26,6 +26,19 @@ func TestModerationActionDescriptorIsClosedAndRejectsTargetFields(t *testing.T) 
 	}
 }
 
+func TestModerationActionReturnsVerifiedCommittedOutcome(t *testing.T) {
+	action := ModerationAction{Gateway: commandgateway.NewModerationGateway(&moderationToolOperator{}), Target: core.ModerationTarget{Name: "alice"}}
+	ctx, _ := api.NewContextWithCapabilities("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands})
+
+	result, err := action.Execute(context.Background(), ctx, []byte(`{"action":"kick"}`))
+	if err != nil || result.IsError {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if !result.EffectsCommitted {
+		t.Fatal("successful moderation action lacks verified committed-effect metadata")
+	}
+}
+
 type moderationToolOperator struct{}
 
 func (moderationToolOperator) EnableCaptcha(context.Context) error                       { return nil }

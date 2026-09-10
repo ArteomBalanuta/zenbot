@@ -11,6 +11,10 @@ import (
 )
 
 func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
+	kick, ok := AgentEntry("kick")
+	if !ok {
+		t.Fatal("kick agent entry is unavailable")
+	}
 	tests := []struct {
 		name     string
 		contract AgentArgumentContract
@@ -26,10 +30,8 @@ func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
 		{name: "boolean enabled", contract: booleanStateArguments("enabled", "Enable captcha.", "on", "off"), input: `{"enabled":true}`, want: "on"},
 		{name: "boolean disabled", contract: booleanStateArguments("enabled", "Enable captcha.", "on", "off"), input: `{"enabled":false}`, want: "off"},
 		{name: "comma list", contract: commaListArguments("trips", "Trips.", "role", "Role.", []string{"ADMIN", "MODERATOR"}), input: `{"trips":["one","two"],"role":"MODERATOR"}`, want: "one,two MODERATOR"},
-		{name: "kick exact", contract: kickArguments(), input: `{"mode":"exact","targets":["@jill"]}`, want: "@jill"},
-		{name: "kick multiple", contract: kickArguments(), input: `{"mode":"multiple","targets":["jill","nex"]}`, want: "-m jill nex"},
-		{name: "kick contains", contract: kickArguments(), input: `{"mode":"contains","targets":["raid"]}`, want: "-c raid"},
-		{name: "kick exact rejects multiple", contract: kickArguments(), input: `{"mode":"exact","targets":["jill","nex"]}`, wantErr: true},
+		{name: "kick nick", contract: kick.Agent.Arguments, input: `{"nick":"@jill"}`, want: "@jill"},
+		{name: "kick rejects legacy mode", contract: kick.Agent.Arguments, input: `{"mode":"exact","targets":["@jill"]}`, wantErr: true},
 		{name: "shadow ban exact", contract: shadowBanArguments(), input: `{"mode":"exact","target":"jill"}`, want: "jill"},
 		{name: "shadow ban contains", contract: shadowBanArguments(), input: `{"mode":"contains","target":"raid"}`, want: "-c raid"},
 		{name: "automove enable", contract: automoveArguments(), input: `{"operation":"enable"}`, want: "on"},
@@ -58,7 +60,30 @@ func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
 	}
 }
 
+func TestKickAgentArgumentsAcceptOneNickname(t *testing.T) {
+	kick, ok := AgentEntry("kick")
+	if !ok {
+		t.Fatal("kick agent entry is unavailable")
+	}
+	contract := kick.Agent.Arguments
+	raw := json.RawMessage(`{"nick":"tajweed"}`)
+	if err := agentcontract.ValidateArguments(contract.Schema(), raw); err != nil {
+		t.Fatalf("kick schema rejected one nickname: %v", err)
+	}
+	got, err := contract.Encode(raw)
+	if err != nil {
+		t.Fatalf("kick Encode: %v", err)
+	}
+	if got != "tajweed" {
+		t.Fatalf("kick Encode = %q, want %q", got, "tajweed")
+	}
+}
+
 func TestConditionalAgentSchemaEncoderParity(t *testing.T) {
+	kick, ok := AgentEntry("kick")
+	if !ok {
+		t.Fatal("kick agent entry is unavailable")
+	}
 	tests := []struct {
 		name     string
 		contract AgentArgumentContract
@@ -70,10 +95,9 @@ func TestConditionalAgentSchemaEncoderParity(t *testing.T) {
 		{name: "automove enable rejects rooms", contract: automoveArguments(), input: `{"operation":"enable","source":"a","destination":"b"}`},
 		{name: "automove configure", contract: automoveArguments(), input: `{"operation":"configure","source":"a","destination":"b"}`, want: "a b", valid: true},
 		{name: "automove configure requires both rooms", contract: automoveArguments(), input: `{"operation":"configure","source":"a"}`},
-		{name: "kick exact", contract: kickArguments(), input: `{"mode":"exact","targets":["alice"]}`, want: "alice", valid: true},
-		{name: "kick exact rejects two", contract: kickArguments(), input: `{"mode":"exact","targets":["alice","bob"]}`},
-		{name: "kick contains rejects two", contract: kickArguments(), input: `{"mode":"contains","targets":["a","b"]}`},
-		{name: "kick multiple accepts two", contract: kickArguments(), input: `{"mode":"multiple","targets":["alice","bob"]}`, want: "-m alice bob", valid: true},
+		{name: "kick nick", contract: kick.Agent.Arguments, input: `{"nick":"alice"}`, want: "alice", valid: true},
+		{name: "kick requires nick", contract: kick.Agent.Arguments, input: `{}`},
+		{name: "kick rejects legacy mode", contract: kick.Agent.Arguments, input: `{"mode":"multiple","targets":["alice","bob"]}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -34,7 +34,13 @@ type TurnEngine struct {
 	Recovery      turn.RecoveryPolicy
 	Gate          turn.CompletionGate
 	Prompt        string
-	Task          *turn.TaskState
+	Control       *CompletionControl
+}
+
+// CompletionControl carries the semantic finalizer's delivery disposition out
+// of the engine without deriving intent from keywords or tool-batch size.
+type CompletionControl struct {
+	SuppressReply bool
 }
 
 func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
@@ -56,15 +62,6 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 	}
 	response := initial
 	all := make([]toolBatchResult, 0)
-	task := e.Task
-	if task == nil {
-		fallback, err := turn.NewTaskContract("turn", e.Prompt, nil, []turn.Obligation{{ID: "obligation-1", Kind: turn.ObligationAnswer, Required: true}})
-		if err != nil {
-			return llm.LlmResponse{}, nil, nil, err
-		}
-		task = turn.NewTaskState(fallback)
-		e.Task = task
-	}
 	cycle := 0
 	for {
 		cycle++
@@ -110,11 +107,6 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 			}
 		}
 		observability.Info(ctx, "agent.tool.batch_completed", "cycle", cycle, "tool_call_count", len(batch), "failure_count", failures)
-		for _, item := range batch {
-			if err := task.Observe(e.primaryIntent(item.Call.Name), item.Call, item.Result); err != nil {
-				return llm.LlmResponse{}, nil, nil, fmt.Errorf("reduce task observation: %w", err)
-			}
-		}
 		all = append(all, batch...)
 		messages, err = appendRegistryProtocol(messages, response, batch, e.Observations, e.Registry, e.Agent)
 		if err != nil {
@@ -165,44 +157,20 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 		return llm.LlmResponse{}, nil, false, err
 	}
 	results := make([]contract.Result, 0, len(all))
+	calls := make([]turn.ToolCallEvidence, 0, len(all))
 	for _, item := range all {
 		results = append(results, item.Result)
-	}
-	if e.Task != nil {
-		e.Task.ObserveAnswer(response.Content())
-		pending := e.Task.Pending()
-		if len(pending) > 0 && continuationAllowed {
-			if !state.AdvanceStep() {
-				return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic task obligations remain unsatisfied at step limit")
-			}
-			feedback, err := json.Marshal(map[string]any{
-				"decision":           string(turn.CompletionContinue),
-				"reason":             "required task obligations remain unsatisfied",
-				"pendingObligations": pending,
-			})
-			if err != nil {
-				return llm.LlmResponse{}, nil, false, fmt.Errorf("encode task obligation feedback: %w", err)
-			}
-			messages = append(messages,
-				llm.NewLlmMessage("assistant", response.Content(), nil, ""),
-				llm.NewLlmMessage("user", "TASK_OBLIGATION_FEEDBACK="+string(feedback), nil, ""),
-			)
-			if err := phase.Transition(turn.PhaseModel); err != nil {
-				return llm.LlmResponse{}, nil, false, err
-			}
-			request, err := e.projectRequest(messages, toolsForPending(providerTools, pending, e.Registry, e.Agent))
-			if err != nil {
-				return llm.LlmResponse{}, nil, false, err
-			}
-			next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.task_obligation_retry.%d", cycle)), request)
-			if err != nil {
-				return llm.LlmResponse{}, nil, false, err
-			}
-			return next, messages, false, ctx.Err()
+		call := turn.ToolCallEvidence{
+			CallID: item.Call.ID, Tool: item.Call.Name,
+			Arguments: string(contract.CanonicalJSON(item.Call.Arguments)),
 		}
-		if len(pending) > 0 && !continuationAllowed && !e.Task.HasUnknownActionOutcome() {
-			return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic task obligations remain unsatisfied during terminal synthesis")
+		if registered, found := e.Registry.Lookup(item.Call.Name); found {
+			if descriptor, descriptorErr := registered.Descriptor(e.Agent); descriptorErr == nil {
+				call.Effect = descriptor.Effect()
+				call.ResultMode = descriptor.ResultMode()
+			}
 		}
+		calls = append(calls, call)
 	}
 	observability.Info(ctx, "agent.completion_gate.started", "cycle", cycle, "candidate_chars", len([]rune(response.Content())), "observation_count", len(results))
 	assessment, err := e.Gate.Evaluate(ctx, turn.CompletionCandidate{
@@ -211,13 +179,28 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 		CanContinue:  continuationAllowed && state.RemainingSteps() > 0,
 		Conversation: append([]llm.LlmMessage(nil), messages...),
 		Tools:        completionToolCapabilities(providerTools),
+		Calls:        calls,
 		Results:      results,
 	})
 	if err != nil {
 		return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion gate: %w", err)
 	}
+	if assessment.ReplyMode != turn.CompletionSend && assessment.ReplyMode != turn.CompletionSuppress {
+		return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion gate returned invalid reply mode %q", assessment.ReplyMode)
+	}
+	if assessment.Decision == turn.CompletionContinue && assessment.ReplyMode != turn.CompletionSend {
+		return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion gate suppressed an unfinished response")
+	}
 	observability.Info(ctx, "agent.completion_gate.completed", "cycle", cycle, "decision", string(assessment.Decision), "feedback_chars", len([]rune(assessment.Feedback)))
 	if assessment.Decision == turn.CompletionFinal {
+		if assessment.ReplyMode == turn.CompletionSuppress {
+			if !canSuppressCompletedReply(e.Registry, e.Agent, all) {
+				return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion gate suppressed a response without verified room delivery")
+			}
+			if e.Control != nil {
+				e.Control.SuppressReply = true
+			}
+		}
 		final, finalMessages, err := e.finalize(ctx, phase, messages, response)
 		return final, finalMessages, true, err
 	}
@@ -251,6 +234,36 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 		return llm.LlmResponse{}, nil, false, err
 	}
 	return next, messages, false, nil
+}
+
+func canSuppressCompletedReply(registry *tool.Registry, agent api.Context, batch []toolBatchResult) bool {
+	if registry == nil || len(batch) == 0 {
+		return false
+	}
+	hasVerifiedDelivery := false
+	for _, item := range batch {
+		if item.Result.IsError {
+			return false
+		}
+		registered, ok := registry.Lookup(item.Call.Name)
+		if !ok {
+			return false
+		}
+		descriptor, err := registered.Descriptor(agent)
+		if err != nil {
+			return false
+		}
+		if descriptor.Effect() == contract.Action && descriptor.ResultMode() != contract.RoomDelivery {
+			return false
+		}
+		if descriptor.ResultMode() == contract.RoomDelivery {
+			if !item.Result.VerifiedRoomDelivery() {
+				return false
+			}
+			hasVerifiedDelivery = true
+		}
+	}
+	return hasVerifiedDelivery
 }
 
 // ResumeAction executes one paused action after validating the opaque resume
@@ -402,58 +415,11 @@ func (e TurnEngine) finalize(ctx context.Context, phase *turn.PhaseMachine, mess
 }
 
 func (e TurnEngine) projectRequest(messages []llm.LlmMessage, tools []any) (llm.LlmRequest, error) {
-	projection, err := e.Projector.ProjectTurn(messages, tools, e.Task, e.Observations, e.NewestRequest)
+	projection, err := e.Projector.ProjectTurn(messages, tools, e.Observations, e.NewestRequest)
 	if err != nil {
 		return llm.LlmRequest{}, fmt.Errorf("project agent turn: %w", err)
 	}
 	return llm.NewLlmRequest(projection.Messages, tools, false, nil, projection), nil
-}
-
-func toolsForPending(providerTools []any, pending []turn.Obligation, registry *tool.Registry, agent api.Context) []any {
-	wanted := make(map[string]struct{}, len(pending))
-	for _, obligation := range pending {
-		if obligation.Kind == turn.ObligationTool && obligation.PrimaryIntent != "" {
-			wanted[obligation.PrimaryIntent] = struct{}{}
-		}
-	}
-	if len(wanted) == 0 {
-		return nil
-	}
-	filtered := make([]any, 0, len(wanted))
-	for _, raw := range providerTools {
-		definition, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		function, ok := definition["function"].(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := function["name"].(string)
-		registered, found := registry.Lookup(name)
-		if !found {
-			continue
-		}
-		descriptor, err := registered.Descriptor(agent)
-		if err != nil {
-			continue
-		}
-		if _, found := wanted[descriptor.PrimaryIntent()]; found {
-			filtered = append(filtered, raw)
-		}
-	}
-	return filtered
-}
-
-func (e TurnEngine) primaryIntent(toolName string) string {
-	if e.Registry != nil {
-		if registered, found := e.Registry.Lookup(toolName); found {
-			if descriptor, err := registered.Descriptor(e.Agent); err == nil {
-				return descriptor.PrimaryIntent()
-			}
-		}
-	}
-	return "unknown_tool"
 }
 
 func availableProviderTools(providerTools []any, ledger *execution.Ledger) []any {

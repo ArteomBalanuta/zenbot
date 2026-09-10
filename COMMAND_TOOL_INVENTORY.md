@@ -17,16 +17,20 @@ from those entries; there is no second command-name map.
 
 Every `saturn_<canonical>` tool has a command-specific JSON object schema. The
 model supplies typed fields such as `{"location":"Chisinau"}` or
-`{"mode":"exact","targets":["@raider"]}`; it never supplies a raw command
+`{"nick":"@raider"}`; it never supplies a raw command
 line or generic `arguments` field. An immutable `AgentArgumentContract`
 validates and encodes those fields into the legacy command tail only inside the
 trusted adapter. Schema or cross-field failures return `INVALID_ARGUMENTS`
 before the command gateway is invoked. Encoded tails are capped at 4,000 bytes.
 
 Every command tool remains an action, is non-idempotent, and executes
-sequentially. Its result reports captured room messages and the number of
-messages delivered. The normal command handler remains authoritative for role
-checks, persistence, side effects, and user-visible formatting.
+sequentially. Its result reports captured room messages, verified deliveries,
+and verified outward actions. Most commands deliver their result directly to
+the room. `saturn_kick` is intentionally silent and returns model data backed by
+an action receipt, allowing one final confirmation or compound summary. The
+normal command handler remains authoritative for role checks, persistence, side
+effects, and user-visible formatting. The manual chat command retains its
+existing `-m` and `-c` modes; they are deliberately absent from the agent tool.
 
 Access values below are capability gates applied before normal command
 authorization:
@@ -41,12 +45,11 @@ authorization:
 | Shape | Commands | Provider fields |
 |---|---|---|
 | Empty object | `memory`, `replicastatus`, `restart`, `shutdown`, `dbzhelp`, `dbzregister`, `dbzstats`, `shadowbanlist`, `unbanall`, `ape`, `coin`, `help`, `crashcourse`, `ping`, `users`, `sub`, `unsub`, `version` | `{}` only |
-| One required string | `prefix(prefix)`, `replica(room)`, `replicaoff(room)`, `sql(query)`, `dfight(enemy)`, `dspawn(enemy)`, `active(identity)`, `authorize(trip)`, `ban(nick)`, `deauthorize(trip)`, `mute(nick)`, `nuke(room)`, `overflow(nick)`, `remove(identity)`, `unban(hash)`, `unmute(hash)`, `unshadowban(identity)`, `info(nick)`, `lastonline(nick)`, `nicks(trip)`, `list(room)`, `note(text)`, `say(message)`, `time(location)`, `weather(location)` | Named nonblank string; token fields reject embedded whitespace |
+| One required string | `prefix(prefix)`, `replica(room)`, `replicaoff(room)`, `sql(query)`, `dfight(enemy)`, `dspawn(enemy)`, `active(identity)`, `authorize(trip)`, `ban(nick)`, `deauthorize(trip)`, `kick(nick)`, `mute(nick)`, `nuke(room)`, `overflow(nick)`, `remove(identity)`, `unban(hash)`, `unmute(hash)`, `unshadowban(identity)`, `info(nick)`, `lastonline(nick)`, `nicks(trip)`, `list(room)`, `note(text)`, `say(message)`, `time(location)`, `weather(location)` | Named nonblank string; token fields reject embedded whitespace |
 | One optional string | `afk(reason)` | `reason` may be omitted |
 | Ordered fields | `color(nick,color)`, `flair(nick,flair)`, `register(nick,trip)`, `mail(recipient,message)`, `msgchannel(room,message)`, `messages(trip,count)`, `resurrect(nick,source,destination)` | Strict named object; `messages.count` is `1..30` |
 | Boolean state | `captcha(enabled)`, `lock(locked)` | Boolean encoded internally as `on` or `off` |
 | Access grant | `access(trips,role)` | Nonempty trip array and `ADMIN|MODERATOR|TRUSTED|USER|REGULAR|PEST` |
-| Kick modes | `kick(mode,targets)` | `mode` is `exact|multiple|contains`; cardinality is checked per mode |
 | Shadow-ban modes | `shadowban(mode,target)` | `mode` is `exact|contains` |
 | Auto-move operations | `automove(operation,source?,destination?)` | `enable|disable|configure`; configure requires both rooms |
 | Notes operations | `notes(operation)` | `list|purge` |

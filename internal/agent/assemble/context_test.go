@@ -7,7 +7,6 @@ import (
 
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/tool/contract"
-	"zenbot/internal/agent/turn"
 )
 
 func TestContextBudgeterKeepsCompleteUnitsAndValidJSON(t *testing.T) {
@@ -95,13 +94,8 @@ func TestContextBudgeterReservesProviderToolManifestCapacity(t *testing.T) {
 	}
 }
 
-func TestProjectTurnPreservesTaskAndAtomicBoundedObservation(t *testing.T) {
+func TestProjectTurnPreservesNewestRequestAndAtomicBoundedObservation(t *testing.T) {
 	objective := "inspect the current records"
-	task, err := turn.NewTaskContract("request", objective, nil, []turn.Obligation{{ID: "answer", Kind: turn.ObligationAnswer, Required: true}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := turn.NewTaskState(task)
 	result := contract.SuccessResult("call-1", "lookup", map[string]any{"rows": []string{strings.Repeat("x", 500), strings.Repeat("y", 500)}})
 	store := NewObservationStore()
 	store.Store(result, 300)
@@ -114,23 +108,23 @@ func TestProjectTurnPreservesTaskAndAtomicBoundedObservation(t *testing.T) {
 		newest,
 		llm.NewLlmMessage("assistant", nil, []llm.LlmToolCall{call}, ""),
 		llm.NewLlmMessage("tool", string(result.Envelope()), nil, "call-1"),
-	}, []any{map[string]any{"name": "lookup"}}, state, store, ContextInput{
+	}, []any{map[string]any{"name": "lookup"}}, store, ContextInput{
 		RequiredPrefix: []Message{policy}, RequiredSuffix: []Message{newest},
 		MaxTokens: 350, ReserveTokens: 20,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !projection.Pruned || len(projection.Messages) != 5 {
+	if !projection.Pruned || len(projection.Messages) != 4 {
 		t.Fatalf("projection did not drop only old context: %#v", projection)
 	}
-	if !strings.Contains(projection.Messages[1].Content(), task.RequestHash) || projection.Messages[2].Content() != objective {
-		t.Fatalf("required task/request missing: %#v", projection.Messages)
+	if projection.Messages[1].Content() != objective {
+		t.Fatalf("required newest request missing: %#v", projection.Messages)
 	}
-	if len(projection.Messages[3].ToolCalls()) != 1 || projection.Messages[4].ToolCallID() != "call-1" || !json.Valid([]byte(projection.Messages[4].Content())) {
+	if len(projection.Messages[2].ToolCalls()) != 1 || projection.Messages[3].ToolCallID() != "call-1" || !json.Valid([]byte(projection.Messages[3].Content())) {
 		t.Fatalf("tool protocol was split or observation invalid: %#v", projection.Messages)
 	}
-	if len(projection.Messages[4].Content()) > 300 || projection.Messages[4].Content() == string(result.Envelope()) {
+	if len(projection.Messages[3].Content()) > 300 || projection.Messages[3].Content() == string(result.Envelope()) {
 		t.Fatal("full observation leaked into projected transcript")
 	}
 }

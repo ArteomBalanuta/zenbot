@@ -45,6 +45,10 @@ type typedCommandGateway struct {
 	arguments string
 }
 
+type routeCommandGateway struct {
+	commands []string
+}
+
 type tinyBudgetCatalog struct{}
 
 func (tinyBudgetCatalog) Text(string) (string, error) { return "policy", nil }
@@ -81,6 +85,11 @@ func (gateway *typedCommandGateway) Execute(_ context.Context, _ api.Context, co
 	gateway.command = command
 	gateway.arguments = arguments
 	return verifiedGatewayExecution("delivered"), nil
+}
+
+func (gateway *routeCommandGateway) Execute(_ context.Context, _ api.Context, command, arguments string) (commandgateway.Execution, error) {
+	gateway.commands = append(gateway.commands, strings.TrimSpace(command+" "+arguments))
+	return verifiedGatewayExecution(command + " result"), nil
 }
 
 func (t roomDeliveryTool) Name() string { return t.name }
@@ -153,6 +162,156 @@ func TestRegistryToolLoopRecordsReadEvidenceAndAttempt(t *testing.T) {
 	}
 }
 
+func TestRegistryToolLoopKeepsNewestRequestWithoutPlannerTaskState(t *testing.T) {
+	const objective = "answer the newest request directly"
+	read := &correctingReadTool{}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse("direct answer", nil, "stop"),
+	}}
+	loop, err := NewRegistryToolLoop(
+		testLiveAssembler(t), client, acceptingCompletionGate{},
+		[]agenttool.Tool{read}, []string{read.Name()},
+		turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := runtime.NewInvocation("no-planner-state", runtime.NewContext("room", "caller", "", "", false, nil), objective, runtime.DIRECT, "", false)
+	completion, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Response.Content() != "direct answer" || len(client.requests) != 1 {
+		t.Fatalf("completion=%#v requests=%d", completion, len(client.requests))
+	}
+	if !messagesContain(client.requests[0].Messages(), objective) {
+		t.Fatalf("execution request lost newest request: %#v", client.requests[0].Messages())
+	}
+	if messagesContain(client.requests[0].Messages(), "TASK_STATE_JSON=") {
+		t.Fatalf("execution request contains planner-derived task state: %#v", client.requests[0].Messages())
+	}
+}
+
+func TestRegistryToolLoopLetsExecutionModelRouteCurrentAndRemoteRooms(t *testing.T) {
+	objective := "count users in lounge, count users in programming, multiply the counts, ping hack.chat, and summarize once"
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("lounge-call", "saturn_list", map[string]any{"room": "lounge"})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("programming-call", "room_users", map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("ping-call", "saturn_ping", map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse("Lounge 1 × programming 1 = 1; hack.chat ping completed.", nil, "stop"),
+	}}
+	gateway := &routeCommandGateway{}
+	directory := &loopRoomDirectory{}
+	unrelated := &correctingReadTool{}
+	listDefinition, ok := commandcatalog.AgentEntry("list")
+	if !ok {
+		t.Fatal("saturn list definition is unavailable")
+	}
+	pingDefinition, ok := commandcatalog.AgentEntry("ping")
+	if !ok {
+		t.Fatal("saturn ping definition is unavailable")
+	}
+	tools := []agenttool.Tool{
+		agenttool.SaturnCommand{Definition: listDefinition, Gateway: gateway},
+		agenttool.RoomUsers{Directory: directory},
+		agenttool.SaturnCommand{Definition: pingDefinition, Gateway: gateway},
+		unrelated,
+	}
+	allowed := []string{"saturn_list", "room_users", "saturn_ping", unrelated.Name()}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, tools, allowed,
+		turn.ExecutionLimits{MaxSteps: 5, MaxToolCalls: 4, MaxCallsPerTool: 2, MaxToolFailures: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := runtime.NewInvocation("contextual-room-route", runtime.NewContext("programming", "caller", "", "", false, nil), objective, runtime.DIRECT, "", false)
+
+	completion, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Response.Content() != "Lounge 1 × programming 1 = 1; hack.chat ping completed." {
+		t.Fatalf("response=%q", completion.Response.Content())
+	}
+	if directory.calls != 1 || len(gateway.commands) != 2 || gateway.commands[0] != "list lounge" || gateway.commands[1] != "ping" {
+		t.Fatalf("directory calls=%d commands=%v", directory.calls, gateway.commands)
+	}
+	if len(client.requests) != 4 {
+		t.Fatalf("provider requests=%d, want four execution requests", len(client.requests))
+	}
+	if !providerRequestHasTool(client.requests[0], unrelated.Name()) {
+		t.Fatalf("initial execution request omitted caller-visible tool %q", unrelated.Name())
+	}
+	if messagesContain(client.requests[3].Messages(), "TASK_OBLIGATION") {
+		t.Fatalf("planner-derived feedback leaked into direct execution: %#v", client.requests[3].Messages())
+	}
+}
+
+func TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner(t *testing.T) {
+	objective := "count users in lounge, count users in programming multiply these counts after execute kick tajweed after that summarize everything in one message for me"
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{
+			llm.NewLlmToolCall("lounge-call", "saturn_list", map[string]any{"room": "lounge"}),
+			llm.NewLlmToolCall("programming-call", "room_users", map[string]any{}),
+		}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{
+			llm.NewLlmToolCall("kick-call", "saturn_kick", map[string]any{"nick": "tajweed"}),
+		}, "tool_calls"),
+		llm.NewLlmResponse("Lounge 1 x programming 1 = 1; tajweed was kicked.", nil, "stop"),
+	}}
+	gateway := &routeCommandGateway{}
+	directory := &loopRoomDirectory{}
+	listDefinition, ok := commandcatalog.AgentEntry("list")
+	if !ok {
+		t.Fatal("saturn list definition is unavailable")
+	}
+	kickDefinition, ok := commandcatalog.AgentEntry("kick")
+	if !ok {
+		t.Fatal("saturn kick definition is unavailable")
+	}
+	tools := []agenttool.Tool{
+		agenttool.SaturnCommand{Definition: listDefinition, Gateway: gateway},
+		agenttool.RoomUsers{Directory: directory},
+		agenttool.SaturnCommand{Definition: kickDefinition, Gateway: gateway},
+	}
+	allowed := []string{"saturn_list", "room_users", "saturn_kick"}
+	gate := &scriptedCompletionGate{assessments: []turn.CompletionAssessment{{Decision: turn.CompletionFinal, Feedback: "Every requested result and action is grounded."}}}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, gate, tools, allowed,
+		turn.ExecutionLimits{MaxSteps: 5, MaxToolCalls: 4, MaxCallsPerTool: 2, MaxToolFailures: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := runtime.NewInvocation("ordered-kick", runtime.NewContextWithCapabilities(
+		"programming", "merc", "595754", "", false, []string{"merc", "tajweed"}, []runtime.Capability{runtime.ModerationCommands}, "",
+	), objective, runtime.DIRECT, "", true)
+
+	completion, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Response.Content() != "Lounge 1 x programming 1 = 1; tajweed was kicked." {
+		t.Fatalf("response=%q", completion.Response.Content())
+	}
+	if directory.calls != 1 || len(gateway.commands) != 2 || gateway.commands[0] != "list lounge" || gateway.commands[1] != "kick tajweed" {
+		t.Fatalf("directory calls=%d commands=%v", directory.calls, gateway.commands)
+	}
+	if len(client.requests) != 3 {
+		t.Fatalf("provider requests=%d, want three execution requests and no planning request", len(client.requests))
+	}
+	if len(gate.inputs) != 1 || len(gate.inputs[0].Calls) != 3 || gate.inputs[0].Calls[2].Tool != "saturn_kick" || gate.inputs[0].Calls[2].Arguments != `{"nick":"tajweed"}` {
+		t.Fatalf("completion gate call evidence=%#v", gate.inputs)
+	}
+	for _, name := range allowed {
+		if !providerRequestHasTool(client.requests[0], name) {
+			t.Fatalf("initial execution request omitted caller-visible tool %q", name)
+		}
+	}
+	for _, request := range client.requests {
+		if messagesContain(request.Messages(), "TASK_OBLIGATION_MISMATCH") || messagesContain(request.Messages(), "TASK_DEPENDENCY_PENDING") {
+			t.Fatalf("planner-derived rejection leaked into execution: %#v", request.Messages())
+		}
+	}
+}
+
 func requestContainsToolCallID(request llm.LlmRequest, id string) bool {
 	for _, message := range request.Messages() {
 		for _, call := range message.ToolCalls() {
@@ -189,14 +348,16 @@ func TestRegistryToolLoopUsesSemanticGateBeforeAcceptingFinalAnswer(t *testing.T
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse("I will fetch the current value now.", nil, "stop"),
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("gate-1", completionAssessmentTool, map[string]any{
-			"decision": "CONTINUE",
-			"feedback": "Call correcting_read and use its observation.",
+			"decision":  "CONTINUE",
+			"feedback":  "Call correcting_read and use its observation.",
+			"replyMode": "SEND",
 		})}, "tool_calls"),
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("read-1", read.Name(), map[string]any{"value": "current"})}, "tool_calls"),
 		llm.NewLlmResponse("The observed value is current.", nil, "stop"),
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("gate-2", completionAssessmentTool, map[string]any{
-			"decision": "FINAL",
-			"feedback": "The answer reports the successful current observation.",
+			"decision":  "FINAL",
+			"feedback":  "The answer reports the successful current observation.",
+			"replyMode": "SEND",
 		})}, "tool_calls"),
 	}}
 	gate, err := NewSemanticCompletionGate(client, "Judge whether the answer satisfies the newest request and uses required tool observations.")
@@ -219,8 +380,10 @@ func TestRegistryToolLoopUsesSemanticGateBeforeAcceptingFinalAnswer(t *testing.T
 	if client.requests[1].ToolChoice() != llm.ToolChoiceRequired || client.requests[4].ToolChoice() != llm.ToolChoiceRequired {
 		t.Fatalf("semantic decisions were not constrained: first=%q final=%q", client.requests[1].ToolChoice(), client.requests[4].ToolChoice())
 	}
-	if !strings.Contains(client.requests[4].Messages()[1].Content(), `"toolObservations":[{"tool":"correcting_read","status":"success"`) {
-		t.Fatalf("final gate did not receive tool observation: %#v", client.requests[4].Messages())
+	var gatePayload gatePayload
+	gateJSON := strings.TrimPrefix(client.requests[4].Messages()[1].Content(), "COMPLETION_CANDIDATE_JSON=")
+	if err := json.Unmarshal([]byte(gateJSON), &gatePayload); err != nil || len(gatePayload.Observations) != 1 || gatePayload.Observations[0].Tool != "correcting_read" || gatePayload.Observations[0].Status != "success" || gatePayload.Observations[0].Arguments != `{"value":"current"}` {
+		t.Fatalf("final gate did not receive bound tool observation: payload=%#v err=%v", gatePayload, err)
 	}
 	if strings.Contains(client.requests[4].Messages()[1].Content(), "SEMANTIC_COMPLETION_FEEDBACK") {
 		t.Fatalf("internal evaluator feedback leaked into conversational context: %#v", client.requests[4].Messages())
@@ -346,33 +509,46 @@ func TestProviderToolDefinitionsFilterModeratorCommandsWithoutRepeatedAuthorizat
 	properties := parameters["properties"].(map[string]any)
 	command := properties["command"].(map[string]any)
 	values := command["enum"].([]any)
-	foundKick := false
+	foundMute, foundKick := false, false
 	for _, value := range values {
+		foundMute = foundMute || value == "mute"
 		foundKick = foundKick || value == "kick"
 	}
-	if !foundKick {
-		t.Fatalf("moderator run_command schema does not expose kick: %#v", values)
+	if !foundMute || foundKick {
+		t.Fatalf("moderator run_command schema has overlapping command routes: %#v", values)
 	}
 }
 
-func TestRegistryToolLoopSuppressesFinalReplyAfterSuccessfulRoomDelivery(t *testing.T) {
-	delivery := roomDeliveryTool{name: "delivered_command", result: contract.ActionSuccessResult("", "delivered_command", map[string]any{"messages": []string{"already visible"}, "deliveredCount": 1}, 1)}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("delivery-call", delivery.Name(), map[string]any{})}, "tool_calls"),
-		llm.NewLlmResponse("already visible", nil, "stop"),
-	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{delivery}, []string{delivery.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inv := runtime.NewInvocation("registry-delivery", runtime.NewContext("room", "caller", "", "", false, nil), "run it", runtime.MENTION, "", false)
-	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
-	if err != nil || !completion.SuppressReply || len(client.requests) != 2 {
-		t.Fatalf("completion=%#v requests=%d err=%v", completion, len(client.requests), err)
+func TestRegistryToolLoopUsesSemanticReplyDispositionAfterSuccessfulRoomDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		replyMode    turn.CompletionReplyMode
+		wantSuppress bool
+	}{
+		{name: "already delivered", replyMode: turn.CompletionSuppress, wantSuppress: true},
+		{name: "derived synthesis requested", replyMode: turn.CompletionSend, wantSuppress: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delivery := roomDeliveryTool{name: "delivered_command", result: contract.ActionSuccessResult("", "delivered_command", map[string]any{"messages": []string{"already visible"}, "deliveredCount": 1}, 1)}
+			client := &scriptedToolClient{responses: []llm.LlmResponse{
+				llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("delivery-call", delivery.Name(), map[string]any{})}, "tool_calls"),
+				llm.NewLlmResponse("derived or duplicate candidate", nil, "stop"),
+			}}
+			gate := &scriptedCompletionGate{assessments: []turn.CompletionAssessment{{Decision: turn.CompletionFinal, Feedback: "The request is complete.", ReplyMode: tc.replyMode}}}
+			loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, gate, []agenttool.Tool{delivery}, []string{delivery.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv := runtime.NewInvocation("registry-delivery", runtime.NewContext("room", "caller", "", "", false, nil), "run it", runtime.MENTION, "", false)
+			completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+			if err != nil || completion.SuppressReply != tc.wantSuppress || len(client.requests) != 2 {
+				t.Fatalf("completion=%#v requests=%d err=%v", completion, len(client.requests), err)
+			}
+		})
 	}
 }
 
-func TestSuppressRegistryReplyRequiresVerifiedRoomDelivery(t *testing.T) {
+func TestSemanticSuppressionRequiresVerifiedRoomDeliveryEvidence(t *testing.T) {
 	agent, _ := api.NewContext("room", "caller", "", "", false, nil)
 	tool := roomDeliveryTool{name: "delivered_command"}
 	registry := agenttool.NewRegistry([]agenttool.Tool{tool}, []string{tool.Name()})
@@ -383,13 +559,30 @@ func TestSuppressRegistryReplyRequiresVerifiedRoomDelivery(t *testing.T) {
 		contract.ActionSuccessResult("delivery-call", tool.Name(), map[string]any{"deliveredCount": 0}, 0),
 		contract.ErrorResult("delivery-call", tool.Name(), "COMMAND_REJECTED", "rejected"),
 	} {
-		if suppressRegistryReply(registry, agent, []toolBatchResult{{Call: call, Result: result}}) {
+		if canSuppressCompletedReply(registry, agent, []toolBatchResult{{Call: call, Result: result}}) {
 			t.Fatalf("unverified delivery suppressed reply: %#v", result)
 		}
 	}
 	verified := contract.ActionSuccessResult("delivery-call", tool.Name(), map[string]any{"deliveredCount": 1}, 1)
-	if !suppressRegistryReply(registry, agent, []toolBatchResult{{Call: call, Result: verified}}) {
+	if !canSuppressCompletedReply(registry, agent, []toolBatchResult{{Call: call, Result: verified}}) {
 		t.Fatal("verified room delivery did not suppress duplicate reply")
+	}
+	second := toolBatchResult{
+		Call:   execution.Call{ID: "delivery-call-2", Name: tool.Name(), Arguments: json.RawMessage(`{}`)},
+		Result: contract.ActionSuccessResult("delivery-call-2", tool.Name(), map[string]any{"deliveredCount": 1}, 1),
+	}
+	if !canSuppressCompletedReply(registry, agent, []toolBatchResult{{Call: call, Result: verified}, second}) {
+		t.Fatal("verified multi-step deliveries were not eligible for semantic suppression")
+	}
+	kickDefinition, ok := commandcatalog.AgentEntry("kick")
+	if !ok {
+		t.Fatal("kick definition is unavailable")
+	}
+	kick := agenttool.SaturnCommand{Definition: kickDefinition}
+	kickRegistry := agenttool.NewRegistry([]agenttool.Tool{kick}, []string{kick.Name()})
+	kickResult := contract.ActionSuccessResult("kick-call", kick.Name(), map[string]any{"actionCount": 1, "deliveredCount": 0, "messages": []string{}}, 0)
+	if canSuppressCompletedReply(kickRegistry, agent, []toolBatchResult{{Call: execution.Call{ID: "kick-call", Name: kick.Name(), Arguments: json.RawMessage(`{"nick":"tajweed"}`)}, Result: kickResult}}) {
+		t.Fatal("silent action was allowed to suppress its required confirmation")
 	}
 }
 
@@ -402,7 +595,7 @@ func TestRegistryToolLoopKeepsSynthesisForMixedOrFailedDeliveryResults(t *testin
 		{
 			name: "mixed model data",
 			tools: []agenttool.Tool{
-				roomDeliveryTool{name: "delivered_command", result: contract.SuccessResult("", "delivered_command", map[string]any{"deliveredCount": 1})},
+				roomDeliveryTool{name: "delivered_command", result: contract.ActionSuccessResult("", "delivered_command", map[string]any{"deliveredCount": 1}, 1)},
 				&correctingReadTool{},
 			},
 			calls: []llm.LlmToolCall{
@@ -575,8 +768,8 @@ func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing
 	if err != nil || completion.Response.Content() != "corrected answer" || read.calls.Load() != 1 || len(client.requests) != 3 {
 		t.Fatalf("completion=%#v calls=%d requests=%d err=%v", completion, read.calls.Load(), len(client.requests), err)
 	}
-	if len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 1 {
-		t.Fatalf("tool manifest disappeared during correction: second=%d third=%d", len(client.requests[1].Tools()), len(client.requests[2].Tools()))
+	if len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 0 {
+		t.Fatalf("tool availability after correction: second=%d third=%d", len(client.requests[1].Tools()), len(client.requests[2].Tools()))
 	}
 	secondMessages := client.requests[1].Messages()
 	if !messagesContain(secondMessages, "INVALID_ARGUMENTS") {
@@ -605,8 +798,8 @@ func TestRegistryToolLoopCorrectsTypedSaturnArgumentsWithoutInventingCommandText
 	if err != nil || completion.Response.Content() != "completed" || gateway.calls != 1 || gateway.command != "weather" || gateway.arguments != "Tokyo" {
 		t.Fatalf("completion=%#v gateway=%#v err=%v", completion, gateway, err)
 	}
-	if len(client.requests) != 3 || len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 1 {
-		t.Fatalf("typed manifest was not retained across correction: requests=%d", len(client.requests))
+	if len(client.requests) != 3 || len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 0 {
+		t.Fatalf("typed tool availability after correction: requests=%d second=%d third=%d", len(client.requests), len(client.requests[1].Tools()), len(client.requests[2].Tools()))
 	}
 	if !messagesContain(client.requests[1].Messages(), "INVALID_ARGUMENTS") {
 		t.Fatalf("correctable observation missing: %#v", client.requests[1].Messages())
@@ -757,8 +950,8 @@ func TestEveryProviderRequestFitsMultiRoundBudgetAndKeepsProtocolAtomic(t *testi
 	for index, request := range client.requests {
 		assertRequestWithinBudget(t, index, request, maxTokens, reserveTokens)
 		assertAtomicToolProtocol(t, index, request.Messages())
-		if !messagesContain(request.Messages(), objective) || !messagesContain(request.Messages(), "TASK_STATE_JSON=") {
-			t.Fatalf("request %d lost immutable objective/task state: %#v", index, request.Messages())
+		if !messagesContain(request.Messages(), objective) {
+			t.Fatalf("request %d lost immutable newest request: %#v", index, request.Messages())
 		}
 		for _, message := range request.Messages() {
 			if message.Role() == "tool" && !json.Valid([]byte(message.Content())) {

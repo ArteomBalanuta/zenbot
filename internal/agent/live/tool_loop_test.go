@@ -73,6 +73,7 @@ func verifiedGatewayExecution(messages ...string) commandgateway.Execution {
 	return commandgateway.Execution{
 		Status:           commandgateway.OutcomeSucceeded,
 		EffectsCommitted: true,
+		Action:           &commandgateway.ActionReceipt{Count: 1},
 		Messages:         append([]string(nil), messages...),
 		Delivery:         &commandgateway.DeliveryReceipt{Count: len(messages)},
 	}

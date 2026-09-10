@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/runtime"
 	"zenbot/internal/agent/turn"
 )
@@ -310,7 +311,7 @@ func (a *Assembler) AssembleWithHistoricalEvidence(ctx context.Context, inv runt
 		optional = append(optional, recentContextUnits(recent)...)
 	}
 	filteredTools := cloneAnySlice(filterTools(tools, inv.Mode(), inv.Prompt()))
-	pr, e := ProjectTurn(nil, filteredTools, nil, nil, ContextInput{
+	pr, e := ProjectTurn(nil, filteredTools, nil, ContextInput{
 		RequiredPrefix: []Message{llm.NewLlmMessage("system", sys, nil, "")},
 		Optional:       optional,
 		RequiredSuffix: []Message{llm.NewLlmMessage("user", promptText, nil, "")},
@@ -326,14 +327,14 @@ func (a *Assembler) AssembleWithHistoricalEvidence(ctx context.Context, inv runt
 // ProjectTurn reapplies this assembler's configured limits to an evolving
 // request transcript. newestRequest is the immutable contextualized request
 // produced during initial assembly.
-func (a *Assembler) ProjectTurn(messages []Message, tools []any, taskState *turn.TaskState, observations *ObservationStore, newestRequest Message) (Projection, error) {
+func (a *Assembler) ProjectTurn(messages []Message, tools []any, observations *ObservationStore, newestRequest Message) (Projection, error) {
 	if a == nil || a.system == nil {
 		return Projection{}, errors.New("assembler is not initialized")
 	}
 	var policy Message
 	foundPolicy := false
 	for _, message := range messages {
-		if message.Role() == "system" && !strings.HasPrefix(message.Content(), "TASK_STATE_JSON=") {
+		if message.Role() == "system" {
 			policy = message
 			foundPolicy = true
 			break
@@ -352,7 +353,7 @@ func (a *Assembler) ProjectTurn(messages []Message, tools []any, taskState *turn
 	if !foundNewest {
 		return Projection{}, errors.New("turn projection transcript lost newest request")
 	}
-	return ProjectTurn(messages, tools, taskState, observations, ContextInput{
+	return ProjectTurn(messages, tools, observations, ContextInput{
 		RequiredPrefix: []Message{policy},
 		RequiredSuffix: []Message{newestRequest},
 		MaxTokens:      a.maxContextTokens(),
@@ -521,7 +522,7 @@ func filterTools(in []any, mode runtime.Mode, prompt string) []any {
 	out := []any{}
 	for _, v := range in {
 		name := toolName(v)
-		if mode == runtime.MODERATION && name != "run_command" {
+		if mode == runtime.MODERATION && !participation.IsSemanticModerationTool(name) {
 			continue
 		}
 		if mode == runtime.AMBIENT && strings.HasPrefix(name, "saturn_") {

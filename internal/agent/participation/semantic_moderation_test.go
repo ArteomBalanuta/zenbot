@@ -94,16 +94,16 @@ func TestPipelineKeepsSemanticModerationFailClosedUntilReady(t *testing.T) {
 	}
 }
 
-func TestSemanticModerationIngressIsReadyWhenAllSourceAliasesHaveTypedOperations(t *testing.T) {
+func TestSemanticModerationIngressIsReadyWithOneTargetBoundMuteTool(t *testing.T) {
 	if !SemanticModerationIngressReady() {
-		t.Fatal("semantic moderation ingress remained disabled after complete typed command parity")
+		t.Fatal("semantic moderation ingress remained disabled")
 	}
-	if got, want := SourceModerationAliases(), []string{"captcha", "mute", "unmute", "kick", "shadowban", "unshadowban"}; len(got) != len(want) {
-		t.Fatalf("source aliases = %#v", got)
+	if got, want := SemanticModerationTools(), []string{"saturn_mute"}; len(got) != len(want) {
+		t.Fatalf("moderation tools = %#v", got)
 	} else {
 		for i := range want {
 			if got[i] != want[i] {
-				t.Fatalf("source aliases = %#v, want %#v", got, want)
+				t.Fatalf("moderation tools = %#v, want %#v", got, want)
 			}
 		}
 	}

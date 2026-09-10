@@ -35,8 +35,13 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	if required, restricted := requiredCommandCapability(definition); restricted {
 		capabilities = []string{string(required)}
 	}
-	result := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"}},"required":["messages","deliveredCount"]}`)
+	result := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}`)
+	resultMode := contract.RoomDelivery
 	writes := []string{"commands", "room_delivery"}
+	if definition.Canonical == "kick" {
+		resultMode = contract.ModelData
+		writes = []string{"commands"}
+	}
 	if definition.Agent.Access == commandcatalog.AgentModerator || definition.Agent.Access == commandcatalog.AgentPermanentBan {
 		writes = append(writes, "moderation")
 	}
@@ -58,7 +63,7 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	}
 	return contract.NewDescriptor(
 		t.Name(), definition.Agent.Label, definition.Agent.Description, definition.Agent.Category,
-		access, contract.Action, contract.RoomDelivery, definition.Agent.Arguments.Schema(),
+		access, contract.Action, resultMode, definition.Agent.Arguments.Schema(),
 		capabilities, nil, false, 10*time.Second, result, nil, writes, definition.Agent.WhenNotUse,
 		options...,
 	)
@@ -102,11 +107,10 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 		}
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn command could not run"), nil
 	}
-	if failure, rejected := commandExecutionFailure(t.Name(), execution); rejected {
+	if failure, rejected := commandExecutionFailure(t.Name(), execution, definition.Canonical == "kick"); rejected {
 		return failure, nil
 	}
-	messages := append([]string(nil), execution.Messages...)
-	return contract.ActionSuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": execution.Delivery.Count}, execution.Delivery.Count), nil
+	return commandExecutionSuccess(t.Name(), execution), nil
 }
 
 func contractAccess(access commandcatalog.AgentAccess) contract.Access {

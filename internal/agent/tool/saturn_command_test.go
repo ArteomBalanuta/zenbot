@@ -11,6 +11,7 @@ import (
 	"zenbot/internal/agent/commandgateway"
 	agenttool "zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
+	"zenbot/internal/agent/tool/execution"
 	commandcatalog "zenbot/internal/command/catalog"
 )
 
@@ -57,6 +58,48 @@ func TestSaturnCommandDescriptorCarriesCatalogIdentityAndCapabilityPolicy(t *tes
 	}
 }
 
+func TestSaturnKickDescriptorHasOneRootNicknameArgument(t *testing.T) {
+	moderator, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	kick := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "kick")}
+	descriptor, err := kick.Descriptor(moderator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Type       string                     `json:"type"`
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if err := json.Unmarshal(descriptor.Parameters(), &schema); err != nil {
+		t.Fatalf("decode provider schema: %v", err)
+	}
+	if schema.Type != "object" || len(schema.Properties) != 1 || schema.Properties["nick"] == nil || len(schema.Required) != 1 || schema.Required[0] != "nick" {
+		t.Fatalf("kick provider schema = %s, want flat required nick object", descriptor.Parameters())
+	}
+	if err := contract.ValidateArguments(descriptor.Parameters(), json.RawMessage(`{"nick":"tajweed"}`)); err != nil {
+		t.Fatalf("provider schema rejected saturn_kick({nick: tajweed}): %v", err)
+	}
+}
+
+func TestSaturnPingAdvertisesItsFixedHackChatRuntimeTarget(t *testing.T) {
+	public, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	ping := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "ping")}
+	descriptor, err := ping.Descriptor(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing := descriptor.Routing()
+	if !strings.Contains(strings.ToLower(descriptor.Description()), "hack.chat:80") || !strings.Contains(strings.ToLower(strings.Join(routing.Targets, " ")), "hack.chat") {
+		t.Fatalf("ping does not advertise its fixed runtime target: description=%q routing=%#v", descriptor.Description(), routing)
+	}
+	if err := contract.ValidateArguments(descriptor.Parameters(), json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("argumentless ping was rejected: %v", err)
+	}
+	if err := contract.ValidateArguments(descriptor.Parameters(), json.RawMessage(`{"host":"example.com"}`)); err == nil {
+		t.Fatal("ping accepted a caller-selected host")
+	}
+}
+
 func TestSaturnCommandDispatchesCanonicalArgumentsAndEnforcesCapabilities(t *testing.T) {
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("sent")}
 	creator, _ := api.NewContextWithCapabilities("room", "creator", "trip", "", false, []string{}, []api.Capability{api.AdminCommands})
@@ -87,7 +130,7 @@ func TestSaturnModerationCommandCannotRetargetReviewedAuthor(t *testing.T) {
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "kick"), Gateway: gateway}
-	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"mode":"exact","targets":["bob"]}`))
+	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"nick":"bob"}`))
 	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 0 {
 		t.Fatalf("result=%#v calls=%d err=%v", result, gateway.calls, err)
 	}
@@ -113,8 +156,8 @@ func TestSaturnCommandRequiresVerifiedCommittedDelivery(t *testing.T) {
 		{name: "rejected", execution: commandgateway.Execution{Status: commandgateway.OutcomeRejected}, wantCode: "COMMAND_REJECTED"},
 		{name: "unknown", execution: commandgateway.Execution{Status: commandgateway.OutcomeUnknown}, wantCode: "ACTION_OUTCOME_UNKNOWN"},
 		{name: "uncommitted", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, Delivery: &commandgateway.DeliveryReceipt{Count: 1}}, wantCode: "UNVERIFIED_ACTION_OUTCOME"},
-		{name: "missing receipt", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true}, wantCode: "UNVERIFIED_ROOM_DELIVERY"},
-		{name: "zero receipt", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Delivery: &commandgateway.DeliveryReceipt{}}, wantCode: "UNVERIFIED_ROOM_DELIVERY"},
+		{name: "missing receipt", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Action: &commandgateway.ActionReceipt{Count: 1}}, wantCode: "UNVERIFIED_ROOM_DELIVERY"},
+		{name: "zero receipt", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Action: &commandgateway.ActionReceipt{Count: 1}, Delivery: &commandgateway.DeliveryReceipt{}}, wantCode: "UNVERIFIED_ROOM_DELIVERY"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,11 +179,50 @@ func TestSaturnCommandRequiresVerifiedCommittedDelivery(t *testing.T) {
 	}
 }
 
-func TestSaturnCommandRejectsCrossFieldArgumentsBeforeGateway(t *testing.T) {
+func TestSaturnKickAcceptsVerifiedActionWithoutRoomDelivery(t *testing.T) {
+	moderator, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	tool := agenttool.SaturnCommand{
+		Definition: agentCommandDefinition(t, "kick"),
+		Gateway: &runCommandGatewayStub{result: commandgateway.Execution{
+			Status:           commandgateway.OutcomeSucceeded,
+			EffectsCommitted: true,
+			Action:           &commandgateway.ActionReceipt{Count: 1},
+		}},
+	}
+	descriptor, err := tool.Descriptor(moderator)
+	if err != nil || descriptor.ResultMode() != contract.ModelData {
+		t.Fatalf("descriptor=%#v err=%v", descriptor, err)
+	}
+
+	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"nick":"raider"}`))
+
+	if err != nil || result.IsError || !result.EffectsCommitted || result.VerifiedRoomDelivery() || result.DeliveryCount != 0 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if err := contract.ValidateResult(descriptor.ResultSchema(), []byte(result.Content)); err != nil {
+		t.Fatalf("silent kick result violates its declared schema: content=%s err=%v", result.Content, err)
+	}
+	var content struct {
+		ActionCount    int `json:"actionCount"`
+		DeliveredCount int `json:"deliveredCount"`
+	}
+	if json.Unmarshal([]byte(result.Content), &content) != nil || content.ActionCount != 1 || content.DeliveredCount != 0 {
+		t.Fatalf("result content=%s", result.Content)
+	}
+	registry := agenttool.NewRegistry([]agenttool.Tool{tool}, []string{tool.Name()})
+	executed := (&execution.Executor{Registry: registry, Ledger: execution.NewLedger(map[string]int{tool.Name(): 1}, 1)}).Execute(
+		context.Background(), moderator, execution.Call{ID: "kick-call", Name: tool.Name(), Arguments: json.RawMessage(`{"nick":"raider"}`)},
+	)
+	if executed.IsError || !executed.EffectsCommitted || executed.DeliveryCount != 0 {
+		t.Fatalf("executor rejected verified silent kick: %#v", executed)
+	}
+}
+
+func TestSaturnKickRejectsUnexpectedArgumentsBeforeGateway(t *testing.T) {
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "kick"), Gateway: gateway}
-	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"mode":"contains","targets":["raid","spam"]}`))
+	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"nick":"raid","targets":["spam"]}`))
 	if err != nil || !result.IsError || result.ErrorCode != "INVALID_ARGUMENTS" || gateway.calls != 0 {
 		t.Fatalf("result=%#v calls=%d err=%v", result, gateway.calls, err)
 	}
@@ -180,7 +262,7 @@ func TestSaturnCommandEncodesRepresentativeCommandFamilies(t *testing.T) {
 	}{
 		{name: "weather phrase", caller: public, canonical: "weather", arguments: `{"location":"New York"}`, wantTail: "New York"},
 		{name: "remote room list", caller: public, canonical: "list", arguments: `{"room":"lounge"}`, wantTail: "lounge"},
-		{name: "moderator kick", caller: moderator, canonical: "kick", arguments: `{"mode":"multiple","targets":["@raider","spammer"]}`, wantTail: "-m @raider spammer"},
+		{name: "moderator kick", caller: moderator, canonical: "kick", arguments: `{"nick":"@raider"}`, wantTail: "@raider"},
 		{name: "access grant", caller: creator, canonical: "access", arguments: `{"trips":["aaa","bbb"],"role":"MODERATOR"}`, wantTail: "aaa,bbb MODERATOR"},
 	}
 	for _, test := range tests {

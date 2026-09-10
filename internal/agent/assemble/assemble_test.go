@@ -317,7 +317,14 @@ func TestAssembleExposesAuthorizedCommandToolsForNaturalLanguageRequests(t *test
 		t.Fatal(err)
 	}
 	a := testAssembler(t, catalog)
-	tools := []any{map[string]any{"name": "run_command"}, map[string]any{"name": "room_data"}, map[string]any{"name": "saturn_dbzstr"}}
+	tools := []any{
+		map[string]any{"name": "run_command"},
+		map[string]any{"name": "room_data"},
+		map[string]any{"name": "saturn_dbzstr"},
+		map[string]any{"name": "saturn_mute"},
+		map[string]any{"name": "saturn_kick"},
+		map[string]any{"name": "saturn_captcha"},
+	}
 	r, err := a.Assemble(context.Background(), invocation(runtime.DIRECT, "icecream"), []Message{
 		llm.NewLlmMessage("system", "[Internal tool evidence from announce]\nold", nil, ""),
 		llm.NewLlmMessage("system", "fresh", nil, ""),
@@ -325,8 +332,8 @@ func TestAssembleExposesAuthorizedCommandToolsForNaturalLanguageRequests(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Tools()) != 3 {
-		t.Fatalf("ordinary tools = %d, want 3", len(r.Tools()))
+	if len(r.Tools()) != len(tools) {
+		t.Fatalf("ordinary tools = %d, want %d", len(r.Tools()), len(tools))
 	}
 	if strings.Contains(r.Messages()[1].Content(), "old") {
 		t.Fatal("internal evidence leaked into request")
@@ -335,7 +342,7 @@ func TestAssembleExposesAuthorizedCommandToolsForNaturalLanguageRequests(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(moderation.Tools()) != 1 || toolName(moderation.Tools()[0]) != "run_command" {
+	if len(moderation.Tools()) != 1 || toolName(moderation.Tools()[0]) != "saturn_mute" {
 		t.Fatalf("moderation tools = %#v", moderation.Tools())
 	}
 	ambient, err := a.Assemble(context.Background(), invocation(runtime.AMBIENT, "icecream"), nil, "", tools, Talk)

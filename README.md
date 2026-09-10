@@ -121,7 +121,7 @@ Agent execution values:
 - `agent.memoryRawTurns` keeps the newest complete turns verbatim; older loaded turns are summarized into untrusted H2-backed memory without deleting their authoritative raw rows.
 - `agent.memorySummaryMaxChars` bounds the persisted summary projection.
 - `agent.contextMessageLimit` controls recent public room context; explicit named-user history can retrieve up to 500 public messages with timestamps and identity metadata.
-- `agent.maxContextTokens` supports ceilings up to 1,000,000 estimated tokens, while `agent.contextReserveTokens` reserves policy/request/output capacity. The loop reprojects before every worker-model call, accounts for the live tool manifest, keeps the original objective/task state mandatory, drops assistant-call/tool-result pairs atomically, and never slices JSON.
+- `agent.maxContextTokens` supports ceilings up to 1,000,000 estimated tokens, while `agent.contextReserveTokens` reserves policy/request/output capacity. The loop reprojects before every worker-model call, accounts for the live tool manifest, keeps the exact newest request mandatory, drops assistant-call/tool-result pairs atomically, and never slices JSON.
 
 The complete `SATURN_AGENT_*` environment surface is listed in [.env.example](.env.example). Environment values take precedence over TOML. The ignored production `config.toml` remains the source of truth when no override is supplied.
 

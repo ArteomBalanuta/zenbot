@@ -57,7 +57,7 @@ func (t ModerationAction) Execute(ctx context.Context, caller api.Context, args 
 	if err := t.Gateway.Execute(ctx, api.MODERATION, caller, t.Target, action); err != nil {
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action was rejected"), nil
 	}
-	return contract.SuccessResult("", t.Name(), map[string]any{"executed": true}), nil
+	return contract.ActionSuccessResult("", t.Name(), map[string]any{"executed": true}, 0), nil
 }
 
 var _ Tool = ModerationAction{}

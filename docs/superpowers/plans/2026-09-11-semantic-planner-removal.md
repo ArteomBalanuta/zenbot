@@ -249,7 +249,7 @@ git commit -m "refactor(agent): ground completion in request evidence"
 
 - [ ] **Step 1: Write the live-shaped regression**
 
-Replace the planner ready-frontier test with `TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner`. Script exactly three execution responses: a batch containing `saturn_list(room=lounge)` and zero-argument `room_users`; a `saturn_kick(mode=exact, targets=[@tajweed29])`; then one combined final answer.
+Replace the planner ready-frontier test with `TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner`. Script exactly three execution responses: a batch containing `saturn_list(room=lounge)` and zero-argument `room_users`; a `saturn_kick(nick=@tajweed29)`; then one combined final answer.
 
 Construct only those three tools with `NewRegistryToolLoop`. Keep the real moderation capability on the invocation.
 

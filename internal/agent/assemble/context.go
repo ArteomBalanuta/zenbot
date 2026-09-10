@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	"zenbot/internal/agent/llm"
-	"zenbot/internal/agent/turn"
 )
 
 type ContextSource string
@@ -116,13 +114,10 @@ func (ContextBudgeter) Project(input ContextInput) (Projection, error) {
 }
 
 // ProjectTurn is the single transcript projection boundary used before model
-// calls. Required policy, task state, and newest request are retained while
+// calls. Required policy and newest request are retained while
 // assistant tool calls and their observations remain atomic optional units.
-func ProjectTurn(messages []Message, tools []any, taskState *turn.TaskState, observations *ObservationStore, input ContextInput) (Projection, error) {
+func ProjectTurn(messages []Message, tools []any, observations *ObservationStore, input ContextInput) (Projection, error) {
 	input.ManifestTokens = manifestTokenCost(tools)
-	if taskState != nil {
-		input.RequiredPrefix = append(copyMessages(input.RequiredPrefix), taskStateMessage(taskState))
-	}
 	sanitized := projectedObservationMessages(messages, observations)
 	before, after := splitTurnContext(sanitized, input.RequiredPrefix, input.RequiredSuffix)
 	input.Optional = append(input.Optional, before...)
@@ -139,32 +134,6 @@ func manifestTokenCost(tools []any) int {
 		return maxContextTokens
 	}
 	return (len(encoded) + 3) / 4
-}
-
-func taskStateMessage(state *turn.TaskState) Message {
-	task := state.Contract()
-	satisfiedEvidence := make([]string, 0)
-	for _, evidence := range state.Evidence() {
-		if evidence.ObligationID != "" {
-			satisfiedEvidence = append(satisfiedEvidence, evidence.ObligationID+":"+evidence.CallID)
-		}
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"requestId":            task.RequestID,
-		"requestHash":          task.RequestHash,
-		"objective":            task.Objective,
-		"constraints":          task.Constraints(),
-		"pendingObligations":   state.Pending(),
-		"satisfiedEvidence":    satisfiedEvidence,
-		"unknownActionOutcome": state.HasUnknownActionOutcome(),
-		"prohibitedActionRetries": func() []string {
-			if state.HasUnknownActionOutcome() {
-				return []string{"all action retries for this turn"}
-			}
-			return []string{}
-		}(),
-	})
-	return llm.NewLlmMessage("system", "TASK_STATE_JSON="+string(payload), nil, "")
 }
 
 func projectedObservationMessages(messages []Message, observations *ObservationStore) []Message {
@@ -206,9 +175,6 @@ func splitTurnContext(messages, requiredPrefix, requiredSuffix []Message) ([]Con
 			if index == suffixEnd {
 				newestSeen = true
 			}
-			continue
-		}
-		if message.Role() == "system" && strings.HasPrefix(message.Content(), "TASK_STATE_JSON=") {
 			continue
 		}
 		remaining = append(remaining, message)

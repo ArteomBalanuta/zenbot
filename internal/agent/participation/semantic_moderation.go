@@ -59,12 +59,20 @@ func sourceWordRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || unicode.Is(unicode.Pc, r) || r == '\u200c' || r == '\u200d'
 }
 
-// SourceModerationAliases is the complete source run_command moderation
-// inventory. It is deliberately separate from the public informational aliases.
-func SourceModerationAliases() []string {
-	return []string{"captcha", "mute", "unmute", "kick", "shadowban", "unshadowban"}
+// SemanticModerationTools is the deliberately narrow tool inventory for
+// autonomous moderation. The listener supplies the reviewed author as a
+// trusted target, and the tool boundary rejects any attempt to retarget it.
+func SemanticModerationTools() []string { return []string{"saturn_mute"} }
+
+func IsSemanticModerationTool(name string) bool {
+	for _, candidate := range SemanticModerationTools() {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
 }
 
-// SemanticModerationIngressReady documents that every source moderation alias
-// now reaches a reviewed typed EngineImpl operation through run_command.
+// SemanticModerationIngressReady documents that autonomous moderation reaches
+// a reviewed concrete tool instead of the legacy compatibility command route.
 func SemanticModerationIngressReady() bool { return true }

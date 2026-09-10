@@ -12,6 +12,7 @@ import (
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/participation"
 	"zenbot/internal/agent/prompt"
+	"zenbot/internal/agent/runtime"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/command"
@@ -279,9 +280,6 @@ func TestNewAgentToolLoopRegistersEveryAgentCommandWithContextualVisibility(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loop.Planner.(*live.SemanticTaskPlanner); !ok {
-		t.Fatalf("production loop planner=%T, want *live.SemanticTaskPlanner", loop.Planner)
-	}
 	for _, definition := range commandcatalog.AgentEntries() {
 		if _, ok := loop.Registry.Lookup("saturn_" + definition.Canonical); !ok {
 			t.Fatalf("missing agent command tool for %q", definition.Canonical)
@@ -337,6 +335,79 @@ func (mainTestClient) Complete(context.Context, llm.LlmRequest) (llm.LlmResponse
 	return llm.LlmResponse{}, nil
 }
 
+type plannerProbeClient struct {
+	objective      string
+	plannerCalls   int
+	executionCalls int
+	gateCalls      int
+}
+
+func (c *plannerProbeClient) Complete(_ context.Context, request llm.LlmRequest) (llm.LlmResponse, error) {
+	switch {
+	case mainRequestHasTool(request, "submit_task_plan"):
+		c.plannerCalls++
+		return llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("plan", "submit_task_plan", map[string]any{
+			"objective": c.objective, "constraints": []any{}, "obligations": []any{},
+		})}, "tool_calls"), nil
+	case mainRequestHasTool(request, "submit_completion_assessment"):
+		c.gateCalls++
+		return llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("assessment", "submit_completion_assessment", map[string]any{
+			"decision": "FINAL", "feedback": "The direct answer satisfies the request.", "replyMode": "SEND",
+		})}, "tool_calls"), nil
+	default:
+		c.executionCalls++
+		return llm.NewLlmResponse("hello", nil, "stop"), nil
+	}
+}
+
+func mainRequestHasTool(request llm.LlmRequest, want string) bool {
+	for _, raw := range request.Tools() {
+		definition, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		function, ok := definition["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := function["name"].(string); name == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (roomDirectoryForMainTest) FindRoomUsers(string) (tool.RoomUserSnapshot, bool) {
 	return tool.RoomUserSnapshot{}, false
+}
+
+func TestProductionToolLoopStartsWithExecutionInsteadOfSemanticPlanning(t *testing.T) {
+	const objective = "say hello"
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assembler, err := assemble.New(assemble.Config{}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &plannerProbeClient{objective: objective}
+	loop, err := newAgentToolLoop(
+		config.ResolvedAgentConfig{AgentConfig: config.AgentConfig{ContextMessageLimit: 1, MaxSteps: 3, MaxTools: 1}},
+		liveAgentRepositoryStub{}, assembler, catalog, client, roomDirectoryForMainTest{}, mainTestGateway{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := runtime.NewInvocation("planner-probe", runtime.NewContext("room", "caller", "", "", false, nil), objective, runtime.DIRECT, "", false)
+	completion, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Response.Content() != "hello" {
+		t.Fatalf("response=%q", completion.Response.Content())
+	}
+	if client.plannerCalls != 0 || client.executionCalls != 1 || client.gateCalls != 1 {
+		t.Fatalf("provider calls: planner=%d execution=%d gate=%d", client.plannerCalls, client.executionCalls, client.gateCalls)
+	}
 }

@@ -113,6 +113,34 @@ func TestAgentCommandGatewayPreservesTypedModerationOperationsForSyntheticCaller
 	}
 }
 
+func TestAgentCommandGatewayKickReturnsNotFoundWithoutSendingForAbsentActiveTarget(t *testing.T) {
+	e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{}}, authorized: true}
+	caller, err := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "kick", "absent")
+
+	if err != nil || result.Status != commandgateway.OutcomeNotFound || result.EffectsCommitted || result.Delivery != nil || len(e.raws) != 0 || len(e.chats) != 0 {
+		t.Fatalf("result=%#v raws=%#v chats=%#v err=%v", result, e.raws, e.chats, err)
+	}
+}
+
+func TestAgentCommandGatewayKickVerifiesSilentActiveTargetAction(t *testing.T) {
+	e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"Raider": {Name: "Raider"}}}, authorized: true}
+	caller, err := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "kick", "@raider")
+
+	if err != nil || result.Status != commandgateway.OutcomeSucceeded || !result.EffectsCommitted || result.Action == nil || result.Action.Count != 1 || result.Delivery != nil || len(result.Messages) != 0 || len(e.raws) != 1 || e.raws[0] != `{"cmd":"kick","nick":"Raider"}` || len(e.chats) != 0 {
+		t.Fatalf("result=%#v raws=%#v chats=%#v err=%v", result, e.raws, e.chats, err)
+	}
+}
+
 func TestAgentCommandGatewayWaitsForEverySnapshotBackedCommandOutcome(t *testing.T) {
 	public, _ := api.NewContext("programming", "caller", "trip", "hash", false, []string{})
 	moderator, _ := api.NewContextWithCapabilities("programming", "caller", "trip", "hash", false, []string{}, []api.Capability{api.ModerationCommands})
@@ -187,7 +215,7 @@ func TestAgentCommandGatewayDoesNotVerifyLegacySuccessWithoutDelivery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != commandgateway.OutcomeSucceeded || !result.EffectsCommitted {
+	if result.Status != commandgateway.OutcomeSucceeded || result.EffectsCommitted || result.Action != nil {
 		t.Fatalf("terminal command outcome=%#v", result)
 	}
 	if result.Delivery != nil || len(result.Messages) != 0 {
