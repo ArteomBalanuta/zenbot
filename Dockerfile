@@ -8,6 +8,7 @@ FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
+COPY VERSION version.go ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY resources ./resources

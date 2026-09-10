@@ -100,6 +100,26 @@ func TestSystemPromptSelectsModeAndDynamicSQLPoliciesAndCarriesMetadata(t *testi
 	}
 }
 
+func TestSystemPromptAllowsDirectRegularAnswersWithoutQuoteOnlyPersona(t *testing.T) {
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := testAssembler(t, catalog).Assemble(context.Background(), invocation(runtime.DIRECT, "explain polymorphism"), nil, "", nil, Talk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := strings.ToLower(request.Messages()[0].Content())
+	for _, forbidden := range []string{"precise literary quotation engine", "emit exactly one attributed quote", "your sole task is to output a single"} {
+		if strings.Contains(system, forbidden) {
+			t.Fatalf("system prompt still contains quote-only restriction %q", forbidden)
+		}
+	}
+	if !strings.Contains(system, "answer ordinary questions directly") {
+		t.Fatal("system prompt does not establish regular question answering")
+	}
+}
+
 func TestAssembleExposesAuthorizedCommandToolsForNaturalLanguageRequests(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {

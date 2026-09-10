@@ -50,7 +50,7 @@ func TestOutputFinalizerUsesResolvedMarkerAndBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.NoReplyMarker != "marker" || got.MaxOutputChars != 17 || got.Catalog == nil {
+	if got.NoReplyMarker != "marker" || got.MaxOutputChars != 17 {
 		t.Fatalf("finalizer = %#v", got)
 	}
 }

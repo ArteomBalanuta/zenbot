@@ -242,7 +242,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	})
 	finalizer, err := outputFinalizer(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("agent verified quotes: %w", err)
+		return nil, fmt.Errorf("agent output finalizer: %w", err)
 	}
 	rt, err := runtime.NewWithFailureSink(runtime.Config{MaxConcurrent: resolved.MaxConcurrentRequests, QueueCapacity: resolved.QueueCapacity}, live.Runner{Assembler: assembler, Client: client, Finalizer: finalizer, ConversationContext: conversationContext, ToolLoop: toolLoop, Memory: memory}, sink, failure)
 	if err != nil {
@@ -335,7 +335,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	}
 	finalizer, err := outputFinalizer(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("agent verified quotes: %w", err)
+		return nil, fmt.Errorf("agent output finalizer: %w", err)
 	}
 	return live.DirectInvoker{Assembler: assembler, Client: client, ConversationContext: conversationContext, ToolLoop: toolLoop, Finalizer: finalizer, Memory: memory}, nil
 }

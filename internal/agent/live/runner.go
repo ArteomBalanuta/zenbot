@@ -32,15 +32,10 @@ const defaultMaxOutputChars = 8000
 type OutputFinalizer struct {
 	NoReplyMarker  string
 	MaxOutputChars int
-	Catalog        *verifiedQuoteCatalog
 }
 
 func NewOutputFinalizer(noReplyMarker string, maxOutputChars int) (OutputFinalizer, error) {
-	catalog, err := loadVerifiedQuoteCatalog(nil)
-	if err != nil {
-		return OutputFinalizer{}, err
-	}
-	return OutputFinalizer{NoReplyMarker: noReplyMarker, MaxOutputChars: maxOutputChars, Catalog: &catalog}, nil
+	return OutputFinalizer{NoReplyMarker: noReplyMarker, MaxOutputChars: maxOutputChars}, nil
 }
 
 func (f OutputFinalizer) Finalize(inv runtime.Invocation, raw string) (string, bool, error) {
@@ -61,12 +56,6 @@ func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string,
 	if containsInternalToolEvidence(content) {
 		return "", false, fmt.Errorf("agent response exposed internal tool evidence")
 	}
-	if quoteOnlyRequired(inv, meta) {
-		if f.Catalog == nil {
-			return "", false, fmt.Errorf("verified quote catalog is not initialized")
-		}
-		content = f.Catalog.selectVerifiedOrFallback(content)
-	}
 	content = trimASCIIControlWhitespace(strings.ReplaceAll(content, f.NoReplyMarker, ""))
 	if content == "" {
 		return "", false, fmt.Errorf("agent returned an empty response")
@@ -80,10 +69,6 @@ func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string,
 		content = string(runes[:maxOutputChars])
 	}
 	return content, true, nil
-}
-
-func quoteOnlyRequired(inv runtime.Invocation, meta FinalizationContext) bool {
-	return !inv.Context().Whisper() && inv.Mode() != runtime.MODERATION && !meta.ToolAttempted && (meta.CandidateKind == participation.Talk || meta.CandidateKind == participation.Unclassified)
 }
 
 func finalizeWithContext(f Finalizer, inv runtime.Invocation, raw string, meta FinalizationContext) (string, bool, error) {

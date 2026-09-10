@@ -81,12 +81,8 @@ func TestOutputFinalizerPreservesNonBreakingSpaceLikeSaturn(t *testing.T) {
 	}
 }
 
-func TestOutputFinalizerRejectsInternalToolEvidenceBeforeQuoteFallbackOrTruncation(t *testing.T) {
-	catalog, err := loadVerifiedQuoteCatalog(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := OutputFinalizer{NoReplyMarker: "[[SATURN_NO_REPLY]]", MaxOutputChars: 3, Catalog: &catalog}
+func TestOutputFinalizerRejectsInternalToolEvidenceBeforeTruncation(t *testing.T) {
+	f := OutputFinalizer{NoReplyMarker: "[[SATURN_NO_REPLY]]", MaxOutputChars: 3}
 	marker := "[Internal tool evidence from room_users] secret"
 	for _, tc := range []struct {
 		name string

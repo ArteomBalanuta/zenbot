@@ -54,6 +54,75 @@ func TestKickRequiresActiveUserAndUsesSixCharacterDestination(t *testing.T) {
 	}
 }
 
+func TestRegisteredKickNormalizesMentionAndUsesTypedSaturnProtocol(t *testing.T) {
+	e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc"}}}
+	definition, ok := commandDefinitionFor("kick")
+	if !ok {
+		t.Fatal("registered kick command is missing")
+	}
+	status, err := definition.New(e, moderationMessage("!kick @merc", false)).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil {
+		t.Fatalf("status=%v err=%v", status, err)
+	}
+	if got, want := e.raws, []string{`{"cmd":"kick","nick":"Merc"}`}; !equalStrings(got, want) {
+		t.Fatalf("raw=%v, want %v", got, want)
+	}
+	if len(e.chats) != 0 {
+		t.Fatalf("kick unexpectedly posted confirmation: %v", e.chats)
+	}
+}
+
+func TestRegisteredKickSupportsSaturnMultiAndContainsModes(t *testing.T) {
+	definition, ok := commandDefinitionFor("kick")
+	if !ok {
+		t.Fatal("registered kick command is missing")
+	}
+	for _, tc := range []struct {
+		name string
+		text string
+		want map[string]bool
+	}{
+		{
+			name: "multiple normalized targets",
+			text: "!kick -m @RaiderOne RaiderTwo absent",
+			want: map[string]bool{"RaiderOne": true, "RaiderTwo": true},
+		},
+		{
+			name: "active names containing value",
+			text: "!kick -c Raider",
+			want: map[string]bool{"RaiderOne": true, "RaiderTwo": true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &commandEngineStub{users: map[string]*model.User{
+				"RaiderOne": {Name: "RaiderOne"},
+				"RaiderTwo": {Name: "RaiderTwo"},
+				"Resident":  {Name: "Resident"},
+			}}
+			status, err := definition.New(e, moderationMessage(tc.text, false)).Execute(context.Background())
+			if status != model.SUCCESSFUL || err != nil {
+				t.Fatalf("status=%v err=%v", status, err)
+			}
+			got := make(map[string]bool, len(e.raws))
+			for _, payload := range e.raws {
+				var fields map[string]string
+				if err := json.Unmarshal([]byte(payload), &fields); err != nil || fields["cmd"] != "kick" || fields["nick"] == "" || fields["to"] != "" {
+					t.Fatalf("invalid kick payload %q: fields=%v err=%v", payload, fields, err)
+				}
+				got[fields["nick"]] = true
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("kicked=%v, want %v", got, tc.want)
+			}
+			for nick := range tc.want {
+				if !got[nick] {
+					t.Fatalf("kicked=%v, missing %q", got, nick)
+				}
+			}
+		})
+	}
+}
+
 func TestUnbanPreservesHashAndUsageBoundary(t *testing.T) {
 	e := &commandEngineStub{}
 	(&Unban{}).NewInstance(e, moderationMessage("!unban HjkUEWNlIRH35Xk", true)).(*Unban).Execute()

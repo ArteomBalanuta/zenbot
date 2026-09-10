@@ -98,11 +98,19 @@ The direct syntax is:
 
 Exact public mentions of the bot also enter the same room-scoped agent runtime. Public users in one room share conversation memory; whispers use a private user-and-room key. Ambient participation is disabled unless explicitly configured. A polite request to remain quiet suppresses ambient participation without posting repeated acknowledgements.
 
+Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose.
+
 The model can request multiple tools in one response. Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations, the same authorized manifest is retained for correction calls, and the model synthesizes the final answer after observations.
 
 Moderators can request moderation actions through natural language. The configured creator receives direct admin and permanent-ban capabilities. The gateway still performs Saturn role checks and binds autonomous moderation actions to the reviewed author.
 
 See [AGENTIC_ARCHITECTURE.md](AGENTIC_ARCHITECTURE.md) for the full flow and contracts.
+
+## Known Room Snapshot Issue
+
+`*list <current-room>` reads the host engine's active-user snapshot and works without opening another connection. `*list <other-room>` currently reaches the remote snapshot workflow but its generated temporary nick uses the form `msg-xxxxxxxx`. Hack.Chat accepts only letters, numbers, and underscores in a nick, so it rejects that join before sending `onlineSet`; the coordinator then emits the generic `Unable to complete room operation.` fallback. The target-room spelling is not the underlying failure.
+
+Replica lifecycle is implemented independently through `ManagedReplicaController` and `ReplicaFactory`; replicas use the configured bot identity and are not blocked by this temporary-nick defect. The remote snapshot correction is to generate a protocol-valid identity such as `msg_xxxxxxxx` and preserve the request-specific failure message.
 
 ## Persistence And Migration
 

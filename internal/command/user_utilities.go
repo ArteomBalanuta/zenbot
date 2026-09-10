@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+	release "zenbot"
 	"zenbot/internal/model"
 )
-
-const saturnVersion = "1.0.29"
 
 const saturnApe = `
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⢠⣄⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -51,7 +50,7 @@ func (c *versionCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, saturnVersion, c.message.IsWhisper); err != nil {
+	if _, err := c.engine.SendChatMessage(c.message.Name, release.Version(), c.message.IsWhisper); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

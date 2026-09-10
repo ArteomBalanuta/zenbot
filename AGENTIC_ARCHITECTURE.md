@@ -186,6 +186,7 @@ Recent room context and user-history queries read only `PUBLIC` messages. New wh
 `internal/agent/live/runner.go` sends provider content through `OutputFinalizer` before delivery. It:
 
 - normalizes response formatting
+- preserves ordinary provider answers instead of coercing them into a quotation or fixed template
 - rejects empty required replies
 - strips the no-reply marker from otherwise valid text
 - rejects leaked internal tool evidence

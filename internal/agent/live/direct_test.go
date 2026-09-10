@@ -14,16 +14,15 @@ import (
 	"zenbot/internal/repository"
 )
 
-func TestDirectInvokerCanonicalizesCommandOriginatedProseToOneVerifiedQuote(t *testing.T) {
-	catalog, err := loadVerifiedQuoteCatalog(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse("- one invented quote\n- another invented quote", nil, "stop")}}
-	invoker := DirectInvoker{Assembler: testLiveAssembler(t), Client: client, Finalizer: OutputFinalizer{Catalog: &catalog}}
-	completion, err := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller", Text: "l hello?"}, "hello?")
-	if err != nil || completion.Text() != catalog.fallback() {
-		t.Fatalf("completion=%#v err=%v", completion, err)
+func TestDirectInvokerPreservesCommandOriginatedRegularAnswer(t *testing.T) {
+	want := "Love is both an emotion and a practice.\nIt grows through attention and trust."
+	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse(want, nil, "stop")}}
+	invoker := DirectInvoker{Assembler: testLiveAssembler(t), Client: client, Finalizer: OutputFinalizer{}}
+
+	completion, err := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller", Text: "l what is love?"}, "what is love?")
+
+	if err != nil || completion.Text() != want {
+		t.Fatalf("completion=%#v err=%v, want %q", completion, err, want)
 	}
 }
 

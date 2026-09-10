@@ -65,7 +65,7 @@ func TestPingVersionApeAndCoinParity(t *testing.T) {
 			}
 		}},
 		{"v", "!v extra", func(t *testing.T, chats []string) {
-			if len(chats) != 1 || chats[0] != "alice|1.0.29|true" {
+			if len(chats) != 1 || chats[0] != "alice|1.1.1|true" {
 				t.Fatalf("version output=%v", chats)
 			}
 		}},

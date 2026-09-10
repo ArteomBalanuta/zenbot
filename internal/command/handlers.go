@@ -233,17 +233,50 @@ func (c *kickCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	a := args(c.message)
-	if len(a) == 0 {
+	arguments := args(c.message)
+	if len(arguments) == 0 {
 		return model.FAILED, nil
 	}
-	if c.engine.GetActiveUserByName(a[0]) == nil {
-		reply(&c.commandBase, " user not found")
-		return model.FAILED, nil
+	operations, err := moderationOperations(c.engine)
+	if err != nil {
+		return model.FAILED, err
 	}
-	c.engine.Kick(a[0], "abcdef")
-	reply(&c.commandBase, " user has been kicked")
+	switch arguments[0] {
+	case "-m":
+		for _, rawTarget := range arguments[1:] {
+			if err := kickActiveUser(ctx, c.engine, operations, rawTarget); err != nil {
+				return model.FAILED, err
+			}
+		}
+	case "-c":
+		if len(arguments) < 2 {
+			return model.SUCCESSFUL, nil
+		}
+		users := c.engine.GetActiveUsers()
+		if users == nil {
+			return model.SUCCESSFUL, nil
+		}
+		for user := range *users {
+			if user != nil && strings.Contains(user.Name, arguments[1]) {
+				if err := operations.KickNick(ctx, common.NickTarget(user.Name)); err != nil {
+					return model.FAILED, err
+				}
+			}
+		}
+	default:
+		if err := kickActiveUser(ctx, c.engine, operations, arguments[0]); err != nil {
+			return model.FAILED, err
+		}
+	}
 	return model.SUCCESSFUL, nil
+}
+
+func kickActiveUser(ctx context.Context, engine common.Engine, operations common.ModerationOperations, rawTarget string) error {
+	target, err := activeModerationTarget(engine, rawTarget)
+	if err != nil || target == nil {
+		return err
+	}
+	return operations.KickNick(ctx, common.NickTarget(target.Name))
 }
 
 type unbanCommand struct{ commandBase }

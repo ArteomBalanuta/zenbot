@@ -22,8 +22,8 @@ func TestRegisterUserUtilitiesDispatchesEveryAliasThroughChatListener(t *testing
 	}{
 		{alias: "ping", want: "response time: 0 milliseconds"},
 		{alias: "p", want: "response time: 0 milliseconds"},
-		{alias: "version", want: "1.0.29"},
-		{alias: "v", want: "1.0.29"},
+		{alias: "version", want: "1.1.1"},
+		{alias: "v", want: "1.1.1"},
 		{alias: "ape", want: "⣀"},
 		{alias: "harambe", want: "⣀"},
 		{alias: "coin", want: ""},
