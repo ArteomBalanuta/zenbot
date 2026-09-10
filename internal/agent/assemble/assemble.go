@@ -205,11 +205,11 @@ func project(source []Message, budget int) Projection {
 	return Projection{Messages: out, SerializedChars: chars, EstimatedTokens: (chars + 3) / 4, BudgetChars: budget, Pruned: removed > 0, Overflow: chars > budget, RemovedUnits: removed, Fingerprint: fingerprint(out)}
 }
 func serialized(ms []Message) int {
-	n := 0
-	for _, m := range ms {
-		n += len([]byte(m.Role() + "|" + m.Content() + "|" + m.ToolCallID() + fmt.Sprint(m.ToolCalls())))
+	encoded, err := json.Marshal(messageWireFormat(ms))
+	if err != nil {
+		return maxContextTokens * 4
 	}
-	return n
+	return len(encoded)
 }
 func fingerprint(ms []Message) string {
 	h := sha256.New()
@@ -217,6 +217,29 @@ func fingerprint(ms []Message) string {
 		h.Write([]byte(m.Role() + "|" + m.Content() + "|" + m.ToolCallID() + fmt.Sprint(m.ToolCalls())))
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func messageWireFormat(messages []Message) []map[string]any {
+	out := make([]map[string]any, len(messages))
+	for index, message := range messages {
+		item := map[string]any{"role": message.Role(), "content": message.ContentNullable()}
+		if message.ToolCallID() != "" {
+			item["tool_call_id"] = message.ToolCallID()
+		}
+		if calls := message.ToolCalls(); len(calls) > 0 {
+			toolCalls := make([]map[string]any, len(calls))
+			for callIndex, call := range calls {
+				arguments, _ := json.Marshal(call.Arguments())
+				toolCalls[callIndex] = map[string]any{
+					"id": call.ID(), "type": "function",
+					"function": map[string]any{"name": call.Name(), "arguments": string(arguments)},
+				}
+			}
+			item["tool_calls"] = toolCalls
+		}
+		out[index] = item
+	}
+	return out
 }
 
 // PreparedRequest is immutable request state prepared before provider execution.
@@ -263,14 +286,10 @@ func (a *Assembler) AssembleWithHistoricalEvidence(ctx context.Context, inv runt
 	if a == nil || a.system == nil {
 		return PreparedRequest{}, errors.New("assembler is not initialized")
 	}
-	maxTokens := a.config.MaxContextTokens
-	if maxTokens <= 0 {
-		budgetChars := 32000
-		if a.config.MaxPromptChars > 0 && a.config.MaxPromptChars <= 500000 && a.config.MaxPromptChars*8 > budgetChars {
-			budgetChars = a.config.MaxPromptChars * 8
-		}
-		maxTokens = (budgetChars + 3) / 4
+	if a.config.MaxPromptChars > 0 && utf8.RuneCountInString(inv.Prompt()) > a.config.MaxPromptChars {
+		return PreparedRequest{}, fmt.Errorf("agent prompt character limit exceeded")
 	}
+	maxTokens := a.maxContextTokens()
 	sys, e := a.system.RenderWithHistoricalEvidence(inv, inv.RequestID(), "", kind, ToolEvidence{}, "CANDIDATE", nil)
 	if e != nil {
 		return PreparedRequest{}, e
@@ -291,26 +310,66 @@ func (a *Assembler) AssembleWithHistoricalEvidence(ctx context.Context, inv runt
 		optional = append(optional, recentContextUnits(recent)...)
 	}
 	filteredTools := cloneAnySlice(filterTools(tools, inv.Mode(), inv.Prompt()))
-	manifestTokens := 0
-	if len(filteredTools) > 0 {
-		manifest, marshalErr := json.Marshal(filteredTools)
-		if marshalErr != nil {
-			return PreparedRequest{}, fmt.Errorf("encode agent tool manifest: %w", marshalErr)
-		}
-		manifestTokens = (len(manifest) + 3) / 4
-	}
-	pr, e := (ContextBudgeter{}).Project(ContextInput{
+	pr, e := ProjectTurn(nil, filteredTools, nil, nil, ContextInput{
 		RequiredPrefix: []Message{llm.NewLlmMessage("system", sys, nil, "")},
 		Optional:       optional,
 		RequiredSuffix: []Message{llm.NewLlmMessage("user", promptText, nil, "")},
 		MaxTokens:      maxTokens,
 		ReserveTokens:  a.config.ContextReserveTokens,
-		ManifestTokens: manifestTokens,
 	})
 	if e != nil {
 		return PreparedRequest{}, e
 	}
 	return PreparedRequest{messages: pr.Messages, tools: filteredTools, contextualized: promptText, kind: kind, projection: pr}, nil
+}
+
+// ProjectTurn reapplies this assembler's configured limits to an evolving
+// request transcript. newestRequest is the immutable contextualized request
+// produced during initial assembly.
+func (a *Assembler) ProjectTurn(messages []Message, tools []any, taskState *turn.TaskState, observations *ObservationStore, newestRequest Message) (Projection, error) {
+	if a == nil || a.system == nil {
+		return Projection{}, errors.New("assembler is not initialized")
+	}
+	var policy Message
+	foundPolicy := false
+	for _, message := range messages {
+		if message.Role() == "system" && !strings.HasPrefix(message.Content(), "TASK_STATE_JSON=") {
+			policy = message
+			foundPolicy = true
+			break
+		}
+	}
+	if !foundPolicy || newestRequest.Role() != "user" {
+		return Projection{}, errors.New("turn projection requires policy and newest request")
+	}
+	foundNewest := false
+	for _, message := range messages {
+		if messageFingerprint(message) == messageFingerprint(newestRequest) {
+			foundNewest = true
+			break
+		}
+	}
+	if !foundNewest {
+		return Projection{}, errors.New("turn projection transcript lost newest request")
+	}
+	return ProjectTurn(messages, tools, taskState, observations, ContextInput{
+		RequiredPrefix: []Message{policy},
+		RequiredSuffix: []Message{newestRequest},
+		MaxTokens:      a.maxContextTokens(),
+		ReserveTokens:  a.config.ContextReserveTokens,
+	})
+}
+
+func (a *Assembler) maxContextTokens() int {
+	maxTokens := a.config.MaxContextTokens
+	if maxTokens > 0 {
+		return maxTokens
+	}
+	budgetChars := 32000
+	if a.config.MaxPromptChars > 0 && a.config.MaxPromptChars <= 500000 && a.config.MaxPromptChars*8 > budgetChars {
+		budgetChars = a.config.MaxPromptChars * 8
+	}
+	return (budgetChars + 3) / 4
 }
 
 func historyContextUnits(history []Message) []ContextUnit {

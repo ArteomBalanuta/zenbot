@@ -410,6 +410,16 @@ func TestTruncateBoundsAndCancellation(t *testing.T) {
 	}
 }
 
+func TestAssembleRejectsPromptOverMaxPromptChars(t *testing.T) {
+	a, err := New(Config{MaxPromptChars: 3, MaxContextTokens: 100}, compactCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Assemble(context.Background(), invocation(runtime.DIRECT, "😀😀😀😀"), nil, "", nil, Talk); err == nil || !strings.Contains(err.Error(), "prompt character limit") {
+		t.Fatalf("oversized prompt error=%v", err)
+	}
+}
+
 func TestInvalidModeAndCatalogErrorsPropagate(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {

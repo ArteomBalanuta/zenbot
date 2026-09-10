@@ -27,6 +27,21 @@ type RoutingMetadata struct {
 // construction call sites.
 type DescriptorOption func(*Descriptor) error
 
+// WithMaxModelResultBytes bounds the complete provider-visible observation
+// envelope. The floor leaves room for typed identity and truncation metadata.
+func WithMaxModelResultBytes(maxBytes int) DescriptorOption {
+	return func(descriptor *Descriptor) error {
+		if descriptor == nil {
+			return &ContractError{"nil descriptor"}
+		}
+		if maxBytes < 512 {
+			return &ContractError{"model result limit must be at least 512 bytes"}
+		}
+		descriptor.maxModelResultBytes = maxBytes
+		return nil
+	}
+}
+
 // WithPrimaryIntent assigns the stable semantic operation owned by this
 // provider. A caller-visible manifest may expose only one provider per intent.
 func WithPrimaryIntent(intent string) DescriptorOption {
@@ -142,6 +157,7 @@ type ManifestEntry struct {
 	RequiredSuccessfulTools []string        `json:"prerequisites"`
 	Idempotent              bool            `json:"idempotent"`
 	TimeoutMs               int64           `json:"timeoutMs"`
+	MaxModelResultBytes     int             `json:"maxModelResultBytes"`
 	Resources               Resources       `json:"resources"`
 	WhenNotUse              []string        `json:"whenNotUse"`
 }
@@ -164,6 +180,7 @@ func NewManifestEntry(descriptor Descriptor) ManifestEntry {
 		RequiredSuccessfulTools: descriptor.RequiredSuccessfulTools(),
 		Idempotent:              descriptor.Idempotent(),
 		TimeoutMs:               descriptor.Timeout().Milliseconds(),
+		MaxModelResultBytes:     descriptor.MaxModelResultBytes(),
 		Resources: Resources{
 			Reads:  descriptor.ResourceReads(),
 			Writes: descriptor.ResourceWrites(),

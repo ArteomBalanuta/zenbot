@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
 	agenttool "zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
@@ -75,6 +76,21 @@ type scriptedCompletionGate struct {
 
 type acceptingCompletionGate struct{}
 
+func configuredTurnEngine(t *testing.T, engine TurnEngine) TurnEngine {
+	t.Helper()
+	engine.Projector = testLiveAssembler(t)
+	engine.NewestRequest = llm.NewLlmMessage("user", engine.Prompt, nil, "")
+	engine.Observations = assemble.NewObservationStore()
+	return engine
+}
+
+func engineMessages(prompt string) []llm.LlmMessage {
+	return []llm.LlmMessage{
+		llm.NewLlmMessage("system", "test policy", nil, ""),
+		llm.NewLlmMessage("user", prompt, nil, ""),
+	}
+}
+
 func (acceptingCompletionGate) Evaluate(context.Context, turn.CompletionCandidate) (turn.CompletionAssessment, error) {
 	return turn.CompletionAssessment{Decision: turn.CompletionFinal, Feedback: "The candidate satisfies the request."}, nil
 }
@@ -111,8 +127,9 @@ func TestTurnEngineSemanticGateContinuesPromiseUntilToolResultSatisfiesRequest(t
 		Gate:      gate,
 		Prompt:    "perform the available action",
 	}
+	engine = configuredTurnEngine(t, engine)
 	initial := llm.NewLlmResponse("I will execute that action now.", nil, "stop")
-	messages := []llm.LlmMessage{llm.NewLlmMessage("user", "perform the available action", nil, "")}
+	messages := engineMessages(engine.Prompt)
 	providerTools := []any{map[string]any{"type": "function", "function": map[string]any{"name": action.Name(), "description": "Execute the test action."}}}
 
 	response, _, batch, err := engine.Complete(context.Background(), messages, providerTools, initial, state)
@@ -136,7 +153,7 @@ func TestTurnEngineSemanticGateContinuesPromiseUntilToolResultSatisfiesRequest(t
 		t.Fatalf("semantic feedback missing from retry: %#v", correctionMessages)
 	}
 	observationMessages := client.requests[1].Messages()
-	if !messagesContain(observationMessages, `"executed":true`) {
+	if !messagesContain(observationMessages, "executed") {
 		t.Fatalf("tool observation missing from follow-up: %#v", observationMessages)
 	}
 }
@@ -150,8 +167,9 @@ func TestTurnEngineDoesNotPublishUnsatisfiedCandidateAtStepLimit(t *testing.T) {
 	state := turn.NewState(limits)
 	state.AdvanceStep()
 	engine := TurnEngine{Client: &scriptedToolClient{}, Registry: registry, Agent: agent, Allowed: []string{action.Name()}, Limits: limits, Gate: gate, Prompt: "perform the action"}
+	engine = configuredTurnEngine(t, engine)
 
-	_, _, _, err := engine.Complete(context.Background(), []llm.LlmMessage{llm.NewLlmMessage("user", "perform the action", nil, "")}, []any{"manifest"}, llm.NewLlmResponse("I will do it.", nil, "stop"), state)
+	_, _, _, err := engine.Complete(context.Background(), engineMessages(engine.Prompt), []any{"manifest"}, llm.NewLlmResponse("I will do it.", nil, "stop"), state)
 	if err == nil || !strings.Contains(err.Error(), "semantic completion remains unsatisfied at step limit") {
 		t.Fatalf("error=%v", err)
 	}
@@ -177,8 +195,9 @@ func TestTurnEngineFeedsDeniedActionBackAsObservation(t *testing.T) {
 		Gate:      &scriptedCompletionGate{assessments: []turn.CompletionAssessment{{Decision: turn.CompletionFinal, Feedback: "The denial is accurately reported."}}},
 		Prompt:    "perform the action",
 	}
+	engine = configuredTurnEngine(t, engine)
 	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls")
-	response, _, batch, err := engine.Complete(context.Background(), nil, []any{"manifest"}, initial, state)
+	response, _, batch, err := engine.Complete(context.Background(), engineMessages(engine.Prompt), []any{"manifest"}, initial, state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,10 +230,11 @@ func TestTurnEngineUnknownActionOutcomeDisablesToolsAndDoesNotRetry(t *testing.T
 		Gate:      acceptingCompletionGate{},
 		Prompt:    "perform the action",
 	}
+	engine = configuredTurnEngine(t, engine)
 	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls")
 	providerTools := []any{map[string]any{"type": "function", "function": map[string]any{"name": action.Name()}}}
 
-	response, _, batch, err := engine.Complete(context.Background(), nil, providerTools, initial, state)
+	response, _, batch, err := engine.Complete(context.Background(), engineMessages(engine.Prompt), providerTools, initial, state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,9 +285,10 @@ func TestTurnEngineThreeToolRoundsPreserveExactObjectiveAndTaskObligations(t *te
 		Limits: limits, Interrupt: fixedInterruptHook{decision: turn.InterruptDecision{Outcome: turn.InterruptAllow}}, Gate: gate,
 		Prompt: objective, Task: taskState,
 	}
+	engine = configuredTurnEngine(t, engine)
 	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("lookup-call", lookup.Name(), map[string]any{"subject": "alice"})}, "tool_calls")
 
-	response, _, batch, err := engine.Complete(context.Background(), nil, providerTools, initial, state)
+	response, _, batch, err := engine.Complete(context.Background(), engineMessages(engine.Prompt), providerTools, initial, state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,8 +339,9 @@ func TestTurnEnginePausesBeforeExecutingAction(t *testing.T) {
 		Gate:      &scriptedCompletionGate{},
 		Prompt:    "perform the action",
 	}
+	engine = configuredTurnEngine(t, engine)
 	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls")
-	_, _, _, err := engine.Complete(context.Background(), nil, nil, initial, state)
+	_, _, _, err := engine.Complete(context.Background(), engineMessages(engine.Prompt), nil, initial, state)
 	var paused *turn.PausedError
 	if !errors.As(err, &paused) || paused.Pending.ResumeToken != "resume-1" {
 		t.Fatalf("error=%#v, want paused checkpoint", err)

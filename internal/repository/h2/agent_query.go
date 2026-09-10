@@ -72,7 +72,11 @@ func (d *Database) ExecuteAgentQuery(ctx context.Context, name string, raw json.
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(map[string]any{"rows": rows})
+		out := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, map[string]any{"name": row.Name, "message": row.Message, "createdOn": row.CreatedOnMillis, "channel": row.Channel})
+		}
+		return json.Marshal(map[string]any{"rows": out})
 	default:
 		return nil, fmt.Errorf("unknown agent database query: %s", name)
 	}

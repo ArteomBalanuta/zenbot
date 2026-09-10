@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/tool"
@@ -20,21 +21,24 @@ import (
 // model transcript, execution state, recovery bounds, and interruption policy
 // isolated from every other request.
 type TurnEngine struct {
-	Client    llm.LlmClient
-	Registry  *tool.Registry
-	Agent     api.Context
-	Allowed   []string
-	Limits    turn.ExecutionLimits
-	Interrupt turn.InterruptHook
-	Final     turn.FinalResponseValidator
-	Recovery  turn.RecoveryPolicy
-	Gate      turn.CompletionGate
-	Prompt    string
-	Task      *turn.TaskState
+	Client        llm.LlmClient
+	Registry      *tool.Registry
+	Agent         api.Context
+	Projector     *assemble.Assembler
+	NewestRequest llm.LlmMessage
+	Observations  *assemble.ObservationStore
+	Allowed       []string
+	Limits        turn.ExecutionLimits
+	Interrupt     turn.InterruptHook
+	Final         turn.FinalResponseValidator
+	Recovery      turn.RecoveryPolicy
+	Gate          turn.CompletionGate
+	Prompt        string
+	Task          *turn.TaskState
 }
 
 func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
-	if e.Client == nil || e.Registry == nil || e.Gate == nil || state == nil || strings.TrimSpace(e.Prompt) == "" {
+	if e.Client == nil || e.Registry == nil || e.Gate == nil || e.Projector == nil || e.Observations == nil || state == nil || strings.TrimSpace(e.Prompt) == "" {
 		return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent turn engine is incomplete")
 	}
 	hook := e.Interrupt
@@ -82,7 +86,11 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 		}
 		batchCalls := make([]execution.Call, 0, len(calls))
 		for _, call := range calls {
-			batchCalls = append(batchCalls, execution.FromLLM(call))
+			candidate := execution.FromLLM(call)
+			if _, duplicate := e.Observations.Full(candidate.ID); duplicate {
+				return llm.LlmResponse{}, nil, nil, fmt.Errorf("invalid agent tool call: duplicate tool call ID across turn: %s", candidate.ID)
+			}
+			batchCalls = append(batchCalls, candidate)
 		}
 		if err := phase.Transition(turn.PhaseGate); err != nil {
 			return llm.LlmResponse{}, nil, nil, err
@@ -108,7 +116,7 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 			}
 		}
 		all = append(all, batch...)
-		messages, err = appendRegistryProtocol(messages, response, batch)
+		messages, err = appendRegistryProtocol(messages, response, batch, e.Observations, e.Registry, e.Agent)
 		if err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}
@@ -131,8 +139,10 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 		} else if err := phase.Transition(turn.PhaseModel); err != nil {
 			return llm.LlmResponse{}, nil, nil, err
 		}
-		messages = withTaskState(messages, task)
-		nextRequest := llm.NewLlmRequest(messages, tools, false, nil, nil)
+		nextRequest, err := e.projectRequest(messages, tools)
+		if err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
 		response, err = e.Client.Complete(observability.WithStage(ctx, stage), nextRequest)
 		if err != nil {
 			return llm.LlmResponse{}, nil, nil, err
@@ -177,11 +187,14 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 				llm.NewLlmMessage("assistant", response.Content(), nil, ""),
 				llm.NewLlmMessage("user", "TASK_OBLIGATION_FEEDBACK="+string(feedback), nil, ""),
 			)
-			messages = withTaskState(messages, e.Task)
 			if err := phase.Transition(turn.PhaseModel); err != nil {
 				return llm.LlmResponse{}, nil, false, err
 			}
-			next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.task_obligation_retry.%d", cycle)), llm.NewLlmRequest(messages, toolsForPending(providerTools, pending, e.Registry, e.Agent), false, nil, nil))
+			request, err := e.projectRequest(messages, toolsForPending(providerTools, pending, e.Registry, e.Agent))
+			if err != nil {
+				return llm.LlmResponse{}, nil, false, err
+			}
+			next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.task_obligation_retry.%d", cycle)), request)
 			if err != nil {
 				return llm.LlmResponse{}, nil, false, err
 			}
@@ -222,12 +235,15 @@ func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachi
 		llm.NewLlmMessage("assistant", response.Content(), nil, ""),
 		llm.NewLlmMessage("user", "SEMANTIC_COMPLETION_FEEDBACK="+string(feedback), nil, ""),
 	)
-	messages = withTaskState(messages, e.Task)
 	if err := phase.Transition(turn.PhaseModel); err != nil {
 		return llm.LlmResponse{}, nil, false, err
 	}
 	observability.Info(ctx, "agent.correction.started", "correction_type", "semantic_completion", "cycle", cycle)
-	next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.semantic_completion_retry.%d", cycle)), llm.NewLlmRequest(messages, providerTools, false, nil, nil))
+	request, err := e.projectRequest(messages, providerTools)
+	if err != nil {
+		return llm.LlmResponse{}, nil, false, err
+	}
+	next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.semantic_completion_retry.%d", cycle)), request)
 	if err != nil {
 		return llm.LlmResponse{}, nil, false, err
 	}
@@ -362,8 +378,11 @@ func (e TurnEngine) finalize(ctx context.Context, phase *turn.PhaseMachine, mess
 			llm.NewLlmMessage("assistant", response.Content(), response.ToolCalls(), ""),
 			llm.NewLlmMessage("user", "Produce one complete final answer to the newest request using the available observations. Do not call tools, repeat an earlier answer, or return an empty response.", nil, ""),
 		)
-		reflectionMessages = withTaskState(reflectionMessages, e.Task)
-		corrected, correctionErr := e.Client.Complete(observability.WithStage(ctx, "llm.final_reflection"), llm.NewLlmRequest(reflectionMessages, nil, false, nil, nil))
+		request, projectionErr := e.projectRequest(reflectionMessages, nil)
+		if projectionErr != nil {
+			return llm.LlmResponse{}, nil, projectionErr
+		}
+		corrected, correctionErr := e.Client.Complete(observability.WithStage(ctx, "llm.final_reflection"), request)
 		if correctionErr != nil {
 			return llm.LlmResponse{}, nil, correctionErr
 		}
@@ -382,40 +401,12 @@ func (e TurnEngine) finalize(ctx context.Context, phase *turn.PhaseMachine, mess
 	return response, messages, nil
 }
 
-func withTaskState(messages []llm.LlmMessage, state *turn.TaskState) []llm.LlmMessage {
-	if state == nil {
-		return append([]llm.LlmMessage(nil), messages...)
+func (e TurnEngine) projectRequest(messages []llm.LlmMessage, tools []any) (llm.LlmRequest, error) {
+	projection, err := e.Projector.ProjectTurn(messages, tools, e.Task, e.Observations, e.NewestRequest)
+	if err != nil {
+		return llm.LlmRequest{}, fmt.Errorf("project agent turn: %w", err)
 	}
-	filtered := make([]llm.LlmMessage, 0, len(messages)+1)
-	for _, message := range messages {
-		if message.Role() == "system" && strings.HasPrefix(message.Content(), "TASK_STATE_JSON=") {
-			continue
-		}
-		filtered = append(filtered, message)
-	}
-	task := state.Contract()
-	satisfiedEvidence := make([]string, 0)
-	for _, evidence := range state.Evidence() {
-		if evidence.ObligationID != "" {
-			satisfiedEvidence = append(satisfiedEvidence, evidence.ObligationID+":"+evidence.CallID)
-		}
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"requestId":            task.RequestID,
-		"requestHash":          task.RequestHash,
-		"objective":            task.Objective,
-		"constraints":          task.Constraints(),
-		"pendingObligations":   state.Pending(),
-		"satisfiedEvidence":    satisfiedEvidence,
-		"unknownActionOutcome": state.HasUnknownActionOutcome(),
-		"prohibitedActionRetries": func() []string {
-			if state.HasUnknownActionOutcome() {
-				return []string{"all action retries for this turn"}
-			}
-			return []string{}
-		}(),
-	})
-	return append(filtered, llm.NewLlmMessage("system", "TASK_STATE_JSON="+string(payload), nil, ""))
+	return llm.NewLlmRequest(projection.Messages, tools, false, nil, projection), nil
 }
 
 func toolsForPending(providerTools []any, pending []turn.Obligation, registry *tool.Registry, agent api.Context) []any {

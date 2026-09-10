@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/observability"
 	"zenbot/internal/agent/turn"
@@ -17,6 +18,7 @@ const (
 	completionGateConversationSize = 6
 	completionGateMessageChars     = 2000
 	completionGateResultChars      = 4000
+	completionGateObservationBytes = 8000
 	completionGateToolChars        = 500
 )
 
@@ -68,6 +70,7 @@ func completionAssessmentDefinition() any {
 		"function": map[string]any{
 			"name":        completionAssessmentTool,
 			"description": "Submit the semantic completion decision for the supplied candidate. This does not execute a Saturn action.",
+			"strict":      true,
 			"parameters": map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -117,10 +120,13 @@ type gateMessage struct {
 }
 
 type gateObservation struct {
-	Tool      string `json:"tool"`
-	Status    string `json:"status"`
-	Content   string `json:"content"`
-	ErrorCode string `json:"errorCode,omitempty"`
+	Tool           string `json:"tool"`
+	Status         string `json:"status"`
+	Content        string `json:"content"`
+	ErrorCode      string `json:"errorCode,omitempty"`
+	ReturnedCount  int    `json:"returnedCount"`
+	Truncated      bool   `json:"truncated"`
+	ContinuationID string `json:"continuationId,omitempty"`
 }
 
 func completionGatePayload(candidate turn.CompletionCandidate) gatePayload {
@@ -141,17 +147,22 @@ func completionGatePayload(candidate turn.CompletionCandidate) gatePayload {
 		})
 	}
 	observations := make([]gateObservation, 0, len(candidate.Results))
-	for _, result := range candidate.Results {
-		status := "success"
-		if result.IsError {
-			status = "error"
+	observationBytes := 0
+	store := assemble.NewObservationStore()
+	for index := len(candidate.Results) - 1; index >= 0; index-- {
+		result := candidate.Results[index]
+		view := store.Store(result, completionGateResultChars)
+		observation := gateObservation{
+			Tool: view.Tool, Status: view.Status, Content: view.Summary,
+			ErrorCode: result.ErrorCode, ReturnedCount: view.ReturnedCount,
+			Truncated: view.Truncated, ContinuationID: view.ContinuationID,
 		}
-		observations = append(observations, gateObservation{
-			Tool:      result.ToolName,
-			Status:    status,
-			Content:   truncateText(result.Content, completionGateResultChars),
-			ErrorCode: result.ErrorCode,
-		})
+		encoded, _ := json.Marshal(observation)
+		if observationBytes+len(encoded) > completionGateObservationBytes {
+			continue
+		}
+		observationBytes += len(encoded)
+		observations = append([]gateObservation{observation}, observations...)
 	}
 	return gatePayload{
 		NewestRequest:  strings.TrimSpace(candidate.Request),

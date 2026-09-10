@@ -150,11 +150,14 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
 	initialRequest := prepared.LlmRequest()
+	newestRequest := llm.NewLlmMessage("user", prepared.ContextualizedPrompt(), nil, "")
+	observations := assemble.NewObservationStore()
 	if taskState != nil {
-		initialRequest = llm.NewLlmRequest(
-			withTaskState(initialRequest.Messages(), taskState), initialRequest.Tools(),
-			initialRequest.BypassPromptCache(), initialRequest.ResponseFormat(), initialRequest.Projection(),
-		).WithToolChoice(initialRequest.ToolChoice())
+		projection, projectionErr := l.Assembler.ProjectTurn(initialRequest.Messages(), initialRequest.Tools(), taskState, observations, newestRequest)
+		if projectionErr != nil {
+			return Completion{}, fmt.Errorf("project initial agent turn: %w", projectionErr)
+		}
+		initialRequest = llm.NewLlmRequest(projection.Messages, initialRequest.Tools(), initialRequest.BypassPromptCache(), initialRequest.ResponseFormat(), projection).WithToolChoice(initialRequest.ToolChoice())
 	}
 	first, err := l.Client.Complete(observability.WithStage(ctx, "llm.initial"), initialRequest)
 	if err != nil {
@@ -183,7 +186,7 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		return Completion{}, errors.New("agent response was truncated")
 	}
 	if l.general {
-		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, initialRequest.Messages(), initialRequest.Tools(), first, l.allowed, l.Limits, state, l.Interrupt, l.Gate, taskState, inv.Prompt())
+		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, l.Assembler, newestRequest, observations, initialRequest.Messages(), initialRequest.Tools(), first, l.allowed, l.Limits, state, l.Interrupt, l.Gate, taskState, inv.Prompt())
 		if loopErr != nil {
 			return Completion{}, loopErr
 		}

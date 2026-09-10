@@ -62,6 +62,32 @@ func TestDatabaseQueryConditionalBranchesRequireOnlyRelevantSelectors(t *testing
 	}
 }
 
+func TestDatabaseQueryResultContractIsConcreteAndBounded(t *testing.T) {
+	descriptor, err := (agenttool.DatabaseQuery{}).Descriptor(historyContext(t, "programming"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, valid := range []string{
+		`{"count":7}`,
+		`{"rows":[{"name":"alice","message":"hello","createdOn":7,"channel":"room"}]}`,
+	} {
+		if err := contract.ValidateResult(descriptor.ResultSchema(), json.RawMessage(valid)); err != nil {
+			t.Fatalf("valid database result rejected: %v", err)
+		}
+	}
+	for _, invalid := range []string{
+		`{"anything":"unbounded"}`,
+		`{"rows":[{"Name":"alice","Message":"hello","CreatedOnMillis":7,"Channel":"room"}]}`,
+	} {
+		if err := contract.ValidateResult(descriptor.ResultSchema(), json.RawMessage(invalid)); err == nil {
+			t.Fatalf("invalid database result accepted: %s", invalid)
+		}
+	}
+	if !strings.Contains(string(descriptor.ResultSchema()), `"maxItems":60`) {
+		t.Fatalf("database rows are not bounded: %s", descriptor.ResultSchema())
+	}
+}
+
 func (r *namedQueryRepositoryStub) ExecuteAgentQuery(_ context.Context, name string, _ json.RawMessage, _, _ string) (json.RawMessage, error) {
 	r.calls++
 	r.name = name

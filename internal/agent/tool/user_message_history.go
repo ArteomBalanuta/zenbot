@@ -26,13 +26,14 @@ func (t UserMessageHistory) Name() string { return userMessageHistoryName }
 
 func (t UserMessageHistory) Descriptor(api.Context) (contract.Descriptor, error) {
 	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"nick":{"type":"string","minLength":1,"maxLength":100},"room":{"type":"string","minLength":1,"maxLength":100},"limit":{"type":"integer","minimum":1,"maximum":500}},"required":["nick"]}`)
+	row := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"trip":{"type":"string"},"hash":{"type":"string"},"message":{"type":"string"},"createdOn":{"type":"integer"},"channel":{"type":"string"}},"required":["name","trip","hash","message","createdOn","channel"]}`)
 	result := contract.SchemaObject(map[string]json.RawMessage{
-		"rows":            json.RawMessage(`{"type":"array"}`),
-		"returnedCount":   json.RawMessage(`{"type":"integer"}`),
-		"oldestCreatedOn": json.RawMessage(`{"type":"any"}`),
-		"newestCreatedOn": json.RawMessage(`{"type":"any"}`),
+		"rows":            json.RawMessage(`{"type":"array","items":` + string(row) + `,"maxItems":500}`),
+		"returnedCount":   json.RawMessage(`{"type":"integer","minimum":0,"maximum":500}`),
+		"oldestCreatedOn": json.RawMessage(`{"oneOf":[{"type":"integer"},{"type":"null"}]}`),
+		"newestCreatedOn": json.RawMessage(`{"oneOf":[{"type":"integer"},{"type":"null"}]}`),
 	}, []string{"rows", "returnedCount", "oldestCreatedOn", "newestCreatedOn"}, false)
-	return contract.NewDescriptor(userMessageHistoryName, "User message history", "Fetch up to 500 latest public messages by one named user across all rooms; pass room only to restrict the search.", "history", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"messages"}, nil, []string{"Do not use for whispers or current-presence claims."}, contract.WithPrimaryIntent("named_user_public_history"))
+	return contract.NewDescriptor(userMessageHistoryName, "User message history", "Fetch up to 500 latest public messages by one named user across all rooms; pass room only to restrict the search.", "history", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"messages"}, nil, []string{"Do not use for whispers or current-presence claims."}, contract.WithPrimaryIntent("named_user_public_history"), contract.WithMaxModelResultBytes(8192))
 }
 
 func (t UserMessageHistory) Execute(ctx context.Context, agent api.Context, args json.RawMessage) (contract.Result, error) {

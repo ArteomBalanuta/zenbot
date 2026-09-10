@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/runtime"
@@ -41,6 +43,37 @@ type typedCommandGateway struct {
 	calls     int
 	command   string
 	arguments string
+}
+
+type tinyBudgetCatalog struct{}
+
+func (tinyBudgetCatalog) Text(string) (string, error) { return "policy", nil }
+func (tinyBudgetCatalog) Formatted(path string, values ...any) (string, error) {
+	if path == "input/router-contextualized-prompt.txt" && len(values) == 4 {
+		return fmt.Sprint(values[3]), nil
+	}
+	return "policy", nil
+}
+
+type largeBudgetTool struct{ name string }
+
+func (tool largeBudgetTool) Name() string { return tool.name }
+func (tool largeBudgetTool) Descriptor(api.Context) (contract.Descriptor, error) {
+	return contract.NewDescriptor(
+		tool.name, tool.name, "Return a large bounded test observation.", "test",
+		contract.AccessUser, contract.ReadOnly, contract.ModelData,
+		json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`),
+		nil, nil, true, time.Second, json.RawMessage(`{"type":"object"}`),
+		[]string{tool.name}, nil, []string{"Do not use outside context-budget tests."},
+		contract.WithMaxModelResultBytes(700),
+	)
+}
+func (tool largeBudgetTool) Execute(context.Context, api.Context, json.RawMessage) (contract.Result, error) {
+	rows := make([]map[string]any, 24)
+	for index := range rows {
+		rows[index] = map[string]any{"index": index, "value": strings.Repeat(tool.name, 12)}
+	}
+	return contract.SuccessResult("", tool.name, map[string]any{"rows": rows}), nil
 }
 
 func (gateway *typedCommandGateway) Execute(_ context.Context, _ api.Context, command, arguments string) (commandgateway.Execution, error) {
@@ -507,6 +540,25 @@ func TestExecuteRegistryBatchRejectsDuplicateCallIDsBeforeExecution(t *testing.T
 	}
 }
 
+func TestRegistryToolLoopRejectsReusedCallIDAcrossRoundsBeforeExecution(t *testing.T) {
+	read := &correctingReadTool{}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("reused", read.Name(), map[string]any{"value": "one"})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("reused", read.Name(), map[string]any{"value": "two"})}, "tool_calls"),
+	}}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2, MaxCallsPerTool: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := runtime.NewInvocation("reused-call-id", runtime.NewContext("room", "caller", "", "", false, nil), "read twice", runtime.DIRECT, "", false)
+	if _, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, ""); err == nil || !strings.Contains(err.Error(), "duplicate tool call ID across turn") {
+		t.Fatalf("duplicate call ID error=%v", err)
+	}
+	if read.calls.Load() != 1 {
+		t.Fatalf("duplicate call ID executed tool %d times", read.calls.Load())
+	}
+}
+
 func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
@@ -655,5 +707,139 @@ func TestRegistryToolLoopReflectsInvalidPlainFinalResponseWithoutTools(t *testin
 	}
 	if len(client.requests[1].Tools()) != 0 || client.requests[1].ToolChoice() != llm.ToolChoiceAuto {
 		t.Fatalf("final reflection retained execution tools: %#v", client.requests[1])
+	}
+}
+
+func TestEveryProviderRequestFitsMultiRoundBudgetAndKeepsProtocolAtomic(t *testing.T) {
+	const maxTokens = 800
+	const reserveTokens = 100
+	assembler, err := assemble.New(assemble.Config{
+		MaxPromptChars: 200, MaxContextTokens: maxTokens, ContextReserveTokens: reserveTokens,
+	}, tinyBudgetCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []agenttool.Tool{
+		largeBudgetTool{name: "large_one"},
+		largeBudgetTool{name: "large_two"},
+		largeBudgetTool{name: "large_three"},
+	}
+	allowed := []string{"large_one", "large_two", "large_three"}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse("I can answer without looking.", nil, "stop"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("call-one", "large_one", map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("call-two", "large_two", map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("call-three", "large_three", map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse("unfinished terminal answer", nil, "length"),
+		llm.NewLlmResponse("final answer from bounded observations", nil, "stop"),
+	}}
+	gate := &scriptedCompletionGate{assessments: []turn.CompletionAssessment{
+		{Decision: turn.CompletionContinue, Feedback: "Use the available tools before answering."},
+		{Decision: turn.CompletionFinal, Feedback: "The terminal answer uses the observations."},
+	}}
+	loop, err := NewRegistryToolLoop(
+		assembler, client, gate, tools, allowed,
+		turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 3, MaxCallsPerTool: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objective := "Use all three sources and report a final answer."
+	inv := runtime.NewInvocation("bounded-multi-round", runtime.NewContext("room", "caller", "", "", false, nil), objective, runtime.DIRECT, "", false)
+	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Response.Content() != "final answer from bounded observations" || len(client.requests) != 6 {
+		t.Fatalf("completion=%#v requests=%d", completion, len(client.requests))
+	}
+	pruned := false
+	for index, request := range client.requests {
+		assertRequestWithinBudget(t, index, request, maxTokens, reserveTokens)
+		assertAtomicToolProtocol(t, index, request.Messages())
+		if !messagesContain(request.Messages(), objective) || !messagesContain(request.Messages(), "TASK_STATE_JSON=") {
+			t.Fatalf("request %d lost immutable objective/task state: %#v", index, request.Messages())
+		}
+		for _, message := range request.Messages() {
+			if message.Role() == "tool" && !json.Valid([]byte(message.Content())) {
+				t.Fatalf("request %d contains invalid observation JSON: %q", index, message.Content())
+			}
+		}
+		if projection, ok := request.Projection().(assemble.Projection); ok && projection.Pruned {
+			pruned = true
+		}
+	}
+	if !pruned {
+		t.Fatal("tiny multi-round budget never pruned an optional context unit")
+	}
+}
+
+func TestToolLoopEnforcesMaxPromptCharsBeforeProviderCall(t *testing.T) {
+	assembler, err := assemble.New(assemble.Config{MaxPromptChars: 3, MaxContextTokens: 500}, tinyBudgetCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := &correctingReadTool{}
+	client := &scriptedToolClient{}
+	loop, err := NewRegistryToolLoop(assembler, client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := runtime.NewInvocation("oversized", runtime.NewContext("room", "caller", "", "", false, nil), "😀😀😀😀", runtime.DIRECT, "", false)
+	if _, err := loop.CompleteWithEvidence(context.Background(), invocation, nil, ""); err == nil || !strings.Contains(err.Error(), "prompt character limit") {
+		t.Fatalf("oversized prompt error=%v", err)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("provider was called %d times for an oversized prompt", len(client.requests))
+	}
+}
+
+func assertRequestWithinBudget(t *testing.T, index int, request llm.LlmRequest, maxTokens, reserveTokens int) {
+	t.Helper()
+	messages := make([]map[string]any, 0, len(request.Messages()))
+	for _, message := range request.Messages() {
+		item := map[string]any{"role": message.Role(), "content": message.ContentNullable()}
+		if message.ToolCallID() != "" {
+			item["tool_call_id"] = message.ToolCallID()
+		}
+		if calls := message.ToolCalls(); len(calls) > 0 {
+			encodedCalls := make([]map[string]any, len(calls))
+			for callIndex, call := range calls {
+				arguments, _ := json.Marshal(call.Arguments())
+				encodedCalls[callIndex] = map[string]any{"id": call.ID(), "type": "function", "function": map[string]any{"name": call.Name(), "arguments": string(arguments)}}
+			}
+			item["tool_calls"] = encodedCalls
+		}
+		messages = append(messages, item)
+	}
+	messageJSON, _ := json.Marshal(messages)
+	toolJSON, _ := json.Marshal(request.Tools())
+	estimatedTokens := (len(messageJSON) + len(toolJSON) + 64 + 3) / 4
+	if estimatedTokens+reserveTokens > maxTokens {
+		t.Fatalf("request %d estimated tokens=%d + reserve=%d exceeds %d", index, estimatedTokens, reserveTokens, maxTokens)
+	}
+}
+
+func assertAtomicToolProtocol(t *testing.T, requestIndex int, messages []llm.LlmMessage) {
+	t.Helper()
+	for index := 0; index < len(messages); index++ {
+		message := messages[index]
+		calls := message.ToolCalls()
+		if len(calls) == 0 {
+			if message.Role() == "tool" {
+				t.Fatalf("request %d has orphan tool message at %d", requestIndex, index)
+			}
+			continue
+		}
+		if message.Role() != "assistant" || index+len(calls) >= len(messages) {
+			t.Fatalf("request %d has incomplete assistant tool-call unit at %d", requestIndex, index)
+		}
+		for offset, call := range calls {
+			observation := messages[index+offset+1]
+			if observation.Role() != "tool" || observation.ToolCallID() != call.ID() {
+				t.Fatalf("request %d split tool call %q at %d", requestIndex, call.ID(), index)
+			}
+		}
+		index += len(calls)
 	}
 }

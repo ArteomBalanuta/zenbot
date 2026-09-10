@@ -33,6 +33,7 @@ const (
 type Descriptor struct {
 	name, label, description, category         string
 	primaryIntent                              string
+	maxModelResultBytes                        int
 	access                                     Access
 	effect                                     Effect
 	mode                                       ResultMode
@@ -46,6 +47,8 @@ type Descriptor struct {
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+const DefaultMaxModelResultBytes = 8192
 
 func NewDescriptor(name, label, description, category string, access Access, effect Effect, mode ResultMode, parameters json.RawMessage, capabilities, prerequisites []string, idempotent bool, timeout time.Duration, resultSchema json.RawMessage, reads, writes, whenNotUse []string, options ...DescriptorOption) (Descriptor, error) {
 	if !nameRE.MatchString(name) {
@@ -68,7 +71,7 @@ func NewDescriptor(name, label, description, category string, access Access, eff
 	if err := ValidateSchema(resultSchema, false); err != nil {
 		return Descriptor{}, err
 	}
-	descriptor := Descriptor{name: name, label: label, description: description, category: category, primaryIntent: name, access: access, effect: effect, mode: mode, parameters: clone(parameters), resultSchema: clone(resultSchema), capabilities: sortedClone(capabilities), prerequisites: sortedClone(prerequisites), reads: sortedClone(reads), writes: sortedClone(writes), idempotent: idempotent, timeout: timeout, whenNotUse: append([]string(nil), whenNotUse...)}
+	descriptor := Descriptor{name: name, label: label, description: description, category: category, primaryIntent: name, maxModelResultBytes: DefaultMaxModelResultBytes, access: access, effect: effect, mode: mode, parameters: clone(parameters), resultSchema: clone(resultSchema), capabilities: sortedClone(capabilities), prerequisites: sortedClone(prerequisites), reads: sortedClone(reads), writes: sortedClone(writes), idempotent: idempotent, timeout: timeout, whenNotUse: append([]string(nil), whenNotUse...)}
 	for _, option := range options {
 		if option == nil {
 			return Descriptor{}, &ContractError{"nil descriptor option"}
@@ -98,6 +101,7 @@ func (d Descriptor) Label() string                  { return d.label }
 func (d Descriptor) Description() string            { return d.description }
 func (d Descriptor) Category() string               { return d.category }
 func (d Descriptor) PrimaryIntent() string          { return d.primaryIntent }
+func (d Descriptor) MaxModelResultBytes() int       { return d.maxModelResultBytes }
 func (d Descriptor) Access() Access                 { return d.access }
 func (d Descriptor) Effect() Effect                 { return d.effect }
 func (d Descriptor) ResultMode() ResultMode         { return d.mode }

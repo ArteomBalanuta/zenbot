@@ -28,7 +28,12 @@ func (t DatabaseQuery) Descriptor(api.Context) (contract.Descriptor, error) {
 		{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","const":"recent_messages_for_requester"},"limit":{"type":"integer","minimum":1,"maximum":60}},"required":["query"]},
 		{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","const":"recent_messages_for_room"},"room":{"type":"string","minLength":1,"maxLength":100},"limit":{"type":"integer","minimum":1,"maximum":60}},"required":["query","room"]}
 	]}`)
-	return contract.NewDescriptor(databaseQueryName, "Approved database query", "Run one fixed read-only database query.", "database", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, json.RawMessage(`{"type":"any"}`), []string{"database"}, nil, []string{"Do not use for generated SQL or private data."}, contract.WithPrimaryIntent("approved_database_query"))
+	row := `{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"message":{"type":"string"},"createdOn":{"type":"integer"},"channel":{"type":"string"}},"required":["name","message","createdOn","channel"]}`
+	result := json.RawMessage(`{"oneOf":[
+		{"type":"object","additionalProperties":false,"properties":{"count":{"type":"integer","minimum":0}},"required":["count"]},
+		{"type":"object","additionalProperties":false,"properties":{"rows":{"type":"array","items":` + row + `,"maxItems":60}},"required":["rows"]}
+	]}`)
+	return contract.NewDescriptor(databaseQueryName, "Approved database query", "Run one fixed read-only database query.", "database", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, 2*time.Second, result, []string{"database"}, nil, []string{"Do not use for generated SQL or private data."}, contract.WithPrimaryIntent("approved_database_query"), contract.WithMaxModelResultBytes(8192))
 }
 func (t DatabaseQuery) Execute(ctx context.Context, agent api.Context, raw json.RawMessage) (contract.Result, error) {
 	if t.Repository == nil {

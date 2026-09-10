@@ -48,6 +48,32 @@ func TestVerifiedRoomDeliveryRequiresCommittedEffectAndPositiveReceipt(t *testin
 	}
 }
 
+func TestDescriptorOwnsValidatedModelResultLimit(t *testing.T) {
+	newDescriptor := func(options ...DescriptorOption) (Descriptor, error) {
+		return NewDescriptor(
+			"bounded", "Bounded", "Return one bounded result.", "test",
+			AccessUser, ReadOnly, ModelData,
+			json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`),
+			nil, nil, true, time.Second, json.RawMessage(`{"type":"object"}`),
+			[]string{"test"}, nil, []string{"Do not use outside tests."}, options...,
+		)
+	}
+	descriptor, err := newDescriptor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.MaxModelResultBytes() <= 0 {
+		t.Fatalf("default model result limit=%d", descriptor.MaxModelResultBytes())
+	}
+	descriptor, err = newDescriptor(WithMaxModelResultBytes(4096))
+	if err != nil || descriptor.MaxModelResultBytes() != 4096 {
+		t.Fatalf("configured descriptor=%#v err=%v", descriptor, err)
+	}
+	if _, err := newDescriptor(WithMaxModelResultBytes(0)); err == nil {
+		t.Fatal("zero model result limit was accepted")
+	}
+}
+
 func TestValidateResultEnforcesRequiredObjectFields(t *testing.T) {
 	s := SchemaObject(map[string]json.RawMessage{"answer": SchemaString()}, []string{"answer"}, false)
 	if err := ValidateResult(s, json.RawMessage(`{}`)); err == nil {

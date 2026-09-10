@@ -9,6 +9,7 @@ import (
 
 	"zenbot/internal/agent/api"
 	agenttool "zenbot/internal/agent/tool"
+	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/repository"
 )
 
@@ -71,6 +72,12 @@ func TestUserMessageHistoryDescriptorAndRestrictedJSONResult(t *testing.T) {
 	}
 	if r.IsError {
 		t.Fatalf("result=%#v", r)
+	}
+	if err := contract.ValidateResult(d.ResultSchema(), json.RawMessage(r.Content)); err != nil {
+		t.Fatalf("concrete history result schema rejected execution output: %v", err)
+	}
+	if !strings.Contains(string(d.ResultSchema()), `"maxItems":500`) || !strings.Contains(string(d.ResultSchema()), `"createdOn"`) {
+		t.Fatalf("history result schema is not concrete and bounded: %s", d.ResultSchema())
 	}
 
 	_, err = tool.Execute(context.Background(), historyContext(t, "Lounge"), json.RawMessage(`{"nick":"Alice","room":" other ","limit":2}`))
