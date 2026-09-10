@@ -333,7 +333,7 @@ func suppressRegistryReply(registry *tool.Registry, agent api.Context, batch []t
 		return false
 	}
 	for _, item := range batch {
-		if item.Result.IsError {
+		if !item.Result.VerifiedRoomDelivery() {
 			return false
 		}
 		registered, ok := registry.Lookup(item.Call.Name)

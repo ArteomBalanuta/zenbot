@@ -24,7 +24,7 @@ func TestLastOnlineSelectsLatestNonPresenceMessageAndJoinedRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !record.LastMessage.Valid || record.LastMessage.String != "latest" || !record.LastSeenMillis.Valid || record.LastSeenMillis.Int64 != 4000 {
+	if !record.Found || !record.LastMessage.Valid || record.LastMessage.String != "latest" || !record.LastSeenMillis.Valid || record.LastSeenMillis.Int64 != 4000 {
 		t.Fatalf("last message=%+v last seen=%+v", record.LastMessage, record.LastSeenMillis)
 	}
 	if !record.JoinedMillis.Valid || record.JoinedMillis.Int64 != 5000 {
@@ -45,7 +45,7 @@ func TestLastOnlineUsesCurrentPresenceTableForSessionJoin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !record.JoinedMillis.Valid || record.JoinedMillis.Int64 != 3000 {
+	if !record.Found || !record.JoinedMillis.Valid || record.JoinedMillis.Int64 != 3000 {
 		t.Fatalf("joined=%+v", record.JoinedMillis)
 	}
 }
@@ -63,18 +63,18 @@ func TestLastOnlineMatchesNameOrTripWithSaturnCaseSemantics(t *testing.T) {
 	}
 
 	byName, err := d.LastOnline(ctx, "Merc")
-	if err != nil || !byName.LastMessage.Valid || byName.LastMessage.String != "by-name" {
+	if err != nil || !byName.Found || !byName.LastMessage.Valid || byName.LastMessage.String != "by-name" {
 		t.Fatalf("name record=%+v err=%v", byName, err)
 	}
 	byTrip, err := d.LastOnline(ctx, "Trip-B")
-	if err != nil || !byTrip.LastMessage.Valid || byTrip.LastMessage.String != "by-trip" {
+	if err != nil || !byTrip.Found || !byTrip.LastMessage.Valid || byTrip.LastMessage.String != "by-trip" {
 		t.Fatalf("trip record=%+v err=%v", byTrip, err)
 	}
 	missing, err := d.LastOnline(ctx, "merc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if missing.LastMessage.Valid || missing.LastSeenMillis.Valid || missing.JoinedMillis.Valid {
+	if missing.Found || missing.LastMessage.Valid || missing.LastSeenMillis.Valid || missing.JoinedMillis.Valid {
 		t.Fatalf("case-folded unexpectedly: %+v", missing)
 	}
 }
@@ -85,7 +85,7 @@ func TestLastOnlineReturnsEmptyRecordForAbsentTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.LastMessage.Valid || record.LastSeenMillis.Valid || record.JoinedMillis.Valid {
+	if record.Found || record.LastMessage.Valid || record.LastSeenMillis.Valid || record.JoinedMillis.Valid {
 		t.Fatalf("record=%+v", record)
 	}
 }

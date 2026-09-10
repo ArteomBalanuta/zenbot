@@ -10,10 +10,20 @@ import (
 	"time"
 
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/commandgateway"
 	agenttool "zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/command"
 )
+
+func verifiedCommandExecution(messages ...string) commandgateway.Execution {
+	return commandgateway.Execution{
+		Status:           commandgateway.OutcomeSucceeded,
+		EffectsCommitted: true,
+		Messages:         append([]string(nil), messages...),
+		Delivery:         &commandgateway.DeliveryReceipt{Count: len(messages)},
+	}
+}
 
 type runCommandGatewayStub struct {
 	calls              int
@@ -76,7 +86,7 @@ func TestRunCommandDescriptorAddsModerationAndPermanentBanAliasesByCapability(t 
 
 func TestRunCommandNormalizesCallsGatewayOnceAndRejectsFailure(t *testing.T) {
 	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
-	gateway := &runCommandGatewayStub{result: command.CommandExecution{Executed: true, Messages: []string{"forecast"}}}
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("forecast")}
 	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":" W ","arguments":" Tokyo "}`))
 	var body struct {
 		Messages       []string `json:"messages"`
@@ -88,7 +98,7 @@ func TestRunCommandNormalizesCallsGatewayOnceAndRejectsFailure(t *testing.T) {
 	if err != nil || result.IsError || gateway.calls != 1 || gateway.command != "w" || gateway.arguments != "Tokyo" {
 		t.Fatalf("result=%#v err=%v gateway=%#v", result, err, gateway)
 	}
-	gateway = &runCommandGatewayStub{result: command.CommandExecution{Executed: false}}
+	gateway = &runCommandGatewayStub{result: command.CommandExecution{Status: commandgateway.OutcomeRejected}}
 	result, err = (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"ping"}`))
 	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
@@ -106,7 +116,7 @@ func TestRunCommandTurnsGatewayRejectionIntoCorrectableObservation(t *testing.T)
 
 func TestRunCommandModerationAliasCannotRetargetReviewedAuthor(t *testing.T) {
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")
-	gateway := &runCommandGatewayStub{result: command.CommandExecution{Executed: true}}
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("moderation complete")}
 	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), moderator, json.RawMessage(`{"command":"k","arguments":"bob"}`))
 	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 0 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)

@@ -177,7 +177,7 @@ func TestRunnerSuppressesOrdinaryReplyForCorrectedCommandDelivery(t *testing.T) 
 	runner := Runner{Assembler: testLiveAssembler(t), Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "none"}, ToolLoop: loop}
 	inv := runtime.NewInvocation("runner-prose", runtime.NewContext("room", "caller", "", "", false, nil), "weather?", runtime.MENTION, "", false)
 	result, err := runner.Run(context.Background(), inv)
-	if err != nil || result.ShouldReply() || !result.ToolDeliveryOwned() || result.Text() != "Completed the requested Saturn action." || len(result.DurableEvidence()) != 0 || gateway.calls != 1 {
+	if err != nil || result.ShouldReply() || !result.ToolDeliveryOwned() || result.Text() != "" || len(result.DurableEvidence()) != 0 || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v gateway=%d", result, err, gateway.calls)
 	}
 }

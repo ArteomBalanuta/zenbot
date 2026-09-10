@@ -130,6 +130,8 @@ func (d Definition) JSON() json.RawMessage {
 type Result struct {
 	CallID, ToolName, Content, ErrorCode string
 	IsError                              bool
+	EffectsCommitted                     bool
+	DeliveryCount                        int
 }
 
 func SuccessResult(call, tool string, value any) Result {
@@ -138,6 +140,15 @@ func SuccessResult(call, tool string, value any) Result {
 		b = []byte(s)
 	}
 	return Result{CallID: call, ToolName: tool, Content: string(b)}
+}
+func ActionSuccessResult(call, tool string, value any, deliveryCount int) Result {
+	result := SuccessResult(call, tool, value)
+	result.EffectsCommitted = true
+	result.DeliveryCount = deliveryCount
+	return result
+}
+func (r Result) VerifiedRoomDelivery() bool {
+	return !r.IsError && r.EffectsCommitted && r.DeliveryCount > 0
 }
 func ErrorResult(call, tool, code, msg string) Result {
 	if code == "" {

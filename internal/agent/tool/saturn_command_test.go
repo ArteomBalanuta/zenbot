@@ -58,7 +58,7 @@ func TestSaturnCommandDescriptorCarriesCatalogIdentityAndCapabilityPolicy(t *tes
 }
 
 func TestSaturnCommandDispatchesCanonicalArgumentsAndEnforcesCapabilities(t *testing.T) {
-	gateway := &runCommandGatewayStub{result: commandgateway.Execution{Executed: true, Messages: []string{"sent"}}}
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("sent")}
 	creator, _ := api.NewContextWithCapabilities("room", "creator", "trip", "", false, []string{}, []api.Capability{api.AdminCommands})
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "prefix"), Gateway: gateway}
 	result, err := tool.Execute(context.Background(), creator, json.RawMessage(`{"prefix":"$"}`))
@@ -73,7 +73,7 @@ func TestSaturnCommandDispatchesCanonicalArgumentsAndEnforcesCapabilities(t *tes
 }
 
 func TestSaturnModerationCommandCannotRetargetReviewedAuthor(t *testing.T) {
-	gateway := &runCommandGatewayStub{result: commandgateway.Execution{Executed: true}}
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "kick"), Gateway: gateway}
 	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"mode":"exact","targets":["bob"]}`))
@@ -92,8 +92,41 @@ func TestSaturnCommandTurnsGatewayRejectionIntoCorrectableObservation(t *testing
 	}
 }
 
+func TestSaturnCommandRequiresVerifiedCommittedDelivery(t *testing.T) {
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	tests := []struct {
+		name      string
+		execution commandgateway.Execution
+		wantCode  string
+	}{
+		{name: "rejected", execution: commandgateway.Execution{Status: commandgateway.OutcomeRejected}, wantCode: "COMMAND_REJECTED"},
+		{name: "unknown", execution: commandgateway.Execution{Status: commandgateway.OutcomeUnknown}, wantCode: "ACTION_OUTCOME_UNKNOWN"},
+		{name: "uncommitted", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, Delivery: &commandgateway.DeliveryReceipt{Count: 1}}, wantCode: "UNVERIFIED_ACTION_OUTCOME"},
+		{name: "missing receipt", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true}, wantCode: "UNVERIFIED_ROOM_DELIVERY"},
+		{name: "zero receipt", execution: commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Delivery: &commandgateway.DeliveryReceipt{}}, wantCode: "UNVERIFIED_ROOM_DELIVERY"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway := &runCommandGatewayStub{result: tc.execution}
+			tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather"), Gateway: gateway}
+
+			result, err := tool.Execute(context.Background(), caller, json.RawMessage(`{"location":"Chisinau"}`))
+
+			if err != nil || !result.IsError || result.ErrorCode != tc.wantCode || result.VerifiedRoomDelivery() {
+				t.Fatalf("result=%#v err=%v, want %s", result, err, tc.wantCode)
+			}
+		})
+	}
+
+	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather"), Gateway: &runCommandGatewayStub{result: verifiedCommandExecution("weather")}}
+	result, err := tool.Execute(context.Background(), caller, json.RawMessage(`{"location":"Chisinau"}`))
+	if err != nil || result.IsError || !result.VerifiedRoomDelivery() || result.DeliveryCount != 1 {
+		t.Fatalf("verified result=%#v err=%v", result, err)
+	}
+}
+
 func TestSaturnCommandRejectsCrossFieldArgumentsBeforeGateway(t *testing.T) {
-	gateway := &runCommandGatewayStub{result: commandgateway.Execution{Executed: true}}
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "kick"), Gateway: gateway}
 	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"mode":"contains","targets":["raid","spam"]}`))
@@ -141,7 +174,7 @@ func TestSaturnCommandEncodesRepresentativeCommandFamilies(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gateway := &runCommandGatewayStub{result: commandgateway.Execution{Executed: true}}
+			gateway := &runCommandGatewayStub{result: verifiedCommandExecution("delivered")}
 			command := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, test.canonical), Gateway: gateway}
 			result, err := command.Execute(context.Background(), test.caller, json.RawMessage(test.arguments))
 			if err != nil || result.IsError || gateway.calls != 1 || gateway.command != test.canonical || gateway.arguments != test.wantTail {

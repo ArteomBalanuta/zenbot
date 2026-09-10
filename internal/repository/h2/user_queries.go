@@ -111,9 +111,12 @@ func (d *Database) RecentPresenceNames(ctx context.Context, hash, trip string, a
 
 func (d *Database) LastOnline(ctx context.Context, target string) (repository.LastOnlineRecord, error) {
 	var record repository.LastOnlineRecord
-	if err := d.DB.QueryRowContext(ctx, selectLastOnline, target, target).Scan(&record.LastMessage, &record.LastSeenMillis); err != nil && err != sql.ErrNoRows {
+	if err := d.DB.QueryRowContext(ctx, selectLastOnline, target, target).Scan(&record.LastMessage, &record.LastSeenMillis); err == sql.ErrNoRows {
+		return record, nil
+	} else if err != nil {
 		return repository.LastOnlineRecord{}, err
 	}
+	record.Found = true
 	// Saturn looks up the current session only after finding a last-seen row.
 	if !record.LastSeenMillis.Valid {
 		return record, nil

@@ -3,9 +3,12 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"zenbot/internal/model"
 )
+
+var ErrNotFound = errors.New("not found")
 
 // RegisteredUser is the persisted trip/nick pair rendered by !users.
 type RegisteredUser struct {
@@ -16,6 +19,7 @@ type RegisteredUser struct {
 // LastOnlineRecord is the raw message-history state needed to render Saturn's
 // last-online reply. Invalid fields mean the corresponding query found no row.
 type LastOnlineRecord struct {
+	Found          bool
 	LastMessage    sql.NullString
 	LastSeenMillis sql.NullInt64
 	JoinedMillis   sql.NullInt64

@@ -126,8 +126,8 @@ func TestRestartShutdownDirectExecutionPreservesControllerBehavior(t *testing.T)
 		{name: "shutdown cancellation wins", canonical: "shutdown", cancelled: true, wantStatus: model.FAILED, wantErr: context.Canceled},
 		{name: "restart success", canonical: "restart", wantStatus: model.SUCCESSFUL, wantRestart: 1},
 		{name: "shutdown success", canonical: "shutdown", wantStatus: model.SUCCESSFUL, wantShutdown: 1},
-		{name: "restart request failure is swallowed", canonical: "restart", controllerErr: requestFailure, wantStatus: model.SUCCESSFUL, wantRestart: 1},
-		{name: "shutdown request failure is swallowed", canonical: "shutdown", controllerErr: requestFailure, wantStatus: model.SUCCESSFUL, wantShutdown: 1},
+		{name: "restart request failure is returned", canonical: "restart", controllerErr: requestFailure, wantStatus: model.FAILED, wantErr: requestFailure, wantRestart: 1},
+		{name: "shutdown request failure is returned", canonical: "shutdown", controllerErr: requestFailure, wantStatus: model.FAILED, wantErr: requestFailure, wantShutdown: 1},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

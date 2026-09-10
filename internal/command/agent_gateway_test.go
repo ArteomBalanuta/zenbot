@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
+	"zenbot/internal/service"
 )
 
 type gatewayEngine struct {
@@ -54,7 +56,7 @@ func TestAgentCommandGatewayExecutesTrustedPublicCommandAndCapturesSuccessfulSen
 		t.Fatal(err)
 	}
 	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, " P ", " Tokyo ")
-	if err != nil || !result.Executed || e.sends != 1 || len(result.Messages) != 1 {
+	if err != nil || result.Status != commandgateway.OutcomeSucceeded || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 || e.sends != 1 || len(result.Messages) != 1 {
 		t.Fatalf("result=%#v err=%v sends=%d", result, err, e.sends)
 	}
 	if e.chats[0][:7] != "caller|" {
@@ -68,13 +70,17 @@ func TestAgentCommandGatewayRejectsUnauthorizedUnknownAndSendFailure(t *testing.
 		name, command string
 		authorized    bool
 		sendErr       error
+		wantStatus    commandgateway.OutcomeStatus
+		wantError     bool
 	}{
-		{"unknown", "totally_unknown", true, nil}, {"denied", "captcha", false, nil}, {"send", "ping", true, errors.New("send failed")},
+		{"unknown", "totally_unknown", true, nil, "", true},
+		{"denied", "captcha", false, nil, "", true},
+		{"send", "ping", true, errors.New("send failed"), commandgateway.OutcomeRejected, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}}, authorized: tc.authorized, sendErr: tc.sendErr}
 			result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, tc.command, "")
-			if err == nil || result.Executed || len(result.Messages) != 0 {
+			if (err != nil) != tc.wantError || result.Status != tc.wantStatus || result.EffectsCommitted || result.Delivery != nil || len(result.Messages) != 0 {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
 			if tc.command != "ping" && e.sends != 0 {
@@ -90,7 +96,7 @@ func TestAgentCommandGatewayDoesNotExecuteCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	result, err := NewAgentCommandGateway(e).Execute(ctx, caller, "ping", "")
-	if err == nil || result.Executed || e.sends != 0 {
+	if err == nil || result.Status == commandgateway.OutcomeSucceeded || result.EffectsCommitted || result.Delivery != nil || e.sends != 0 {
 		t.Fatalf("result=%#v err=%v sends=%d", result, err, e.sends)
 	}
 }
@@ -102,7 +108,7 @@ func TestAgentCommandGatewayPreservesTypedModerationOperationsForSyntheticCaller
 		t.Fatal(err)
 	}
 	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "captcha", "on")
-	if err != nil || !result.Executed || len(e.raws) != 1 || e.raws[0] != `{"cmd":"enablecaptcha"}` || len(result.Messages) != 1 {
+	if err != nil || result.Status != commandgateway.OutcomeSucceeded || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 || len(e.raws) != 1 || e.raws[0] != `{"cmd":"enablecaptcha"}` || len(result.Messages) != 1 {
 		t.Fatalf("result=%#v raws=%#v messages=%#v err=%v", result, e.raws, result.Messages, err)
 	}
 }
@@ -158,13 +164,51 @@ func TestAgentCommandGatewayWaitsForEverySnapshotBackedCommandOutcome(t *testing
 
 			select {
 			case execution := <-completed:
-				if execution.err != nil || !execution.result.Executed || len(execution.result.Messages) != 1 || execution.result.Messages[0] != "remote operation result" {
+				if execution.err != nil || execution.result.Status != commandgateway.OutcomeSucceeded || !execution.result.EffectsCommitted || execution.result.Delivery == nil || execution.result.Delivery.Count != 1 || len(execution.result.Messages) != 1 || execution.result.Messages[0] != "remote operation result" {
 					t.Fatalf("execution=%+v", execution)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("gateway did not resume after snapshot completion")
 			}
 		})
+	}
+}
+
+func TestAgentCommandGatewayDoesNotVerifyLegacySuccessWithoutDelivery(t *testing.T) {
+	e := &gatewayEngine{
+		commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}},
+		authorized:        true,
+		sendErr:           errors.New("delivery failed"),
+	}
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "say", "hello")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != commandgateway.OutcomeSucceeded || !result.EffectsCommitted {
+		t.Fatalf("terminal command outcome=%#v", result)
+	}
+	if result.Delivery != nil || len(result.Messages) != 0 {
+		t.Fatalf("failed send was promoted to verified delivery: %#v", result)
+	}
+}
+
+func TestAgentCommandGatewayMapsMissingRecordToNotFoundOutcome(t *testing.T) {
+	e := &gatewayEngine{
+		commandEngineStub: commandEngineStub{
+			users:  map[string]*model.User{"caller": {Name: "caller"}},
+			bundle: &service.Bundle{Users: &service.UserService{Queries: &lastOnlineCommandQueriesStub{}}},
+		},
+		authorized: true,
+	}
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "lastonline", "absent")
+
+	if err != nil || result.Status != commandgateway.OutcomeNotFound || result.EffectsCommitted || result.Delivery != nil {
+		t.Fatalf("result=%#v err=%v", result, err)
 	}
 }
 
@@ -177,18 +221,24 @@ func TestAgentCommandGatewayReturnsSnapshotFailureInsteadOfEarlySuccess(t *testi
 		requests: make(chan snapshot.RoomSnapshotRequest, 1),
 	}
 	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
-	completed := make(chan error, 1)
+	completed := make(chan struct {
+		result CommandExecution
+		err    error
+	}, 1)
 	go func() {
-		_, err := NewAgentCommandGateway(engine).Execute(context.Background(), caller, "list", "lounge")
-		completed <- err
+		result, err := NewAgentCommandGateway(engine).Execute(context.Background(), caller, "list", "lounge")
+		completed <- struct {
+			result CommandExecution
+			err    error
+		}{result: result, err: err}
 	}()
 	request := <-engine.requests
 	request.OnComplete(snapshot.Failed("remote room failed"))
 
 	select {
-	case err := <-completed:
-		if err == nil || err.Error() != "remote room failed" {
-			t.Fatalf("error=%v", err)
+	case outcome := <-completed:
+		if outcome.err != nil || outcome.result.Status != commandgateway.OutcomeRejected || outcome.result.EffectsCommitted || outcome.result.Delivery != nil {
+			t.Fatalf("outcome=%#v", outcome)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("gateway did not resume after snapshot failure")

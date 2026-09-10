@@ -57,6 +57,7 @@ func (f *groupBHistoryFake) SaturnLastMessages(context.Context, *string, string,
 type authFake struct {
 	granted []string
 	err     error
+	failAt  int
 }
 
 func (f *authFake) IsTripAuthorized(context.Context, string, model.Role, []string) (bool, error) {
@@ -64,6 +65,9 @@ func (f *authFake) IsTripAuthorized(context.Context, string, model.Role, []strin
 }
 func (f *authFake) GrantTrip(_ context.Context, t string, r model.Role) error {
 	f.granted = append(f.granted, t+":"+r.String())
+	if f.failAt > 0 && len(f.granted) != f.failAt {
+		return nil
+	}
 	return f.err
 }
 func (f *authFake) ResolveRole(context.Context, string) (model.Role, error) {
@@ -156,13 +160,13 @@ func TestAccessCommandUsesSaturnRawCaseSensitiveRoleParsing(t *testing.T) {
 	}
 }
 
-func TestAccessCommandCommaTargetsUseUserAndJavaSplitSemantics(t *testing.T) {
+func TestAccessCommandCommaTargetsUseRequestedRoleAndJavaSplitSemantics(t *testing.T) {
 	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}}
 	auth := &authFake{}
 	e := newIdentityEngine(ids, auth)
 	d, _ := commandDefinitionFor("grant")
 	status, err := d.New(e, &model.ChatMessage{Name: "mod", Trip: "invoker", Text: "!grant first,second, ADMIN"}).Execute(context.Background())
-	wantGrants := []string{"first:User", "second:User"}
+	wantGrants := []string{"first:Admin", "second:Admin"}
 	wantReply := "mod|\\n Granted new Roles: ADMIN to trips: [first second]|false"
 	if status != model.SUCCESSFUL || err != nil || len(auth.granted) != len(wantGrants) || len(e.chats) != 1 || e.chats[0] != wantReply {
 		t.Fatalf("status=%v err=%v grants=%v chats=%v", status, err, auth.granted, e.chats)
@@ -171,6 +175,32 @@ func TestAccessCommandCommaTargetsUseUserAndJavaSplitSemantics(t *testing.T) {
 		if auth.granted[i] != wantGrants[i] {
 			t.Fatalf("grants=%v want=%v", auth.granted, wantGrants)
 		}
+	}
+}
+
+func TestAccessCommandStopsCommaTargetGrantOnPersistenceFailure(t *testing.T) {
+	errWant := errors.New("second grant failed")
+	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}}
+	auth := &authFake{err: errWant, failAt: 2}
+	e := newIdentityEngine(ids, auth)
+	d, _ := commandDefinitionFor("grant")
+
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Trip: "invoker", Text: "!grant first,second,third ADMIN"}).Execute(context.Background())
+
+	if status != model.FAILED || !errors.Is(err, errWant) {
+		t.Fatalf("status=%v err=%v, want FAILED and %v", status, err, errWant)
+	}
+	wantGrants := []string{"first:Admin", "second:Admin"}
+	if len(auth.granted) != len(wantGrants) {
+		t.Fatalf("grants=%v, want %v", auth.granted, wantGrants)
+	}
+	for index := range wantGrants {
+		if auth.granted[index] != wantGrants[index] {
+			t.Fatalf("grants=%v, want %v", auth.granted, wantGrants)
+		}
+	}
+	if len(e.chats) != 0 {
+		t.Fatalf("success reply sent after failed grant: %v", e.chats)
 	}
 }
 

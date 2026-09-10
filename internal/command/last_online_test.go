@@ -39,6 +39,7 @@ func (s *lastOnlineCommandQueriesStub) LastOnline(_ context.Context, target stri
 
 func TestLastOnlineCommandUsesFirstNormalizedArgumentAndWhisper(t *testing.T) {
 	queries := &lastOnlineCommandQueriesStub{record: repository.LastOnlineRecord{
+		Found:          true,
 		LastMessage:    sql.NullString{String: "hello", Valid: true},
 		LastSeenMillis: sql.NullInt64{Int64: 0, Valid: true},
 	}}

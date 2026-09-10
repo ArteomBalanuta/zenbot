@@ -66,14 +66,30 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 		}
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn command could not run"), nil
 	}
-	if !executed.Executed {
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "command was rejected"), nil
+	if failure, rejected := commandExecutionFailure(t.Name(), executed); rejected {
+		return failure, nil
 	}
 	messages := append([]string(nil), executed.Messages...)
-	if len(messages) == 0 {
-		messages = []string{fmt.Sprintf("Saturn command '%s' executed; its output was sent to the room. No other Saturn command was executed.", name)}
+	return contract.ActionSuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": executed.Delivery.Count}, executed.Delivery.Count), nil
+}
+
+func commandExecutionFailure(toolName string, execution commandgateway.Execution) (contract.Result, bool) {
+	switch execution.Status {
+	case commandgateway.OutcomeUnknown:
+		return contract.ErrorResult("", toolName, "ACTION_OUTCOME_UNKNOWN", "action outcome is unknown"), true
+	case commandgateway.OutcomeNotFound:
+		return contract.ErrorResult("", toolName, "NOT_FOUND", "requested record was not found"), true
+	case commandgateway.OutcomeSucceeded:
+		if !execution.EffectsCommitted {
+			return contract.ErrorResult("", toolName, "UNVERIFIED_ACTION_OUTCOME", "command completion was not verified"), true
+		}
+		if execution.Delivery == nil || execution.Delivery.Count <= 0 {
+			return contract.ErrorResult("", toolName, "UNVERIFIED_ROOM_DELIVERY", "command output delivery was not verified"), true
+		}
+		return contract.Result{}, false
+	default:
+		return contract.ErrorResult("", toolName, "COMMAND_REJECTED", "command was rejected"), true
 	}
-	return contract.SuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": len(executed.Messages)}), nil
 }
 
 func runCommandAliases(caller api.Context) []string {

@@ -47,7 +47,7 @@ func (gateway *typedCommandGateway) Execute(_ context.Context, _ api.Context, co
 	gateway.calls++
 	gateway.command = command
 	gateway.arguments = arguments
-	return commandgateway.Execution{Executed: true, Messages: []string{"delivered"}}, nil
+	return verifiedGatewayExecution("delivered"), nil
 }
 
 func (t roomDeliveryTool) Name() string { return t.name }
@@ -312,7 +312,7 @@ func TestProviderToolDefinitionsFilterModeratorCommandsWithoutRepeatedAuthorizat
 }
 
 func TestRegistryToolLoopSuppressesFinalReplyAfterSuccessfulRoomDelivery(t *testing.T) {
-	delivery := roomDeliveryTool{name: "delivered_command", result: contract.SuccessResult("", "delivered_command", map[string]any{"messages": []string{"already visible"}, "deliveredCount": 1})}
+	delivery := roomDeliveryTool{name: "delivered_command", result: contract.ActionSuccessResult("", "delivered_command", map[string]any{"messages": []string{"already visible"}, "deliveredCount": 1}, 1)}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("delivery-call", delivery.Name(), map[string]any{})}, "tool_calls"),
 		llm.NewLlmResponse("already visible", nil, "stop"),
@@ -325,6 +325,27 @@ func TestRegistryToolLoopSuppressesFinalReplyAfterSuccessfulRoomDelivery(t *test
 	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
 	if err != nil || !completion.SuppressReply || len(client.requests) != 2 {
 		t.Fatalf("completion=%#v requests=%d err=%v", completion, len(client.requests), err)
+	}
+}
+
+func TestSuppressRegistryReplyRequiresVerifiedRoomDelivery(t *testing.T) {
+	agent, _ := api.NewContext("room", "caller", "", "", false, nil)
+	tool := roomDeliveryTool{name: "delivered_command"}
+	registry := agenttool.NewRegistry([]agenttool.Tool{tool}, []string{tool.Name()})
+	call := execution.Call{ID: "delivery-call", Name: tool.Name(), Arguments: json.RawMessage(`{}`)}
+
+	for _, result := range []contract.Result{
+		contract.SuccessResult("delivery-call", tool.Name(), map[string]any{"deliveredCount": 1}),
+		contract.ActionSuccessResult("delivery-call", tool.Name(), map[string]any{"deliveredCount": 0}, 0),
+		contract.ErrorResult("delivery-call", tool.Name(), "COMMAND_REJECTED", "rejected"),
+	} {
+		if suppressRegistryReply(registry, agent, []toolBatchResult{{Call: call, Result: result}}) {
+			t.Fatalf("unverified delivery suppressed reply: %#v", result)
+		}
+	}
+	verified := contract.ActionSuccessResult("delivery-call", tool.Name(), map[string]any{"deliveredCount": 1}, 1)
+	if !suppressRegistryReply(registry, agent, []toolBatchResult{{Call: call, Result: verified}}) {
+		t.Fatal("verified room delivery did not suppress duplicate reply")
 	}
 }
 

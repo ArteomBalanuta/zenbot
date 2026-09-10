@@ -121,7 +121,9 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 			trips = trips[:len(trips)-1]
 		}
 		for _, trip := range trips {
-			b.Security.Authorization.GrantTrip(ctx, trip, model.USER)
+			if err := b.Security.Authorization.GrantTrip(ctx, trip, role); err != nil {
+				return model.FAILED, err
+			}
 		}
 		reply(&c.commandBase, fmt.Sprintf("\\n Granted new Roles: %s to trips: %v", roleName, trips))
 		return model.SUCCESSFUL, nil

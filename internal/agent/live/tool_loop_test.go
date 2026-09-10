@@ -69,9 +69,18 @@ func (loopGateway) Execute(context.Context, api.Context, string, string) (comman
 
 type recordingCommandGateway struct{ calls int }
 
+func verifiedGatewayExecution(messages ...string) commandgateway.Execution {
+	return commandgateway.Execution{
+		Status:           commandgateway.OutcomeSucceeded,
+		EffectsCommitted: true,
+		Messages:         append([]string(nil), messages...),
+		Delivery:         &commandgateway.DeliveryReceipt{Count: len(messages)},
+	}
+}
+
 func (g *recordingCommandGateway) Execute(_ context.Context, _ api.Context, _ string, arguments string) (commandgateway.Execution, error) {
 	g.calls++
-	return commandgateway.Execution{Executed: true, Messages: []string{"weather " + arguments}}, nil
+	return verifiedGatewayExecution("weather " + arguments), nil
 }
 
 // forgedPublicTool has an expected registry name but substitutes a different
@@ -190,7 +199,7 @@ type rejectingCommandGateway struct{ calls int }
 
 func (g *rejectingCommandGateway) Execute(context.Context, api.Context, string, string) (commandgateway.Execution, error) {
 	g.calls++
-	return commandgateway.Execution{Executed: false}, nil
+	return commandgateway.Execution{Status: commandgateway.OutcomeRejected}, nil
 }
 
 func TestToolLoopMakesOneFollowUpWithMatchingToolID(t *testing.T) {

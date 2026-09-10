@@ -92,11 +92,11 @@ func TestAccessParityTracer3InputFailuresMatchSaturn(t *testing.T) {
 	}
 }
 
-func TestAccessParityTracer4CommaTargetsKeepSaturnUserQuirk(t *testing.T) {
+func TestAccessParityTracer4CommaTargetsPersistRequestedRole(t *testing.T) {
 	auth := &authFake{}
 	e := accessParityEngine(auth)
 	status, err := (&accessCommand{commandBase: commandBase{engine: e, message: &model.ChatMessage{Name: "admin", Trip: "admin-trip", Text: "!access first,second, ADMIN"}}}).Execute(context.Background())
-	wantGrants := []string{"first:User", "second:User"}
+	wantGrants := []string{"first:Admin", "second:Admin"}
 	wantReply := "admin|\\n Granted new Roles: ADMIN to trips: [first second]|false"
 	if status != model.SUCCESSFUL || err != nil || len(auth.granted) != len(wantGrants) || len(e.chats) != 1 || e.chats[0] != wantReply {
 		t.Fatalf("status=%v err=%v grants=%v chats=%v", status, err, auth.granted, e.chats)

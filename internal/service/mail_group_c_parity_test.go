@@ -46,15 +46,15 @@ func TestMailGroupCQueueSerializesResolvedTripsAndEscapedPayload(t *testing.T) {
 	}
 }
 
-func TestMailGroupCQueueIgnoresFailedWriteLikeSaturn(t *testing.T) {
+func TestMailGroupCQueueReturnsFailedWrite(t *testing.T) {
 	db := openMailGroupCDB(t)
 	seedMailRecipient(t, db)
 	if _, err := db.Exec("DROP TABLE mail"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := (&service.MailService{DB: db}).Queue("still acknowledged", "alice#origin", "merc", true); err != nil {
-		t.Fatalf("Queue returned write error, want Saturn-compatible acknowledgement: %v", err)
+	if err := (&service.MailService{DB: db}).Queue("must be persisted", "alice#origin", "merc", true); err == nil {
+		t.Fatal("Queue succeeded after the mail table was dropped")
 	}
 }
 

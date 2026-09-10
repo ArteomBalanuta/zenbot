@@ -60,6 +60,9 @@ func (s *UserService) LastOnline(ctx context.Context, target string) (string, er
 	if err != nil {
 		return "", err
 	}
+	if !record.Found {
+		return "", repository.ErrNotFound
+	}
 	now := time.Now().UTC()
 	if s.Now != nil {
 		now = s.Now().UTC()
@@ -272,8 +275,9 @@ func (s *MailService) QueueResolved(message, owner, receiver string, whisper boo
 	}
 	escapedMessage, _ := json.Marshal(message)
 	message = string(escapedMessage[1 : len(escapedMessage)-1])
-	// Saturn logs delivery-write failures but still acknowledges scheduling.
-	_, _ = s.DB.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES($1,$2,$3,'PENDING',$4,$5)`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper))
+	if _, err := s.DB.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES($1,$2,$3,'PENDING',$4,$5)`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper)); err != nil {
+		return "", err
+	}
 	return receivers, nil
 }
 func (s *MailService) RegisteredUsers() string {

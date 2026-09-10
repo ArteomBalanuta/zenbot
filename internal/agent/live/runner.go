@@ -155,9 +155,6 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 	if suppressReply {
 		observability.Info(ctx, "agent.response.suppressed", "tool_attempted", meta.ToolAttempted)
 		memoryText := strings.TrimSpace(response.Content())
-		if memoryText == "" {
-			memoryText = "Completed the requested Saturn action."
-		}
 		return runtime.NewToolOwnedResult(inv.RequestID(), memoryText, evidence), nil
 	}
 	observability.Debug(ctx, "agent.response.finalization_started",

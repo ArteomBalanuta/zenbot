@@ -17,7 +17,13 @@ import (
 type agentCaptureEngine struct {
 	common.Engine
 	messages            []string
+	deliveryCount       int
 	snapshotCompletions []<-chan snapshot.OperationResult
+}
+
+func (e *agentCaptureEngine) recordDelivery(message string) {
+	e.messages = append(e.messages, message)
+	e.deliveryCount++
 }
 
 func requiredAgentCapability[T any](engine common.Engine, name string) (T, error) {
@@ -32,7 +38,7 @@ func requiredAgentCapability[T any](engine common.Engine, name string) (T, error
 func (e *agentCaptureEngine) SendChatMessage(author, message string, whisper bool) (string, error) {
 	result, err := e.Engine.SendChatMessage(author, message, whisper)
 	if err == nil {
-		e.messages = append(e.messages, message)
+		e.recordDelivery(message)
 	}
 	return result, err
 }
@@ -40,7 +46,7 @@ func (e *agentCaptureEngine) SendChatMessage(author, message string, whisper boo
 func (e *agentCaptureEngine) SendWhisperMessage(author, payload string) (string, error) {
 	result, err := e.Engine.SendWhisperMessage(author, payload)
 	if err == nil {
-		e.messages = append(e.messages, payload)
+		e.recordDelivery(payload)
 	}
 	return result, err
 }
@@ -48,7 +54,7 @@ func (e *agentCaptureEngine) SendWhisperMessage(author, payload string) (string,
 func (e *agentCaptureEngine) SendAddressedMessage(author, payload string, whisper bool) (string, error) {
 	result, err := e.Engine.SendAddressedMessage(author, payload, whisper)
 	if err == nil {
-		e.messages = append(e.messages, payload)
+		e.recordDelivery(payload)
 	}
 	return result, err
 }
@@ -237,14 +243,14 @@ func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error
 		select {
 		case result := <-completed:
 			message := strings.TrimSpace(result.Reply)
-			if message != "" {
-				e.messages = append(e.messages, result.Reply)
-			}
 			if result.Outcome == snapshot.OutcomeFailed {
 				if message == "" {
 					message = "remote room operation failed"
 				}
 				return fmt.Errorf("%s", message)
+			}
+			if message != "" {
+				e.recordDelivery(result.Reply)
 			}
 		case <-ctx.Done():
 			return ctx.Err()

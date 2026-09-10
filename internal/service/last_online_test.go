@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ func (s *lastOnlineQueriesStub) LastOnline(_ context.Context, target string) (re
 
 func TestUserServiceLastOnlineRendersSaturnPayload(t *testing.T) {
 	queries := &lastOnlineQueriesStub{record: repository.LastOnlineRecord{
+		Found:          true,
 		LastMessage:    sql.NullString{String: "quote \" slash \\ newline\n<>&\x01", Valid: true},
 		LastSeenMillis: sql.NullInt64{Int64: 0, Valid: true},
 		JoinedMillis:   sql.NullInt64{Int64: 12 * 60 * 60 * 1000, Valid: true},
@@ -52,21 +54,18 @@ func TestUserServiceLastOnlineRendersSaturnPayload(t *testing.T) {
 	}
 }
 
-func TestUserServiceLastOnlineRendersSaturnDefaultsForMissingRows(t *testing.T) {
+func TestUserServiceLastOnlineReturnsNotFoundForMissingRows(t *testing.T) {
 	service := UserService{Queries: &lastOnlineQueriesStub{}, Now: func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }}
 
 	got, err := service.LastOnline(context.Background(), "absent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `\n Nick|Trip: absent\n Joined:  - \n Last seen:  - \n Seen active:  -  ago.\n Session duration:  -  \n Last message:  - \n`
-	if got != want {
-		t.Fatalf("payload=%q, want %q", got, want)
+	if got != "" || !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("payload=%q err=%v, want repository.ErrNotFound", got, err)
 	}
 }
 
 func TestUserServiceLastOnlineLeavesSessionFieldsDefaultWithoutLastMessage(t *testing.T) {
 	service := UserService{Queries: &lastOnlineQueriesStub{record: repository.LastOnlineRecord{
+		Found:        true,
 		JoinedMillis: sql.NullInt64{Int64: 0, Valid: true},
 	}}, Now: func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }}
 

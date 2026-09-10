@@ -32,6 +32,22 @@ func TestEnvelope(t *testing.T) {
 	}
 }
 
+func TestVerifiedRoomDeliveryRequiresCommittedEffectAndPositiveReceipt(t *testing.T) {
+	verified := ActionSuccessResult("call", "command", map[string]any{"deliveredCount": 1}, 1)
+	if !verified.VerifiedRoomDelivery() || !verified.EffectsCommitted || verified.DeliveryCount != 1 {
+		t.Fatalf("verified result=%#v", verified)
+	}
+	for _, result := range []Result{
+		SuccessResult("call", "command", map[string]any{"deliveredCount": 1}),
+		ActionSuccessResult("call", "command", map[string]any{"deliveredCount": 0}, 0),
+		ErrorResult("call", "command", "COMMAND_REJECTED", "rejected"),
+	} {
+		if result.VerifiedRoomDelivery() {
+			t.Fatalf("unverified result accepted: %#v", result)
+		}
+	}
+}
+
 func TestValidateResultEnforcesRequiredObjectFields(t *testing.T) {
 	s := SchemaObject(map[string]json.RawMessage{"answer": SchemaString()}, []string{"answer"}, false)
 	if err := ValidateResult(s, json.RawMessage(`{}`)); err == nil {

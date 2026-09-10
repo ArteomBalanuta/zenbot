@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/common"
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
@@ -140,7 +141,7 @@ func TestSQLRestartShutdownFinalCatalogIntegration(t *testing.T) {
 			beforeQueries := len(query.queries)
 			beforeRestart, beforeShutdown := controller.restartCalls, controller.shutdownCalls
 			result, err := NewAgentCommandGateway(engine).Execute(context.Background(), caller, entry.alias, "SELECT 1")
-			if err == nil || result.Executed {
+			if err == nil || result.Status == commandgateway.OutcomeSucceeded {
 				t.Errorf("agent gateway accepted %q: result=%+v err=%v", entry.alias, result, err)
 			}
 			if len(query.queries) != beforeQueries || controller.restartCalls != beforeRestart || controller.shutdownCalls != beforeShutdown {

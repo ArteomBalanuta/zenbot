@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
@@ -33,7 +32,7 @@ func (c *restartCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, fmt.Errorf("host lifecycle controller is not configured")
 	}
 	if err := controller.RequestRestart(ctx); err != nil {
-		log.Printf("lifecycle restart request failed: %v", err)
+		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
 }
@@ -51,7 +50,7 @@ func (c *shutdownCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, fmt.Errorf("host lifecycle controller is not configured")
 	}
 	if err := controller.RequestShutdown(ctx); err != nil {
-		log.Printf("lifecycle shutdown request failed: %v", err)
+		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
 }

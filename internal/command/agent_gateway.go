@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
 )
 
 // AgentCommandGateway is the narrow command boundary available to the bounded agent action.
@@ -79,18 +81,32 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 	status, err := definition.New(capturing, message).Execute(ctx)
 	(&legacyAdapter{engine: capturing, def: definition, msg: message}).audit(ctx, status)
 	if err != nil {
-		return CommandExecution{}, err
+		if errors.Is(err, repository.ErrNotFound) {
+			return CommandExecution{Status: commandgateway.OutcomeNotFound}, nil
+		}
+		if ctx.Err() != nil {
+			return CommandExecution{Status: commandgateway.OutcomeUnknown}, nil
+		}
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, nil
 	}
 	if status != model.SUCCESSFUL {
-		return CommandExecution{}, fmt.Errorf("command execution rejected")
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, nil
 	}
 	if err := capturing.awaitSnapshotCompletions(ctx); err != nil {
-		return CommandExecution{}, err
+		if ctx.Err() != nil {
+			return CommandExecution{Status: commandgateway.OutcomeUnknown}, nil
+		}
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, nil
 	}
-	if err := ctx.Err(); err != nil {
-		return CommandExecution{}, err
+	execution := CommandExecution{
+		Status:           commandgateway.OutcomeSucceeded,
+		EffectsCommitted: true,
+		Messages:         append([]string(nil), capturing.messages...),
 	}
-	return CommandExecution{Executed: true, Messages: append([]string(nil), capturing.messages...)}, nil
+	if capturing.deliveryCount > 0 {
+		execution.Delivery = &commandgateway.DeliveryReceipt{Count: capturing.deliveryCount}
+	}
+	return execution, nil
 }
 
 func firstCommandArgument(arguments string) string {

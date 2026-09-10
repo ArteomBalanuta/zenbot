@@ -92,14 +92,11 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 		}
 		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn command could not run"), nil
 	}
-	if !execution.Executed {
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn rejected the command invocation"), nil
+	if failure, rejected := commandExecutionFailure(t.Name(), execution); rejected {
+		return failure, nil
 	}
 	messages := append([]string(nil), execution.Messages...)
-	if len(messages) == 0 {
-		messages = []string{fmt.Sprintf("Saturn command '%s' executed and delivered any command output directly to the room.", definition.Canonical)}
-	}
-	return contract.SuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": len(execution.Messages)}), nil
+	return contract.ActionSuccessResult("", t.Name(), map[string]any{"messages": messages, "deliveredCount": execution.Delivery.Count}, execution.Delivery.Count), nil
 }
 
 func contractAccess(access commandcatalog.AgentAccess) contract.Access {
