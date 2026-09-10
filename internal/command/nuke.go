@@ -27,15 +27,15 @@ func (c *nukeCommand) Execute(ctx context.Context) (model.Status, error) {
 		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks")
 		return model.FAILED, nil
 	}
-	submitter, ok := c.engine.(common.RoomSnapshotSubmitter)
+	submitter, ok := c.engine.(common.CredentialedRoomSnapshotSubmitter)
 	if !ok {
-		return model.FAILED, fmt.Errorf("room snapshot submitter is not configured")
+		return model.FAILED, fmt.Errorf("credentialed room snapshot submitter is not configured")
 	}
 	workflowID, err := nukeWorkflowID()
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := submitter.SubmitRoomSnapshot(snapshot.RoomSnapshotRequest{
+	if err := submitter.SubmitCredentialedRoomSnapshot(snapshot.RoomSnapshotRequest{
 		WorkflowID:    workflowID,
 		Author:        c.message.Name,
 		Whisper:       c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper",

@@ -43,7 +43,7 @@ func BindCredentialedRoomSnapshotMaster(engine *EngineImpl) common.Engine {
 }
 
 // SubmitCredentialedRoomSnapshot supplies the master password only to the
-// temporary join descriptor used by a remote message workflow.
+// temporary join descriptor used by a privileged remote-room workflow.
 func (e *credentialedRoomSnapshotMaster) SubmitCredentialedRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
 	if e == nil || e.EngineImpl == nil || e.snapshotCoordinator == nil {
 		return errors.New("room snapshot coordinator is not configured")

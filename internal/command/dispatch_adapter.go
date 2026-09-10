@@ -126,11 +126,11 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgent
 	if _, ok := e.(common.ModerationOperations); ok {
 		canonicals = append(canonicals, "captcha", "authorize", "deauthorize", "lock", "overflow", "ban", "kick", "unban", "unbanall", "mute", "unmute", "color", "flair")
 	}
-	if _, ok := e.(common.RoomSnapshotSubmitter); ok {
+	if _, ok := e.(common.CredentialedRoomSnapshotSubmitter); ok {
 		canonicals = append(canonicals, "nuke")
 	}
 	if _, mover := e.(common.LiveRoomMover); mover {
-		if _, submitter := e.(common.RoomSnapshotSubmitter); submitter {
+		if _, submitter := e.(common.CredentialedRoomSnapshotSubmitter); submitter {
 			canonicals = append(canonicals, "resurrect")
 		}
 	}

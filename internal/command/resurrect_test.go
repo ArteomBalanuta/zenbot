@@ -16,6 +16,11 @@ type resurrectFallbackStub struct {
 	moves    []resurrectMove
 }
 
+type credentialedResurrectFallbackStub struct {
+	*resurrectFallbackStub
+	credentialedRequests []snapshot.RoomSnapshotRequest
+}
+
 type resurrectMove struct {
 	from   string
 	target common.NickTarget
@@ -32,7 +37,12 @@ func (s *resurrectFallbackStub) SubmitRoomSnapshot(request snapshot.RoomSnapshot
 	return nil
 }
 
-func TestResurrectRegistrationRequiresBothLiveMoverAndSnapshotSubmitter(t *testing.T) {
+func (s *credentialedResurrectFallbackStub) SubmitCredentialedRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
+	s.credentialedRequests = append(s.credentialedRequests, request)
+	return nil
+}
+
+func TestResurrectRegistrationRequiresBothLiveMoverAndCredentialedSnapshotSubmitter(t *testing.T) {
 	baseline := &commandEngineStub{users: map[string]*model.User{}}
 	if err := RegisterUserUtilities(baseline); err != nil {
 		t.Fatal(err)
@@ -45,12 +55,18 @@ func TestResurrectRegistrationRequiresBothLiveMoverAndSnapshotSubmitter(t *testi
 	}
 	assertNoResurrectAliases(t, snapshotOnly.commandEngineStub)
 
-	both := &resurrectFallbackStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}
-	if err := RegisterUserUtilities(both); err != nil {
+	uncredentialed := &resurrectFallbackStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}
+	if err := RegisterUserUtilities(uncredentialed); err != nil {
+		t.Fatal(err)
+	}
+	assertNoResurrectAliases(t, uncredentialed.commandEngineStub)
+
+	credentialed := &credentialedResurrectFallbackStub{resurrectFallbackStub: &resurrectFallbackStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}}
+	if err := RegisterUserUtilities(credentialed); err != nil {
 		t.Fatal(err)
 	}
 	for _, alias := range []string{"move", "recover", "heal", "resurrect"} {
-		metadata, ok := (*both.GetEnabledCommands())[alias]
+		metadata, ok := (*credentialed.GetEnabledCommands())[alias]
 		if !ok {
 			t.Fatalf("missing resurrect alias %q", alias)
 		}
@@ -70,8 +86,8 @@ func assertNoResurrectAliases(t *testing.T, engine *commandEngineStub) {
 	}
 }
 
-func TestResurrectCommandFallsBackToSnapshotOnlyWhenNoLiveSourceServesFrom(t *testing.T) {
-	engine := &resurrectFallbackStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}
+func TestResurrectCommandFallsBackToCredentialedSnapshotOnlyWhenNoLiveSourceServesFrom(t *testing.T) {
+	engine := &credentialedResurrectFallbackStub{resurrectFallbackStub: &resurrectFallbackStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}}
 	definition, ok := commandDefinitionFor("move")
 	if !ok {
 		t.Fatal("resurrect definition is missing")
@@ -89,10 +105,13 @@ func TestResurrectCommandFallsBackToSnapshotOnlyWhenNoLiveSourceServesFrom(t *te
 	if len(engine.moves) != 1 || engine.moves[0] != (resurrectMove{from: "source-room", target: common.NickTarget("Alice"), to: common.Channel("destination-room")}) {
 		t.Fatalf("live moves=%+v", engine.moves)
 	}
-	if len(engine.requests) != 1 {
-		t.Fatalf("snapshot submissions=%d, want 1", len(engine.requests))
+	if len(engine.requests) != 0 {
+		t.Fatalf("uncredentialed snapshot submissions=%d, want 0", len(engine.requests))
 	}
-	request := engine.requests[0]
+	if len(engine.credentialedRequests) != 1 {
+		t.Fatalf("credentialed snapshot submissions=%d, want 1", len(engine.credentialedRequests))
+	}
+	request := engine.credentialedRequests[0]
 	if request.WorkflowID == "" || request.Author != "moderator" || !request.Whisper || request.SourceChannel != "source-room" || request.TargetChannel != "source-room" || request.DestinationChannel != "destination-room" {
 		t.Fatalf("snapshot request=%+v", request)
 	}

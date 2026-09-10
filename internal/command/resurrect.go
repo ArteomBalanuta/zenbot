@@ -38,15 +38,15 @@ func (c *resurrectCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.SUCCESSFUL, nil
 	}
-	submitter, ok := c.engine.(common.RoomSnapshotSubmitter)
+	submitter, ok := c.engine.(common.CredentialedRoomSnapshotSubmitter)
 	if !ok {
-		return model.FAILED, fmt.Errorf("room snapshot submitter is not configured")
+		return model.FAILED, fmt.Errorf("credentialed room snapshot submitter is not configured")
 	}
 	workflowID, err := resurrectWorkflowID()
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := submitter.SubmitRoomSnapshot(snapshot.RoomSnapshotRequest{
+	if err := submitter.SubmitCredentialedRoomSnapshot(snapshot.RoomSnapshotRequest{
 		WorkflowID:         workflowID,
 		Author:             c.message.Name,
 		Whisper:            c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper",

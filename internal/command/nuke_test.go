@@ -14,18 +14,33 @@ type nukeSubmitterStub struct {
 	err      error
 }
 
-func (s *nukeSubmitterStub) SubmitRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
+type uncredentialedNukeSubmitterStub struct {
+	*commandEngineStub
+}
+
+func (s *uncredentialedNukeSubmitterStub) SubmitRoomSnapshot(snapshot.RoomSnapshotRequest) error {
+	return nil
+}
+
+func (s *nukeSubmitterStub) SubmitCredentialedRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
 	s.requests = append(s.requests, request)
 	return s.err
 }
 
-func TestNukeRegistrationRequiresRoomSnapshotSubmitter(t *testing.T) {
+func TestNukeRegistrationRequiresCredentialedRoomSnapshotSubmitter(t *testing.T) {
 	withoutSubmitter := &commandEngineStub{users: map[string]*model.User{}}
 	if err := RegisterUserUtilities(withoutSubmitter); err != nil {
 		t.Fatal(err)
 	}
 	if _, registered := (*withoutSubmitter.GetEnabledCommands())["nuke"]; registered {
 		t.Fatal("nuke registered without room snapshot submitter")
+	}
+	uncredentialed := &uncredentialedNukeSubmitterStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}
+	if err := RegisterUserUtilities(uncredentialed); err != nil {
+		t.Fatal(err)
+	}
+	if _, registered := (*uncredentialed.GetEnabledCommands())["nuke"]; registered {
+		t.Fatal("nuke registered with only an uncredentialed room snapshot submitter")
 	}
 
 	withSubmitter := &nukeSubmitterStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}
@@ -84,7 +99,7 @@ func TestNukeCommandRejectsPreCancelledContextWithoutSubmission(t *testing.T) {
 	}
 }
 
-func TestNukeCommandExecutionRequiresRoomSnapshotSubmitter(t *testing.T) {
+func TestNukeCommandExecutionRequiresCredentialedRoomSnapshotSubmitter(t *testing.T) {
 	engine := &commandEngineStub{users: map[string]*model.User{}}
 	definition, ok := commandDefinitionFor("nuke")
 	if !ok {
