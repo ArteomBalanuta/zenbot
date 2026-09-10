@@ -109,6 +109,7 @@ Agent provider values:
 - `agent.apiKeyEnv` names the optional bearer-token environment variable.
 - `agent.thinkingEnabled` is sent as `chat_template_kwargs.enable_thinking`.
 - `agent.maxCompletionTokens`, timeout, retry, queue, prompt, and output values are enforced at their runtime boundaries.
+- Keep `agent.maxCompletionTokens` close to the useful reply size. Very large values extend truncated provider generations without bypassing `agent.maxOutputChars`.
 
 Agent execution values:
 
@@ -134,11 +135,11 @@ The direct syntax is:
 
 Exact public mentions of the bot also enter the same room-scoped agent runtime. Public users in one room share conversation memory; whispers use a private user-and-room key. Ambient participation is disabled unless explicitly configured. A polite request to remain quiet suppresses ambient participation without posting repeated acknowledgements.
 
-Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose.
+Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose. Every proposed final answer passes through a separate model-backed semantic completion gate; unfinished planning or promises return to the bounded tool loop with evaluator feedback instead of being delivered.
 
 The model receives one checked, caller-filtered semantic manifest and can request multiple tools in one response. Each of the 59 exposed `saturn_<command>` tools has command-specific typed parameters, routing guidance, negative constraints, and valid examples; raw command strings and generic argument tails are not accepted. The five explicit non-actionable commands are `l`, `mine`, `whiskey`, `ws`, and `wsa`. There is no keyword router or preliminary discovery/model call.
 
-Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations. Correctable failures retain the same authorized manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before execution.
+Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations. Correctable failures and semantically incomplete candidate answers retain the same authorized manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call, and an unsatisfied bounded result fails closed. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before execution.
 
 Moderators can request moderation actions through natural language. The configured creator receives direct admin and permanent-ban capabilities. The gateway still performs Saturn role checks and binds autonomous moderation actions to the reviewed author.
 

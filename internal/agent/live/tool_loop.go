@@ -22,6 +22,8 @@ import (
 
 const userMessageHistoryTool = "user_message_history"
 
+const compactRetryHistoryMessages = 4
+
 // ToolLoop owns one request-local, bounded tool turn. Its registry, executor,
 // and provider are frozen at composition; it never accepts model-selected tools.
 type ToolLoop struct {
@@ -33,6 +35,7 @@ type ToolLoop struct {
 	general   bool
 	Limits    turn.ExecutionLimits
 	Interrupt turn.InterruptHook
+	Gate      turn.CompletionGate
 }
 
 func ToolLoopLimits() turn.ExecutionLimits { return turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1} }
@@ -115,9 +118,6 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 			if err != nil {
 				return Completion{}, err
 			}
-			if inv.Mode() == runtime.DIRECT || inv.Mode() == runtime.MENTION {
-				definitions = append(definitions, respondToUserDefinition())
-			}
 		} else {
 			definitions = append([]any(nil), l.Tools...)
 		}
@@ -135,9 +135,6 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		return Completion{}, errors.New("agent tool loop step limit")
 	}
 	initialRequest := prepared.LlmRequest()
-	if providerHasTool(prepared.Tools(), respondToUserTool) {
-		initialRequest = initialRequest.WithToolChoice(llm.ToolChoiceRequired)
-	}
 	first, err := l.Client.Complete(observability.WithStage(ctx, "llm.initial"), initialRequest)
 	if err != nil {
 		return Completion{}, fmt.Errorf("complete agent request: %w", err)
@@ -145,11 +142,27 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	if err := ctx.Err(); err != nil {
 		return Completion{}, err
 	}
+	if l.general && first.FinishReason() == "length" && len(first.ToolCalls()) == 0 {
+		if !state.AdvanceStep() {
+			return Completion{}, errors.New("agent response was truncated and no compact retry remained")
+		}
+		observability.Info(ctx, "agent.correction.started", "correction_type", "compact_truncation_retry")
+		first, err = l.Client.Complete(observability.WithStage(ctx, "llm.compact_truncation_retry"), compactInitialRetryRequest(initialRequest))
+		if err != nil {
+			return Completion{}, fmt.Errorf("complete compact truncation retry: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return Completion{}, err
+		}
+		if first.FinishReason() == "length" {
+			return Completion{}, errors.New("agent response remained truncated after compact retry")
+		}
+	}
 	if first.FinishReason() == "length" && !l.general {
 		return Completion{}, errors.New("agent response was truncated")
 	}
 	if l.general {
-		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state, l.Interrupt)
+		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state, l.Interrupt, l.Gate, inv.Prompt())
 		if loopErr != nil {
 			return Completion{}, loopErr
 		}
@@ -266,6 +279,53 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 	}()}, nil
 }
 
+func compactInitialRetryRequest(request llm.LlmRequest) llm.LlmRequest {
+	source := request.Messages()
+	if len(source) <= 2 {
+		return llm.NewLlmRequest(source, request.Tools(), true, request.ResponseFormat(), nil)
+	}
+
+	compact := make([]llm.LlmMessage, 0, compactRetryHistoryMessages+2)
+	start := 0
+	if source[0].Role() == "system" {
+		compact = append(compact, source[0])
+		start = 1
+	}
+	latest := source[len(source)-1]
+	history := make([]llm.LlmMessage, 0, compactRetryHistoryMessages)
+	for _, message := range source[start : len(source)-1] {
+		content := strings.TrimSpace(message.Content())
+		if (message.Role() != "user" && message.Role() != "assistant") || len(message.ToolCalls()) != 0 || message.ToolCallID() != "" || content == "" {
+			continue
+		}
+		if isBulkRetryContext(content) {
+			continue
+		}
+		history = append(history, message)
+	}
+	if len(history) > compactRetryHistoryMessages {
+		history = history[len(history)-compactRetryHistoryMessages:]
+	}
+	compact = append(compact, history...)
+	compact = append(compact, latest)
+	return llm.NewLlmRequest(compact, request.Tools(), true, request.ResponseFormat(), nil)
+}
+
+func isBulkRetryContext(content string) bool {
+	for _, prefix := range []string{
+		"RECENT_PUBLIC_ROOM_MESSAGES_UNTRUSTED_DATA=",
+		"HISTORICAL_TOOL_EVIDENCE_UNTRUSTED_DATA=",
+		"UNTRUSTED_CONVERSATION_SUMMARY ",
+		"[Internal tool evidence",
+		"SEMANTIC_COMPLETION_FEEDBACK=",
+	} {
+		if strings.HasPrefix(content, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // suppressRegistryReply honors the tool delivery contract without discarding
 // model synthesis needed for failed calls or successful MODEL_DATA results.
 func suppressRegistryReply(registry *tool.Registry, agent api.Context, batch []toolBatchResult) bool {
@@ -296,15 +356,15 @@ func NewBoundedToolLoop(assembler *assemble.Assembler, client llm.LlmClient, too
 	return newFrozenToolLoop(assembler, client, tools, allowed, true)
 }
 
-func NewRegistryToolLoop(assembler *assemble.Assembler, client llm.LlmClient, tools []tool.Tool, allowed []string, limits turn.ExecutionLimits) (*ToolLoop, error) {
+func NewRegistryToolLoop(assembler *assemble.Assembler, client llm.LlmClient, gate turn.CompletionGate, tools []tool.Tool, allowed []string, limits turn.ExecutionLimits) (*ToolLoop, error) {
 	loop, err := newFrozenToolLoop(assembler, client, tools, allowed, false)
 	if err != nil {
 		return nil, err
 	}
-	if limits.MaxSteps < 2 || limits.MaxToolCalls < 1 {
+	if gate == nil || limits.MaxSteps < 2 || limits.MaxToolCalls < 1 {
 		return nil, errors.New("registry tool loop limits are insufficient")
 	}
-	loop.Limits, loop.general = limits, true
+	loop.Limits, loop.general, loop.Gate = limits, true, gate
 	return loop, nil
 }
 

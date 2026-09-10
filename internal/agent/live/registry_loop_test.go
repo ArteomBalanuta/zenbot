@@ -106,7 +106,7 @@ func TestRegistryToolLoopRecordsReadEvidenceAndAttempt(t *testing.T) {
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("room-call", roomUsersTool, map[string]any{})}, "tool_calls"),
 		llm.NewLlmResponse("answer from evidence", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{agenttool.RoomUsers{Directory: directory}}, []string{roomUsersTool}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{agenttool.RoomUsers{Directory: directory}}, []string{roomUsersTool}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +120,13 @@ func TestRegistryToolLoopRecordsReadEvidenceAndAttempt(t *testing.T) {
 	}
 }
 
-func TestRegistryToolLoopUsesStructuredFinalAnswerDecision(t *testing.T) {
+func TestRegistryToolLoopAcceptsPlainFinalAnswerWithAutoToolChoice(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("answer", respondToUserTool, map[string]any{"response": "ordinary answer"})}, "tool_calls"),
+		llm.NewLlmResponse("ordinary answer", nil, "stop"),
+		llm.NewLlmResponse("unexpected retry", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,68 +135,133 @@ func TestRegistryToolLoopUsesStructuredFinalAnswerDecision(t *testing.T) {
 	if err != nil || completion.Response.Content() != "ordinary answer" || read.calls.Load() != 0 || len(client.requests) != 1 {
 		t.Fatalf("completion=%#v calls=%d requests=%d err=%v", completion, read.calls.Load(), len(client.requests), err)
 	}
-	if client.requests[0].ToolChoice() != llm.ToolChoiceRequired || !providerRequestHasTool(client.requests[0], respondToUserTool) {
-		t.Fatalf("initial request did not enforce structured decision: %#v", client.requests[0])
+	if client.requests[0].ToolChoice() != llm.ToolChoiceAuto || providerRequestHasTool(client.requests[0], "respond_to_user") {
+		t.Fatalf("initial request did not use the standard auto tool protocol: %#v", client.requests[0])
 	}
 }
 
-func TestRegistryToolLoopCorrectsNarrationIntoToolCallWithoutIntentHeuristics(t *testing.T) {
+func TestRegistryToolLoopUsesSemanticGateBeforeAcceptingFinalAnswer(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse("I will read the requested value.", nil, "stop"),
+		llm.NewLlmResponse("I will fetch the current value now.", nil, "stop"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("gate-1", completionAssessmentTool, map[string]any{
+			"decision": "CONTINUE",
+			"feedback": "Call correcting_read and use its observation.",
+		})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("read-1", read.Name(), map[string]any{"value": "current"})}, "tool_calls"),
+		llm.NewLlmResponse("The observed value is current.", nil, "stop"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("gate-2", completionAssessmentTool, map[string]any{
+			"decision": "FINAL",
+			"feedback": "The answer reports the successful current observation.",
+		})}, "tool_calls"),
+	}}
+	gate, err := NewSemanticCompletionGate(client, "Judge whether the answer satisfies the newest request and uses required tool observations.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, gate, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 1, MaxCallsPerTool: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := runtime.NewInvocation("semantic-gate", runtime.NewContext("room", "caller", "", "", false, nil), "get the current value", runtime.DIRECT, "", false)
+
+	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Response.Content() != "The observed value is current." || read.calls.Load() != 1 || len(client.requests) != 5 {
+		t.Fatalf("completion=%#v calls=%d requests=%d", completion, read.calls.Load(), len(client.requests))
+	}
+	if client.requests[1].ToolChoice() != llm.ToolChoiceRequired || client.requests[4].ToolChoice() != llm.ToolChoiceRequired {
+		t.Fatalf("semantic decisions were not constrained: first=%q final=%q", client.requests[1].ToolChoice(), client.requests[4].ToolChoice())
+	}
+	if !strings.Contains(client.requests[4].Messages()[1].Content(), `"toolObservations":[{"tool":"correcting_read","status":"success"`) {
+		t.Fatalf("final gate did not receive tool observation: %#v", client.requests[4].Messages())
+	}
+	if strings.Contains(client.requests[4].Messages()[1].Content(), "SEMANTIC_COMPLETION_FEEDBACK") {
+		t.Fatalf("internal evaluator feedback leaked into conversational context: %#v", client.requests[4].Messages())
+	}
+}
+
+func TestRegistryToolLoopExecutesDirectToolCallWithAutoChoice(t *testing.T) {
+	read := &correctingReadTool{}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("read", read.Name(), map[string]any{"value": "requested"})}, "tool_calls"),
 		llm.NewLlmResponse("observed value", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	inv := runtime.NewInvocation("narrated-action", runtime.NewContext("room", "caller", "", "", false, nil), "please perform the available read", runtime.DIRECT, "", false)
 	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
-	if err != nil || completion.Response.Content() != "observed value" || read.calls.Load() != 1 || len(client.requests) != 3 {
+	if err != nil || completion.Response.Content() != "observed value" || read.calls.Load() != 1 || len(client.requests) != 2 {
 		t.Fatalf("completion=%#v calls=%d requests=%d err=%v", completion, read.calls.Load(), len(client.requests), err)
 	}
-	if client.requests[0].ToolChoice() != llm.ToolChoiceRequired || client.requests[1].ToolChoice() != llm.ToolChoiceRequired || client.requests[2].ToolChoice() != llm.ToolChoiceAuto {
-		t.Fatalf("tool choices=%q/%q/%q", client.requests[0].ToolChoice(), client.requests[1].ToolChoice(), client.requests[2].ToolChoice())
+	if client.requests[0].ToolChoice() != llm.ToolChoiceAuto || client.requests[1].ToolChoice() != llm.ToolChoiceAuto {
+		t.Fatalf("tool choices=%q/%q", client.requests[0].ToolChoice(), client.requests[1].ToolChoice())
 	}
 }
 
-func TestRegistryToolLoopCorrectsTruncatedUnstructuredDecisionIntoToolCall(t *testing.T) {
+func TestRegistryToolLoopRetriesTruncatedInitialResponseWithCompactContext(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse("unfinished planning prose", nil, "length"),
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("read", read.Name(), map[string]any{"value": "requested"})}, "tool_calls"),
-		llm.NewLlmResponse("observed value", nil, "stop"),
+		llm.NewLlmResponse("recovered answer", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv := runtime.NewInvocation("truncated-decision", runtime.NewContext("room", "caller", "", "", false, nil), "perform the read", runtime.DIRECT, "", false)
-	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
-	if err != nil || completion.Response.Content() != "observed value" || read.calls.Load() != 1 || len(client.requests) != 3 {
+	memory := []llm.LlmMessage{
+		llm.NewLlmMessage("user", "old question", nil, ""),
+		llm.NewLlmMessage("assistant", "old answer", nil, ""),
+		llm.NewLlmMessage("user", "relevant question", nil, ""),
+		llm.NewLlmMessage("assistant", "relevant answer", nil, ""),
+		llm.NewLlmMessage("user", "previous request", nil, ""),
+		llm.NewLlmMessage("assistant", "previous assistant offer", nil, ""),
+	}
+	inv := runtime.NewInvocation("truncated-decision", runtime.NewContext("room", "caller", "", "", false, nil), "who are you?", runtime.DIRECT, "", false)
+	historical := []turn.HistoricalEvidence{{Tool: roomUsersTool, Content: `{"count":1}`, ObservedAtMillis: 1}}
+	completion, err := loop.CompleteWithEvidenceAndHistorical(context.Background(), inv, memory, strings.Repeat("room noise ", 500), historical)
+	if err != nil || completion.Response.Content() != "recovered answer" || read.calls.Load() != 0 || len(client.requests) != 2 {
 		t.Fatalf("completion=%#v calls=%d requests=%d err=%v", completion, read.calls.Load(), len(client.requests), err)
 	}
-	if client.requests[1].ToolChoice() != llm.ToolChoiceRequired {
-		t.Fatalf("truncated decision correction tool choice=%q", client.requests[1].ToolChoice())
+	initialMessages := client.requests[0].Messages()
+	retryMessages := client.requests[1].Messages()
+	if len(retryMessages) >= len(initialMessages) || client.requests[1].ToolChoice() != llm.ToolChoiceAuto {
+		t.Fatalf("retry was not compact and automatic: initial=%d retry=%d choice=%q", len(initialMessages), len(retryMessages), client.requests[1].ToolChoice())
+	}
+	retryText := ""
+	for _, message := range retryMessages {
+		retryText += message.Content() + "\n"
+	}
+	for _, forbidden := range []string{"unfinished planning prose", "RECENT_PUBLIC_ROOM_MESSAGES_UNTRUSTED_DATA", "HISTORICAL_TOOL_EVIDENCE_UNTRUSTED_DATA", "room noise"} {
+		if strings.Contains(retryText, forbidden) {
+			t.Fatalf("compact retry retained %q: %s", forbidden, retryText)
+		}
+	}
+	for _, required := range []string{"previous assistant offer", "who are you?"} {
+		if !strings.Contains(retryText, required) {
+			t.Fatalf("compact retry dropped %q: %s", required, retryText)
+		}
 	}
 }
 
-func TestRegistryToolLoopCorrectsMalformedStructuredDecision(t *testing.T) {
+func TestRegistryToolLoopFailsAfterOneCompactTruncationRetry(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("bad-answer", respondToUserTool, map[string]any{"response": ""})}, "tool_calls"),
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("read", read.Name(), map[string]any{"value": "requested"})}, "tool_calls"),
-		llm.NewLlmResponse("observed value", nil, "stop"),
+		llm.NewLlmResponse("unfinished", nil, "length"),
+		llm.NewLlmResponse("still unfinished", nil, "length"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv := runtime.NewInvocation("malformed-decision", runtime.NewContext("room", "caller", "", "", false, nil), "perform the read", runtime.DIRECT, "", false)
-	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
-	if err != nil || completion.Response.Content() != "observed value" || read.calls.Load() != 1 || len(client.requests) != 3 {
-		t.Fatalf("completion=%#v calls=%d requests=%d err=%v", completion, read.calls.Load(), len(client.requests), err)
+	inv := runtime.NewInvocation("truncated-twice", runtime.NewContext("room", "caller", "", "", false, nil), "who are you?", runtime.DIRECT, "", false)
+	_, err = loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+	if err == nil || !strings.Contains(err.Error(), "remained truncated after compact retry") || read.calls.Load() != 0 || len(client.requests) != 2 {
+		t.Fatalf("error=%v calls=%d requests=%d", err, read.calls.Load(), len(client.requests))
 	}
 }
 
@@ -251,7 +317,7 @@ func TestRegistryToolLoopSuppressesFinalReplyAfterSuccessfulRoomDelivery(t *test
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("delivery-call", delivery.Name(), map[string]any{})}, "tool_calls"),
 		llm.NewLlmResponse("already visible", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{delivery}, []string{delivery.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{delivery}, []string{delivery.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +363,7 @@ func TestRegistryToolLoopKeepsSynthesisForMixedOrFailedDeliveryResults(t *testin
 				llm.NewLlmResponse(nil, tc.calls, "tool_calls"),
 				llm.NewLlmResponse("synthesis required", nil, "stop"),
 			}}
-			loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, tc.tools, allowed, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+			loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, tc.tools, allowed, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -311,7 +377,7 @@ func TestRegistryToolLoopKeepsSynthesisForMixedOrFailedDeliveryResults(t *testin
 }
 
 func TestRegistryToolLoopRejectsInvalidRestrictedDescriptorAtComposition(t *testing.T) {
-	_, err := NewRegistryToolLoop(testLiveAssembler(t), &scriptedToolClient{}, []agenttool.Tool{invalidDescriptorTool{}}, []string{"invalid_descriptor"}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1})
+	_, err := NewRegistryToolLoop(testLiveAssembler(t), &scriptedToolClient{}, acceptingCompletionGate{}, []agenttool.Tool{invalidDescriptorTool{}}, []string{"invalid_descriptor"}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1})
 	if err == nil || !strings.Contains(err.Error(), "descriptor") {
 		t.Fatalf("error=%v", err)
 	}
@@ -349,7 +415,6 @@ func TestCreatorProviderManifestFitsConfiguredContextBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitions = append(definitions, respondToUserDefinition())
 	encoded, err := json.Marshal(definitions)
 	if err != nil {
 		t.Fatal(err)
@@ -407,7 +472,7 @@ func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("fixed", read.Name(), map[string]any{"value": "yes"})}, "tool_calls"),
 		llm.NewLlmResponse("corrected answer", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +481,7 @@ func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing
 	if err != nil || completion.Response.Content() != "corrected answer" || read.calls.Load() != 1 || len(client.requests) != 3 {
 		t.Fatalf("completion=%#v calls=%d requests=%d err=%v", completion, read.calls.Load(), len(client.requests), err)
 	}
-	if len(client.requests[1].Tools()) != 2 || len(client.requests[2].Tools()) != 2 {
+	if len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 1 {
 		t.Fatalf("tool manifest disappeared during correction: second=%d third=%d", len(client.requests[1].Tools()), len(client.requests[2].Tools()))
 	}
 	secondMessages := client.requests[1].Messages()
@@ -437,7 +502,7 @@ func TestRegistryToolLoopCorrectsTypedSaturnArgumentsWithoutInventingCommandText
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("fixed", command.Name(), map[string]any{"room": "lounge"})}, "tool_calls"),
 		llm.NewLlmResponse("completed", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{command}, []string{command.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2, MaxCallsPerTool: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{command}, []string{command.Name()}, turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 2, MaxCallsPerTool: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +511,7 @@ func TestRegistryToolLoopCorrectsTypedSaturnArgumentsWithoutInventingCommandText
 	if err != nil || completion.Response.Content() != "completed" || gateway.calls != 1 || gateway.command != "list" || gateway.arguments != "lounge" {
 		t.Fatalf("completion=%#v gateway=%#v err=%v", completion, gateway, err)
 	}
-	if len(client.requests) != 3 || len(client.requests[1].Tools()) != 2 || len(client.requests[2].Tools()) != 2 {
+	if len(client.requests) != 3 || len(client.requests[1].Tools()) != 1 || len(client.requests[2].Tools()) != 1 {
 		t.Fatalf("typed manifest was not retained across correction: requests=%d", len(client.requests))
 	}
 	observation := client.requests[1].Messages()[len(client.requests[1].Messages())-1]
@@ -463,7 +528,7 @@ func TestRegistryToolLoopHonorsPerToolCallBudget(t *testing.T) {
 		llm.NewLlmResponse("bounded answer", nil, "stop"),
 	}}
 	limits := turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 3, MaxCallsPerTool: 1}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, limits)
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +553,7 @@ func TestRegistryToolLoopHonorsConfiguredFailureBudget(t *testing.T) {
 		llm.NewLlmResponse("degraded answer", nil, "stop"),
 	}}
 	limits := turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 3, MaxToolFailures: 1}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, limits)
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +580,7 @@ func TestRegistryToolLoopReservesTerminalSynthesisAfterLastToolRound(t *testing.
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("two", read.Name(), map[string]any{"value": "second"})}, "tool_calls"),
 		llm.NewLlmResponse("answer from both observations", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 2, MaxCallsPerTool: 2})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 2, MaxCallsPerTool: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,13 +597,13 @@ func TestRegistryToolLoopReservesTerminalSynthesisAfterLastToolRound(t *testing.
 	}
 }
 
-func TestRegistryToolLoopCorrectsInvalidStructuredDecisionOnce(t *testing.T) {
+func TestRegistryToolLoopReflectsInvalidPlainFinalResponseWithoutTools(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse(" ", nil, "stop"),
-		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("answer", respondToUserTool, map[string]any{"response": "recovered final answer"})}, "tool_calls"),
+		llm.NewLlmResponse("recovered final answer", nil, "stop"),
 	}}
-	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1})
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, acceptingCompletionGate{}, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +612,7 @@ func TestRegistryToolLoopCorrectsInvalidStructuredDecisionOnce(t *testing.T) {
 	if err != nil || completion.Response.Content() != "recovered final answer" || len(client.requests) != 2 {
 		t.Fatalf("completion=%#v requests=%d err=%v", completion, len(client.requests), err)
 	}
-	if len(client.requests[1].Tools()) != 2 || client.requests[1].ToolChoice() != llm.ToolChoiceRequired {
-		t.Fatalf("correction did not enforce a structured decision: %#v", client.requests[1])
+	if len(client.requests[1].Tools()) != 0 || client.requests[1].ToolChoice() != llm.ToolChoiceAuto {
+		t.Fatalf("final reflection retained execution tools: %#v", client.requests[1])
 	}
 }

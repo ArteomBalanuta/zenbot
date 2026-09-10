@@ -85,6 +85,11 @@ func safeAttributes(attributes ...any) []any {
 
 func sensitiveKey(key string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+	for _, accounting := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+		if normalized == accounting {
+			return false
+		}
+	}
 	for _, fragment := range []string{"api_key", "token", "secret", "password", "prompt", "arguments", "result", "content", "message", "history", "sql"} {
 		if strings.Contains(normalized, fragment) {
 			return true

@@ -105,9 +105,17 @@ func outputFinalizer(resolved config.ResolvedAgentConfig) (live.OutputFinalizer,
 	return live.NewOutputFinalizer(resolved.NoReplyMarker, resolved.MaxOutputChars)
 }
 
-func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUserMessageHistoryRepository, assembler *assemble.Assembler, client llm.LlmClient, directory tool.RoomUserDirectory, gateway commandgateway.Gateway) (*live.ToolLoop, error) {
-	if db == nil || assembler == nil || client == nil || directory == nil || gateway == nil {
+func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUserMessageHistoryRepository, assembler *assemble.Assembler, catalog *prompt.Catalog, client llm.LlmClient, directory tool.RoomUserDirectory, gateway commandgateway.Gateway) (*live.ToolLoop, error) {
+	if db == nil || assembler == nil || catalog == nil || client == nil || directory == nil || gateway == nil {
 		return nil, fmt.Errorf("agent tool composition is incomplete")
+	}
+	completionInstructions, err := catalog.Text("system/completion-gate.txt")
+	if err != nil {
+		return nil, fmt.Errorf("agent completion policy: %w", err)
+	}
+	completionGate, err := live.NewSemanticCompletionGate(client, completionInstructions)
+	if err != nil {
+		return nil, fmt.Errorf("agent completion gate: %w", err)
 	}
 	if err := commandcatalog.ValidateAgentContracts(); err != nil {
 		return nil, fmt.Errorf("agent command catalog: %w", err)
@@ -133,7 +141,7 @@ func newAgentToolLoop(resolved config.ResolvedAgentConfig, db repository.AgentUs
 		tools = append(tools, tool.DatabaseQuery{Repository: queries}, tool.DatabaseSchema{Repository: schema, Enabled: true}, tool.DatabaseSQL{Schema: schema, Repository: sqlRepo, Config: resolved.SQL})
 		allowed = append(allowed, "database_query", "database_schema", "database_sql")
 	}
-	return live.NewRegistryToolLoop(assembler, client, tools, allowed, turn.ExecutionLimits{
+	return live.NewRegistryToolLoop(assembler, client, completionGate, tools, allowed, turn.ExecutionLimits{
 		MaxSteps:        resolved.MaxSteps,
 		MaxToolCalls:    resolved.MaxTools,
 		MaxCallsPerTool: resolved.MaxCallsPerTool,
@@ -239,7 +247,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
-	toolLoop, err := newAgentToolLoop(resolved, conversationRepository, assembler, client, directory, command.NewResolvingAgentCommandGateway(resolveAgentCommandEngine(resolveEngine)))
+	toolLoop, err := newAgentToolLoop(resolved, conversationRepository, assembler, catalog, client, directory, command.NewResolvingAgentCommandGateway(resolveAgentCommandEngine(resolveEngine)))
 	if err != nil {
 		return nil, fmt.Errorf("agent history tool: %w", err)
 	}
@@ -352,7 +360,7 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
-	toolLoop, err := newAgentToolLoop(resolved, conversationRepository, assembler, client, directory, command.NewAgentCommandGateway(engine))
+	toolLoop, err := newAgentToolLoop(resolved, conversationRepository, assembler, catalog, client, directory, command.NewAgentCommandGateway(engine))
 	if err != nil {
 		return nil, fmt.Errorf("agent history tool: %w", err)
 	}

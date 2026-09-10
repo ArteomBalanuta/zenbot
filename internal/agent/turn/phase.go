@@ -23,12 +23,12 @@ const (
 
 var phaseTransitions = map[Phase]map[Phase]struct{}{
 	PhaseAssemble: {PhaseModel: {}, PhaseFailed: {}},
-	PhaseModel:    {PhasePlan: {}, PhaseFinalize: {}, PhaseFailed: {}},
+	PhaseModel:    {PhasePlan: {}, PhaseReflect: {}, PhaseFinalize: {}, PhaseFailed: {}},
 	PhasePlan:     {PhaseGate: {}, PhaseFailed: {}},
 	PhaseGate:     {PhaseExecute: {}, PhaseObserve: {}, PhasePaused: {}, PhaseFailed: {}},
 	PhaseExecute:  {PhaseObserve: {}, PhaseFailed: {}},
 	PhaseObserve:  {PhaseModel: {}, PhaseReflect: {}, PhaseFinalize: {}, PhaseFailed: {}},
-	PhaseReflect:  {PhaseFinalize: {}, PhaseFailed: {}},
+	PhaseReflect:  {PhaseModel: {}, PhaseFinalize: {}, PhaseFailed: {}},
 	PhaseFinalize: {PhaseComplete: {}, PhaseReflect: {}, PhaseFailed: {}},
 	PhasePaused:   {PhaseGate: {}, PhaseFailed: {}},
 }

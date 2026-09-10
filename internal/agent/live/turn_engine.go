@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -27,10 +28,12 @@ type TurnEngine struct {
 	Interrupt turn.InterruptHook
 	Final     turn.FinalResponseValidator
 	Recovery  turn.RecoveryPolicy
+	Gate      turn.CompletionGate
+	Prompt    string
 }
 
 func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
-	if e.Client == nil || e.Registry == nil || state == nil {
+	if e.Client == nil || e.Registry == nil || e.Gate == nil || state == nil || strings.TrimSpace(e.Prompt) == "" {
 		return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent turn engine is incomplete")
 	}
 	hook := e.Interrupt
@@ -49,44 +52,18 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 	response := initial
 	all := make([]toolBatchResult, 0)
 	cycle := 0
-	structuredDecisionPending := providerHasTool(providerTools, respondToUserTool)
-	decisionCorrectionUsed := false
 	for {
 		cycle++
 		calls := response.ToolCalls()
 		observability.Info(ctx, "agent.loop.cycle", "cycle", cycle, "tool_call_count", len(calls), "finish_reason", response.FinishReason())
-		if structuredDecisionPending {
-			finalResponse, final, finalErr := structuredFinalResponse(response)
-			if final {
-				completed, finalMessages, err := e.finalize(ctx, phase, messages, finalResponse)
-				return completed, finalMessages, all, err
-			}
-			if finalErr != nil || len(calls) == 0 {
-				if decisionCorrectionUsed || !state.AdvanceStep() {
-					if finalErr != nil {
-						return llm.LlmResponse{}, nil, nil, fmt.Errorf("model returned an invalid structured tool decision: %w", finalErr)
-					}
-					return llm.LlmResponse{}, nil, nil, fmt.Errorf("model did not return a structured tool decision")
-				}
-				decisionCorrectionUsed = true
-				messages = append(messages,
-					llm.NewLlmMessage("assistant", response.Content(), nil, ""),
-					llm.NewLlmMessage("user", "Your previous response was not a valid structured decision. Re-evaluate the newest request: call the matching Saturn tool when execution or live data is requested; otherwise call respond_to_user with the complete final answer. Do not narrate or promise a tool call.", nil, ""),
-				)
-				observability.Info(ctx, "agent.correction.started", "correction_type", "structured_tool_decision")
-				next, err := e.Client.Complete(observability.WithStage(ctx, "llm.structured_decision_correction"), llm.NewLlmRequest(messages, providerTools, false, nil, nil).WithToolChoice(llm.ToolChoiceRequired))
-				if err != nil {
-					return llm.LlmResponse{}, nil, nil, err
-				}
-				response = next
-				continue
-			}
-		}
 		if len(calls) == 0 {
-			final, finalMessages, err := e.finalize(ctx, phase, messages, response)
-			return final, finalMessages, all, err
+			next, nextMessages, complete, err := e.assessCompletion(ctx, phase, messages, providerTools, response, all, state, true, cycle)
+			if err != nil || complete {
+				return next, nextMessages, all, err
+			}
+			response, messages = next, nextMessages
+			continue
 		}
-		structuredDecisionPending = false
 		if response.FinishReason() == "length" {
 			return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent response was truncated")
 		}
@@ -147,10 +124,66 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 			return llm.LlmResponse{}, nil, nil, err
 		}
 		if phase.Phase() == turn.PhaseFinalize {
-			final, finalMessages, err := e.finalize(ctx, phase, messages, response)
-			return final, finalMessages, all, err
+			final, finalMessages, complete, err := e.assessCompletion(ctx, phase, messages, providerTools, response, all, state, false, cycle)
+			if err != nil || complete {
+				return final, finalMessages, all, err
+			}
+			return llm.LlmResponse{}, nil, all, fmt.Errorf("terminal synthesis unexpectedly continued")
 		}
 	}
+}
+
+func (e TurnEngine) assessCompletion(ctx context.Context, phase *turn.PhaseMachine, messages []llm.LlmMessage, providerTools []any, response llm.LlmResponse, all []toolBatchResult, state *turn.State, continuationAllowed bool, cycle int) (llm.LlmResponse, []llm.LlmMessage, bool, error) {
+	if err := phase.Transition(turn.PhaseReflect); err != nil {
+		return llm.LlmResponse{}, nil, false, err
+	}
+	results := make([]contract.Result, 0, len(all))
+	for _, item := range all {
+		results = append(results, item.Result)
+	}
+	observability.Info(ctx, "agent.completion_gate.started", "cycle", cycle, "candidate_chars", len([]rune(response.Content())), "observation_count", len(results))
+	assessment, err := e.Gate.Evaluate(ctx, turn.CompletionCandidate{
+		Request:      e.Prompt,
+		Answer:       response.Content(),
+		CanContinue:  continuationAllowed && state.RemainingSteps() > 0,
+		Conversation: append([]llm.LlmMessage(nil), messages...),
+		Tools:        completionToolCapabilities(providerTools),
+		Results:      results,
+	})
+	if err != nil {
+		return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion gate: %w", err)
+	}
+	observability.Info(ctx, "agent.completion_gate.completed", "cycle", cycle, "decision", string(assessment.Decision), "feedback_chars", len([]rune(assessment.Feedback)))
+	if assessment.Decision == turn.CompletionFinal {
+		final, finalMessages, err := e.finalize(ctx, phase, messages, response)
+		return final, finalMessages, true, err
+	}
+	if assessment.Decision != turn.CompletionContinue {
+		return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion gate returned invalid decision %q", assessment.Decision)
+	}
+	if !continuationAllowed || !state.AdvanceStep() {
+		return llm.LlmResponse{}, nil, false, fmt.Errorf("semantic completion remains unsatisfied at step limit")
+	}
+	feedback, err := json.Marshal(map[string]string{"decision": string(assessment.Decision), "feedback": assessment.Feedback})
+	if err != nil {
+		return llm.LlmResponse{}, nil, false, fmt.Errorf("encode semantic completion feedback: %w", err)
+	}
+	messages = append(messages,
+		llm.NewLlmMessage("assistant", response.Content(), nil, ""),
+		llm.NewLlmMessage("user", "SEMANTIC_COMPLETION_FEEDBACK="+string(feedback), nil, ""),
+	)
+	if err := phase.Transition(turn.PhaseModel); err != nil {
+		return llm.LlmResponse{}, nil, false, err
+	}
+	observability.Info(ctx, "agent.correction.started", "correction_type", "semantic_completion", "cycle", cycle)
+	next, err := e.Client.Complete(observability.WithStage(ctx, fmt.Sprintf("llm.semantic_completion_retry.%d", cycle)), llm.NewLlmRequest(messages, providerTools, false, nil, nil))
+	if err != nil {
+		return llm.LlmResponse{}, nil, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return llm.LlmResponse{}, nil, false, err
+	}
+	return next, messages, false, nil
 }
 
 // ResumeAction executes one paused action after validating the opaque resume

@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
@@ -15,7 +16,8 @@ import (
 // would otherwise erase capabilities such as moderation and prefix control.
 type agentCaptureEngine struct {
 	common.Engine
-	messages []string
+	messages            []string
+	snapshotCompletions []<-chan snapshot.OperationResult
 }
 
 func requiredAgentCapability[T any](engine common.Engine, name string) (T, error) {
@@ -200,7 +202,7 @@ func (e *agentCaptureEngine) SubmitRoomSnapshot(request snapshot.RoomSnapshotReq
 	if err != nil {
 		return err
 	}
-	return submitter.SubmitRoomSnapshot(request)
+	return e.submitSnapshot(request, submitter.SubmitRoomSnapshot)
 }
 
 func (e *agentCaptureEngine) SubmitCredentialedRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
@@ -208,7 +210,47 @@ func (e *agentCaptureEngine) SubmitCredentialedRoomSnapshot(request snapshot.Roo
 	if err != nil {
 		return err
 	}
-	return submitter.SubmitCredentialedRoomSnapshot(request)
+	return e.submitSnapshot(request, submitter.SubmitCredentialedRoomSnapshot)
+}
+
+func (e *agentCaptureEngine) submitSnapshot(request snapshot.RoomSnapshotRequest, submit func(snapshot.RoomSnapshotRequest) error) error {
+	completed := make(chan snapshot.OperationResult, 1)
+	previous := request.OnComplete
+	request.OnComplete = func(result snapshot.OperationResult) {
+		select {
+		case completed <- result:
+		default:
+		}
+		if previous != nil {
+			previous(result)
+		}
+	}
+	if err := submit(request); err != nil {
+		return err
+	}
+	e.snapshotCompletions = append(e.snapshotCompletions, completed)
+	return nil
+}
+
+func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error {
+	for _, completed := range e.snapshotCompletions {
+		select {
+		case result := <-completed:
+			message := strings.TrimSpace(result.Reply)
+			if message != "" {
+				e.messages = append(e.messages, result.Reply)
+			}
+			if result.Outcome == snapshot.OutcomeFailed {
+				if message == "" {
+					message = "remote room operation failed"
+				}
+				return fmt.Errorf("%s", message)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (e *agentCaptureEngine) UpdatePrefix(prefix string) (string, error) {

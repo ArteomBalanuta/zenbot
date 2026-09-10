@@ -37,6 +37,98 @@ func (h fixedInterruptHook) Review(context.Context, turn.ActionRequest) (turn.In
 	return h.decision, nil
 }
 
+type scriptedCompletionGate struct {
+	assessments []turn.CompletionAssessment
+	inputs      []turn.CompletionCandidate
+}
+
+type acceptingCompletionGate struct{}
+
+func (acceptingCompletionGate) Evaluate(context.Context, turn.CompletionCandidate) (turn.CompletionAssessment, error) {
+	return turn.CompletionAssessment{Decision: turn.CompletionFinal, Feedback: "The candidate satisfies the request."}, nil
+}
+
+func (g *scriptedCompletionGate) Evaluate(_ context.Context, candidate turn.CompletionCandidate) (turn.CompletionAssessment, error) {
+	g.inputs = append(g.inputs, candidate)
+	assessment := g.assessments[0]
+	g.assessments = g.assessments[1:]
+	return assessment, nil
+}
+
+func TestTurnEngineSemanticGateContinuesPromiseUntilToolResultSatisfiesRequest(t *testing.T) {
+	action := &engineActionTool{}
+	registry := agenttool.NewRegistry([]agenttool.Tool{action}, []string{action.Name()})
+	agent, _ := api.NewContext("room", "caller", "", "", false, nil)
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse("The action completed successfully.", nil, "stop"),
+	}}
+	gate := &scriptedCompletionGate{assessments: []turn.CompletionAssessment{
+		{Decision: turn.CompletionContinue, Feedback: "Execute the available action before answering."},
+		{Decision: turn.CompletionFinal, Feedback: "The requested action is complete and reported."},
+	}}
+	limits := turn.ExecutionLimits{MaxSteps: 4, MaxToolCalls: 1, MaxCallsPerTool: 1}
+	state := turn.NewState(limits)
+	state.AdvanceStep()
+	engine := TurnEngine{
+		Client:    client,
+		Registry:  registry,
+		Agent:     agent,
+		Allowed:   []string{action.Name()},
+		Limits:    limits,
+		Interrupt: fixedInterruptHook{decision: turn.InterruptDecision{Outcome: turn.InterruptAllow}},
+		Gate:      gate,
+		Prompt:    "perform the available action",
+	}
+	initial := llm.NewLlmResponse("I will execute that action now.", nil, "stop")
+	messages := []llm.LlmMessage{llm.NewLlmMessage("user", "perform the available action", nil, "")}
+	providerTools := []any{map[string]any{"type": "function", "function": map[string]any{"name": action.Name(), "description": "Execute the test action."}}}
+
+	response, _, batch, err := engine.Complete(context.Background(), messages, providerTools, initial, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Content() != "The action completed successfully." || action.calls.Load() != 1 || len(batch) != 1 {
+		t.Fatalf("response=%q executions=%d batch=%d", response.Content(), action.calls.Load(), len(batch))
+	}
+	if len(gate.inputs) != 2 || !gate.inputs[0].CanContinue || !gate.inputs[1].CanContinue || len(gate.inputs[0].Results) != 0 || len(gate.inputs[1].Results) != 1 {
+		t.Fatalf("gate inputs=%#v", gate.inputs)
+	}
+	if gate.inputs[1].Results[0].ToolName != action.Name() || gate.inputs[1].Results[0].IsError {
+		t.Fatalf("gate did not receive successful observation: %#v", gate.inputs[1].Results)
+	}
+	if len(client.requests) != 2 || len(client.requests[0].Tools()) != 1 || len(client.requests[1].Tools()) != 1 {
+		t.Fatalf("tools were not retained across continuation: requests=%d", len(client.requests))
+	}
+	correctionMessages := client.requests[0].Messages()
+	if !strings.Contains(correctionMessages[len(correctionMessages)-1].Content(), "Execute the available action") {
+		t.Fatalf("semantic feedback missing from retry: %#v", correctionMessages)
+	}
+	observationMessages := client.requests[1].Messages()
+	if !strings.Contains(observationMessages[len(observationMessages)-1].Content(), `"executed":true`) {
+		t.Fatalf("tool observation missing from follow-up: %#v", observationMessages)
+	}
+}
+
+func TestTurnEngineDoesNotPublishUnsatisfiedCandidateAtStepLimit(t *testing.T) {
+	action := &engineActionTool{}
+	registry := agenttool.NewRegistry([]agenttool.Tool{action}, []string{action.Name()})
+	agent, _ := api.NewContext("room", "caller", "", "", false, nil)
+	gate := &scriptedCompletionGate{assessments: []turn.CompletionAssessment{{Decision: turn.CompletionContinue, Feedback: "The action has not run."}}}
+	limits := turn.ExecutionLimits{MaxSteps: 1, MaxToolCalls: 1, MaxCallsPerTool: 1}
+	state := turn.NewState(limits)
+	state.AdvanceStep()
+	engine := TurnEngine{Client: &scriptedToolClient{}, Registry: registry, Agent: agent, Allowed: []string{action.Name()}, Limits: limits, Gate: gate, Prompt: "perform the action"}
+
+	_, _, _, err := engine.Complete(context.Background(), []llm.LlmMessage{llm.NewLlmMessage("user", "perform the action", nil, "")}, []any{"manifest"}, llm.NewLlmResponse("I will do it.", nil, "stop"), state)
+	if err == nil || !strings.Contains(err.Error(), "semantic completion remains unsatisfied at step limit") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(gate.inputs) != 1 || gate.inputs[0].CanContinue {
+		t.Fatalf("gate continuation availability=%#v", gate.inputs)
+	}
+}
+
 func TestTurnEngineFeedsDeniedActionBackAsObservation(t *testing.T) {
 	action := &engineActionTool{}
 	registry := agenttool.NewRegistry([]agenttool.Tool{action}, []string{action.Name()})
@@ -51,6 +143,8 @@ func TestTurnEngineFeedsDeniedActionBackAsObservation(t *testing.T) {
 		Allowed:   []string{action.Name()},
 		Limits:    turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1},
 		Interrupt: fixedInterruptHook{decision: turn.InterruptDecision{Outcome: turn.InterruptDeny, Reason: "operator denied"}},
+		Gate:      &scriptedCompletionGate{assessments: []turn.CompletionAssessment{{Decision: turn.CompletionFinal, Feedback: "The denial is accurately reported."}}},
+		Prompt:    "perform the action",
 	}
 	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls")
 	response, _, batch, err := engine.Complete(context.Background(), nil, []any{"manifest"}, initial, state)
@@ -79,6 +173,8 @@ func TestTurnEnginePausesBeforeExecutingAction(t *testing.T) {
 		Allowed:   []string{action.Name()},
 		Limits:    turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1},
 		Interrupt: fixedInterruptHook{decision: turn.InterruptDecision{Outcome: turn.InterruptPause, Reason: "approval required", ResumeToken: "resume-1"}},
+		Gate:      &scriptedCompletionGate{},
+		Prompt:    "perform the action",
 	}
 	initial := llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("action-1", action.Name(), map[string]any{})}, "tool_calls")
 	_, _, _, err := engine.Complete(context.Background(), nil, nil, initial, state)

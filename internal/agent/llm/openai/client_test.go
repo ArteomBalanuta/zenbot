@@ -30,7 +30,7 @@ func TestCompleteLogsProviderLifecycleWithoutPayload(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"choices":[{"message":{"content":"private answer"},"finish_reason":"stop"}]}`)
+		io.WriteString(w, `{"choices":[{"message":{"content":"private answer","reasoning_content":"hidden reasoning"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":11,"total_tokens":18}}`)
 	}))
 	defer server.Close()
 	ctx := observability.WithStage(observability.WithRequest(context.Background(), observability.Request{ID: "provider-1"}), "llm.initial")
@@ -39,12 +39,12 @@ func TestCompleteLogsProviderLifecycleWithoutPayload(t *testing.T) {
 	}
 
 	logged := output.String()
-	for _, expected := range []string{"agent.llm.request.started", "agent.llm.attempt.started", "agent.llm.request.completed", "request_id=provider-1", "stage=llm.initial", "finish_reason=stop", "tool_call_count=0"} {
+	for _, expected := range []string{"agent.llm.request.started", "agent.llm.attempt.started", "agent.llm.request.completed", "request_id=provider-1", "stage=llm.initial", "finish_reason=stop", "tool_call_count=0", "prompt_tokens=7", "completion_tokens=11", "total_tokens=18", "reasoning_chars=16", "payload_bytes="} {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("log %q does not contain %q", logged, expected)
 		}
 	}
-	if strings.Contains(logged, "private answer") || strings.Contains(logged, "hello") {
+	if strings.Contains(logged, "private answer") || strings.Contains(logged, "hidden reasoning") || strings.Contains(logged, "hello") {
 		t.Fatalf("provider payload leaked into log: %q", logged)
 	}
 }

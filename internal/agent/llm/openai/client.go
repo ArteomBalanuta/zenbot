@@ -92,6 +92,7 @@ func NewClient(cfg Config) *Client {
 func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (response llm.LlmResponse, err error) {
 	started := time.Now()
 	attempts := 0
+	payloadBytes := 0
 	observability.Info(ctx, "agent.llm.request.started",
 		"context_items", len(in.Messages()),
 		"tool_definition_count", len(in.Tools()),
@@ -106,12 +107,19 @@ func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (response llm.
 			observability.Error(ctx, "agent.llm.request.failed", err, attributes...)
 			return
 		}
+		usage := response.Usage()
+		diagnostics := response.ProviderDiagnostics()
 		observability.Info(ctx, "agent.llm.request.completed",
 			"duration_ms", time.Since(started).Milliseconds(),
 			"attempt_count", attempts,
 			"finish_reason", response.FinishReason(),
 			"tool_call_count", len(response.ToolCalls()),
 			"output_chars", len([]rune(response.Content())),
+			"reasoning_chars", diagnosticInt(diagnostics, "reasoning_chars"),
+			"prompt_tokens", usage["prompt_tokens"],
+			"completion_tokens", usage["completion_tokens"],
+			"total_tokens", usage["total_tokens"],
+			"payload_bytes", payloadBytes,
 		)
 	}()
 	cfg := c.Config
@@ -153,6 +161,7 @@ func (c *Client) Complete(ctx context.Context, in llm.LlmRequest) (response llm.
 	if err != nil {
 		return llm.LlmResponse{}, &llm.LlmError{Code: "validation", Err: err}
 	}
+	payloadBytes = len(body)
 	maxAttempts := cfg.Retries + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -281,8 +290,9 @@ func messageJSON(ms []llm.LlmMessage) []map[string]any {
 type responseEnvelope struct {
 	Choices []struct {
 		Message *struct {
-			Content   *string `json:"content"`
-			ToolCalls []struct {
+			Content          *string `json:"content"`
+			ReasoningContent *string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				ID       string `json:"id"`
 				Function struct {
 					Name      string          `json:"name"`
@@ -335,7 +345,21 @@ func decodeResponse(data []byte) (llm.LlmResponse, error) {
 		delete(diagnostics, "choices")
 		delete(diagnostics, "usage")
 	}
+	if ch.Message.ReasoningContent != nil {
+		diagnostics["reasoning_chars"] = len([]rune(*ch.Message.ReasoningContent))
+	}
 	return llm.NewLlmResponseWithMetadata(content, calls, reason, decodeUsage(e.Usage), diagnostics), nil
+}
+
+func diagnosticInt(diagnostics map[string]any, name string) int {
+	switch value := diagnostics[name].(type) {
+	case int:
+		return value
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
 }
 
 // decodeUsage treats provider accounting as optional metadata. Providers may

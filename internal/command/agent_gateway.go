@@ -84,6 +84,9 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 	if status != model.SUCCESSFUL {
 		return CommandExecution{}, fmt.Errorf("command execution rejected")
 	}
+	if err := capturing.awaitSnapshotCompletions(ctx); err != nil {
+		return CommandExecution{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return CommandExecution{}, err
 	}

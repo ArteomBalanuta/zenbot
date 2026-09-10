@@ -275,7 +275,7 @@ func TestNewAgentToolLoopRegistersEveryAgentCommandWithContextualVisibility(t *t
 		t.Fatal(err)
 	}
 	directory := roomDirectoryForMainTest{}
-	loop, err := newAgentToolLoop(config.ResolvedAgentConfig{AgentConfig: config.AgentConfig{ContextMessageLimit: 1, MaxSteps: 5, MaxTools: 4}}, liveAgentRepositoryStub{}, assembler, mainTestClient{}, directory, mainTestGateway{})
+	loop, err := newAgentToolLoop(config.ResolvedAgentConfig{AgentConfig: config.AgentConfig{ContextMessageLimit: 1, MaxSteps: 5, MaxTools: 4}}, liveAgentRepositoryStub{}, assembler, catalog, mainTestClient{}, directory, mainTestGateway{})
 	if err != nil {
 		t.Fatal(err)
 	}

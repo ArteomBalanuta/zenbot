@@ -33,7 +33,12 @@ flowchart TD
     O --> P[Semantic context budget and assembler]
     P --> Q[OpenAI-compatible completion]
     Q --> R{Tool calls present?}
-    R -->|no| S[OutputFinalizer]
+    R -->|no| RA[SemanticCompletionGate]
+    RA --> RB{Request fully satisfied?}
+    RB -->|no, budget remains| RC[Append evaluator feedback]
+    RC --> Q
+    RB -->|no, bound exhausted| RD[Fail closed]
+    RB -->|yes| S[OutputFinalizer]
     R -->|yes| T[TurnEngine PLAN and GATE]
     T --> U[Validate identity, manifest, capability, schema, budget and HITL]
     U --> V[Execute dependency-aware stages]
@@ -41,7 +46,7 @@ flowchart TD
     W --> WA{Recovery decision}
     WA -->|retry| Q
     WA -->|degrade or bounds reached| WB[Tool-free terminal synthesis]
-    WB --> S
+    WB --> RA
     S --> X{Visible reply?}
     X -->|yes| Y[Runtime sink sends room or whisper message]
     X -->|no| Z[Silent completion]
@@ -147,11 +152,11 @@ The complete command mapping is in [COMMAND_TOOL_INVENTORY.md](COMMAND_TOOL_INVE
 
 ## Tool Loop And State Machine
 
-The active generalized loop is coordinated by `internal/agent/live/turn_engine.go`. `internal/agent/live/tool_loop.go` owns initial assembly, while `internal/agent/live/registry_loop.go` adapts protocol messages and delegates generalized execution. No keyword or regular-expression intent router chooses tools. For direct and mention invocations, the LLM must make an explicit structured decision: invoke one or more exposed tools, or invoke the private `respond_to_user` control tool with a final answer. The closed phases are `ASSEMBLE -> MODEL -> PLAN -> GATE -> EXECUTE -> OBSERVE`, followed by another model cycle or `FINALIZE -> COMPLETE`. `REFLECT`, `PAUSED`, and `FAILED` are explicit bounded branches.
+The active generalized loop is coordinated by `internal/agent/live/turn_engine.go`. `internal/agent/live/tool_loop.go` owns initial assembly, while `internal/agent/live/registry_loop.go` adapts protocol messages and delegates generalized execution. No keyword or regular-expression intent router chooses tools. The provider uses the standard OpenAI tool protocol: it may return candidate content or one or more structured calls from the caller-filtered manifest. `SemanticCompletionGate` independently evaluates every zero-tool candidate against the newest request, recent conversational context, caller-visible tool capabilities, and current-turn observations. The closed phases are `ASSEMBLE -> MODEL -> PLAN -> GATE -> EXECUTE -> OBSERVE`, followed by another model cycle or `REFLECT -> FINALIZE -> COMPLETE`. `PAUSED` and `FAILED` remain explicit bounded branches.
 
 1. The registry computes a checked manifest for the current trusted context, hides unauthorized tools, and orders entries by stable tool name.
-2. The manifest is compactly projected and the assembler sends one provider request with all eligible definitions plus `respond_to_user`, using `tool_choice: required` for direct and mention decisions.
-3. A valid `respond_to_user` call becomes the final answer without entering the tool executor. Unstructured narration receives one bounded LLM self-correction request and cannot escape as a successful initial answer.
+2. The manifest is compactly projected and the assembler sends one provider request with all eligible definitions using `tool_choice: auto`.
+3. A response with no calls is only a candidate final answer. A separate constrained evaluator must return a structured `FINAL` decision before delivery. `CONTINUE` feedback is appended to the transcript and the same authorized manifest remains available to the worker model. This evaluator is semantic and runs for every candidate; it does not use keyword intent heuristics.
 4. Every returned call must have an ID and registered name.
 5. The executor validates capability prerequisites and the strict argument schema before invoking code.
 6. The request-local ledger rejects duplicate call-and-argument keys, per-tool overuse, missing successful prerequisites, and tools disabled after repeated failures.
@@ -159,15 +164,18 @@ The active generalized loop is coordinated by `internal/agent/live/turn_engine.g
 8. Any action, command, dependency, or resource conflict creates an ordering barrier and executes sequentially in provider order.
 9. Results are restored to source order and appended as one assistant `tool_calls` message followed by matching `tool` observations.
 10. `RecoveryPolicy` keeps the authorized manifest only for correctable failures such as invalid arguments, unknown tools, execution failures, and timeouts. Terminal failures such as a disabled tool switch immediately to tool-free degradation.
-11. Reaching the tool-round bound reserves one independent tool-free terminal synthesis call, so the newest observations are never discarded.
-12. Empty, truncated, tool-calling, or repeated final content receives at most one tool-free reflection call before failing closed.
-13. Stateful calls pass through `InterruptHook`. The default allows existing behavior; deny becomes an `ACTION_DENIED` observation and pause returns a typed checkpoint before side effects. `TurnEngine.ResumeAction` verifies the resume token and re-runs current registry, schema, and capability checks.
+11. Reaching the tool-round bound reserves one independent tool-free terminal synthesis call, so the newest observations are never discarded. Its candidate must still pass semantic completion; an unsatisfied candidate at the bound fails closed.
+12. The semantic evaluator itself receives only a compact conversation projection, compact caller-visible capability descriptions, and bounded observation content. It must call `submit_completion_assessment` with `FINAL` or `CONTINUE`; it cannot execute Saturn tools.
+13. Empty, truncated, tool-calling, or repeated final content receives at most one tool-free structural repair call before failing closed. A second truncated initial response fails immediately after its compact retry.
+14. Stateful calls pass through `InterruptHook`. The default allows existing behavior; deny becomes an `ACTION_DENIED` observation and pause returns a typed checkpoint before side effects. `TurnEngine.ResumeAction` verifies the resume token and re-runs current registry, schema, and capability checks.
 
 The relevant bounds are:
 
 | Setting | Enforced by | Meaning |
 |---|---|---|
-| `maxSteps` | turn state | Maximum provider/tool iterations |
+| `maxCompletionTokens` | provider client | Maximum tokens generated by one provider call; keep it close to the useful reply size |
+| `maxOutputChars` | output finalizer | Maximum characters delivered to chat after generation |
+| `maxSteps` | turn state | Maximum worker-model iterations; each candidate may add one constrained semantic evaluation |
 | `maxToolCallsPerTurn` | turn state | Aggregate calls reserved by one request |
 | `maxCallsPerTool` | execution ledger | Distinct calls to one tool |
 | `maxToolFailures` | execution ledger | Failures before that tool is disabled for the request |
@@ -225,13 +233,14 @@ The primary lifecycle events are:
 - `agent.context.loaded` and `agent.context.load_failed`
 - `agent.request.assembled`, `agent.loop.started`, `agent.loop.cycle`,
   `agent.loop.completed`, and `agent.loop.failed`
+- `agent.completion_gate.started` and `agent.completion_gate.completed`, including the structured decision and observation count without logging prompt contents
 - `agent.llm.request.started`, `agent.llm.attempt.retrying`,
   `agent.llm.request.completed`, and `agent.llm.request.failed`. Invalid JSON
   also emits `agent.llm.response.malformed` with the parser offset, response
   size, media type, and SHA-256 fingerprint, never the response body.
 - `agent.tool.batch_started`, `agent.tool.started`, `agent.tool.completed`, and
   `agent.tool.batch_completed`
-- `agent.correction.started`, with `stage` distinguishing structured-decision,
+- `agent.correction.started`, with `stage` distinguishing semantic-completion,
   command, tool-follow-up, and synthesis calls
 - `agent.response.finalized`, `agent.response.finalization_failed`,
   `agent.delivery.completed`, and persistence failure events
@@ -255,8 +264,9 @@ The main hardening controls are `requestTimeoutMillis`, `maxSteps`, `maxToolCall
 
 ## Verification Map
 
-- `internal/agent/live/turn_engine_test.go`: closed loop recovery, reflection, terminal synthesis, interruption, and authorization revalidation on resume
-- `internal/agent/live/registry_loop_test.go`: correction loop, multi-tool ordering, parallel read fan-out, per-tool and failure limits
+- `internal/agent/live/turn_engine_test.go`: semantic completion, closed loop recovery, reflection, terminal synthesis, interruption, and authorization revalidation on resume
+- `internal/agent/live/semantic_completion_gate_test.go`: constrained evaluator protocol and malformed-decision rejection
+- `internal/agent/live/registry_loop_test.go`: end-to-end semantic correction, multi-tool ordering, parallel read fan-out, per-tool and failure limits
 - `internal/agent/tool/execution/execution_test.go`: validation, authorization, cancellation, default/descriptor timeouts, ledger behavior
 - `internal/agent/tool/*_test.go`: schemas and individual tool contracts
 - `internal/command/catalog/agent_contract_test.go`: exhaustive actionability,

@@ -24,6 +24,9 @@ type RoomSnapshotRequest struct {
 	RemoteMessage      string
 	TemporaryJoin      *TemporaryJoin
 	Operation          RoomSnapshotOperation
+	// OnComplete observes the terminal operation outcome for callers that must
+	// consume the result. It runs after any room reply has been published.
+	OnComplete func(OperationResult)
 }
 
 func (r RoomSnapshotRequest) validate() error {
@@ -266,7 +269,7 @@ func (w *workflow) receive(payload string) bool {
 		w.coordinator.mu.Lock()
 		w.coordinator.states[w.request.WorkflowID] = StateFailed
 		w.coordinator.mu.Unlock()
-		result = Failed()
+		result = Failed(errString(opErr))
 		if w.coordinator.outcome != nil {
 			w.coordinator.outcome(w.request, result)
 		}
@@ -276,6 +279,7 @@ func (w *workflow) receive(payload string) bool {
 		_ = w.session.Flush()
 	}
 	_ = w.session.Close()
+	w.complete(result)
 	return true
 }
 func (w *workflow) fail(state WorkflowState, err error) bool {
@@ -291,13 +295,15 @@ func (w *workflow) fail(state WorkflowState, err error) bool {
 	delete(w.coordinator.active, w.request.WorkflowID)
 	w.coordinator.mu.Unlock()
 	w.stopTimer()
+	result := OperationResult{Outcome: OutcomeFailed, Reply: errString(err)}
 	w.publishFailure()
 	if w.coordinator.outcome != nil {
-		w.coordinator.outcome(w.request, OperationResult{Outcome: OutcomeFailed, Reply: errString(err)})
+		w.coordinator.outcome(w.request, result)
 	}
 	if w.session != nil {
 		_ = w.session.Close()
 	}
+	w.complete(result)
 	return true
 }
 
@@ -316,6 +322,12 @@ func (w *workflow) publish(result OperationResult) {
 	}
 	if result.Reply != "" && w.coordinator.reply != nil {
 		w.coordinator.reply(w.request, result.Reply)
+	}
+}
+
+func (w *workflow) complete(result OperationResult) {
+	if w.request.OnComplete != nil {
+		w.request.OnComplete(result)
 	}
 }
 func (w *workflow) publishFailure() {

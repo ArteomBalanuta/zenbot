@@ -32,12 +32,15 @@ model = ""
 apiKeyEnv = "SATURN_AGENT_API_KEY"
 timeoutSeconds = 30
 requestTimeoutMillis = 180000
+# Keep this close to the largest useful chat reply; excessive values only make
+# a runaway or malformed completion slower to terminate.
 maxCompletionTokens = 1024
 thinkingEnabled = false
 maxConcurrentRequests = 2
 queueCapacity = 0
 
-# Request-local model/tool-loop bounds.
+# Request-local worker/tool-loop bounds. Semantic completion assessments are
+# separately constrained calls attached to these bounded worker cycles.
 maxSteps = 5
 maxToolCallsPerTurn = 4
 toolTimeoutMillis = 10000

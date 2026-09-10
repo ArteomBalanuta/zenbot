@@ -88,6 +88,71 @@ func TestCoordinatorProcessesFirstCorrelatedSnapshotAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestCoordinatorCompletesRequestAfterPublishingReply(t *testing.T) {
+	s := &fakeSession{id: "session-completion"}
+	op := &recordingOperation{result: Success("remote users")}
+	events := make([]string, 0, 2)
+	var completed OperationResult
+	var completionFlushed, completionClosed int32
+	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, func(_ RoomSnapshotRequest, _ string) {
+		events = append(events, "reply")
+	}, ParseUsers, time.Second)
+	req := RoomSnapshotRequest{
+		WorkflowID:    "wf-completion",
+		Author:        "author",
+		SourceChannel: "source",
+		TargetChannel: "room",
+		Operation:     op,
+		OnComplete: func(result OperationResult) {
+			completed = result
+			completionFlushed = s.flushed.Load()
+			completionClosed = s.closed.Load()
+			events = append(events, "completion")
+		},
+	}
+
+	if err := c.Submit(req); err != nil {
+		t.Fatal(err)
+	}
+	if !c.OnSnapshot(s.id, `{"cmd":"onlineSet","users":[]}`) {
+		t.Fatal("snapshot was not accepted")
+	}
+	if completed != (OperationResult{Outcome: OutcomeSuccess, Reply: "remote users"}) {
+		t.Fatalf("completion result=%+v", completed)
+	}
+	if len(events) != 2 || events[0] != "reply" || events[1] != "completion" {
+		t.Fatalf("event order=%v, want [reply completion]", events)
+	}
+	if completionFlushed != 1 || completionClosed != 1 {
+		t.Fatalf("completion observed flushed=%d closed=%d, want terminal session lifecycle", completionFlushed, completionClosed)
+	}
+}
+
+func TestCoordinatorCompletesRequestOnWorkflowFailure(t *testing.T) {
+	s := &fakeSession{id: "session-failure"}
+	completed := make(chan OperationResult, 1)
+	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, nil, ParseUsers, time.Second)
+	req := RoomSnapshotRequest{
+		WorkflowID:    "wf-failure",
+		Author:        "author",
+		SourceChannel: "source",
+		TargetChannel: "room",
+		Operation:     &recordingOperation{},
+		OnComplete:    func(result OperationResult) { completed <- result },
+	}
+
+	if err := c.Submit(req); err != nil {
+		t.Fatal(err)
+	}
+	if !c.OnTransportError(s.id, errors.New("transport failed")) {
+		t.Fatal("transport failure was not accepted")
+	}
+	result := <-completed
+	if result.Outcome != OutcomeFailed || result.Reply != "transport failed" {
+		t.Fatalf("completion result=%+v", result)
+	}
+}
+
 func TestCoordinatorReportsEmptyOutcome(t *testing.T) {
 	s := &fakeSession{id: "session"}
 	op := &recordingOperation{result: OperationResult{Outcome: OutcomeEmpty, Reply: "room empty"}}
