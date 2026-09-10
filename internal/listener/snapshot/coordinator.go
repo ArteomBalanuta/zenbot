@@ -291,9 +291,7 @@ func (w *workflow) fail(state WorkflowState, err error) bool {
 	delete(w.coordinator.active, w.request.WorkflowID)
 	w.coordinator.mu.Unlock()
 	w.stopTimer()
-	if w.coordinator.reply != nil && w.request.ReplyMessage != "" {
-		w.coordinator.reply(w.request, "Unable to complete room operation.")
-	}
+	w.publishFailure()
 	if w.coordinator.outcome != nil {
 		w.coordinator.outcome(w.request, OperationResult{Outcome: OutcomeFailed, Reply: errString(err)})
 	}
@@ -322,7 +320,7 @@ func (w *workflow) publish(result OperationResult) {
 }
 func (w *workflow) publishFailure() {
 	if w.coordinator.reply != nil && w.request.ReplyMessage != "" {
-		w.coordinator.reply(w.request, "Unable to complete room operation.")
+		w.coordinator.reply(w.request, w.request.ReplyMessage)
 	}
 }
 func errString(err error) string {

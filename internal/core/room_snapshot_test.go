@@ -78,3 +78,29 @@ func TestCredentialedMasterPreservesWrapperCapabilitiesWhenRegisteringCommands(t
 		t.Fatalf("registered command engine %T lost credentialed snapshot capability", captured)
 	}
 }
+
+func TestCredentialedRoomSnapshotUsesProtocolValidTemporaryNick(t *testing.T) {
+	var captured snapshot.RoomSnapshotRequest
+	coordinator := snapshot.NewRoomSnapshotCoordinator(snapshot.SessionFactoryFunc(func(request snapshot.RoomSnapshotRequest, _ snapshot.SnapshotSink) (snapshot.Session, error) {
+		captured = request
+		return &roomSnapshotSessionStub{id: "temporary-list"}, nil
+	}), nil, func(payload string) (snapshot.Snapshot, error) { return snapshot.Parse(payload, false) }, time.Minute)
+	engine := &EngineImpl{Type: model.MASTER, Password: "secret"}
+	engine.InstallRoomSnapshotCoordinator(coordinator)
+	submitter := BindCredentialedRoomSnapshotMaster(engine).(common.CredentialedRoomSnapshotSubmitter)
+	request := validRoomSnapshotRequest()
+	request.WorkflowID = "12345678-abcd"
+	request.TargetChannel = "lounge"
+
+	if err := submitter.SubmitCredentialedRoomSnapshot(request); err != nil {
+		t.Fatal(err)
+	}
+	defer coordinator.Cancel(request.WorkflowID, "test complete")
+
+	if captured.TemporaryJoin == nil {
+		t.Fatal("credentialed snapshot did not receive a temporary join")
+	}
+	if captured.TemporaryJoin.Channel != "lounge" || captured.TemporaryJoin.Nick != "msg_12345678" || captured.TemporaryJoin.Password != "secret" {
+		t.Fatalf("temporary join = %#v", captured.TemporaryJoin)
+	}
+}

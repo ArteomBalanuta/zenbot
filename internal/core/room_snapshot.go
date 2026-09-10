@@ -51,6 +51,6 @@ func (e *credentialedRoomSnapshotMaster) SubmitCredentialedRoomSnapshot(request 
 	if len(request.WorkflowID) < 8 || request.TargetChannel == "" {
 		return errors.New("credentialed room snapshot request is invalid")
 	}
-	request.TemporaryJoin = &snapshot.TemporaryJoin{Channel: request.TargetChannel, Nick: "msg-" + request.WorkflowID[:8], Password: e.Password}
+	request.TemporaryJoin = &snapshot.TemporaryJoin{Channel: request.TargetChannel, Nick: "msg_" + request.WorkflowID[:8], Password: e.Password}
 	return e.snapshotCoordinator.Submit(request)
 }

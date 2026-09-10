@@ -151,6 +151,27 @@ func TestCoordinatorFailureAndStartFailureCleanup(t *testing.T) {
 	}
 }
 
+func TestCoordinatorUsesRequestSpecificFailureReply(t *testing.T) {
+	session := &fakeSession{id: "list-session"}
+	var replies []string
+	coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) {
+		replies = append(replies, reply)
+	}, ParseUsers, time.Second)
+	req := request(&recordingOperation{})
+	req.ReplyMessage = "Unable to list users in the requested room."
+
+	if err := coordinator.Submit(req); err != nil {
+		t.Fatal(err)
+	}
+	if !coordinator.OnSnapshot(session.id, `{"cmd":"warn","text":"invalid nick"}`) {
+		t.Fatal("invalid snapshot frame did not terminate the workflow")
+	}
+
+	if len(replies) != 1 || replies[0] != req.ReplyMessage {
+		t.Fatalf("failure replies = %#v, want %#v", replies, []string{req.ReplyMessage})
+	}
+}
+
 func TestCoordinatorTimeoutAndLateEventsAreRejected(t *testing.T) {
 	s := &fakeSession{id: "session"}
 	op := &recordingOperation{}

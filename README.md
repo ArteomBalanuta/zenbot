@@ -106,11 +106,11 @@ Moderators can request moderation actions through natural language. The configur
 
 See [AGENTIC_ARCHITECTURE.md](AGENTIC_ARCHITECTURE.md) for the full flow and contracts.
 
-## Known Room Snapshot Issue
+## Remote Room Listing And Replicas
 
-`*list <current-room>` reads the host engine's active-user snapshot and works without opening another connection. `*list <other-room>` currently reaches the remote snapshot workflow but its generated temporary nick uses the form `msg-xxxxxxxx`. Hack.Chat accepts only letters, numbers, and underscores in a nick, so it rejects that join before sending `onlineSet`; the coordinator then emits the generic `Unable to complete room operation.` fallback. The target-room spelling is not the underlying failure.
+`*list <current-room>` reads the host engine's active-user snapshot without opening another connection. `*list <other-room>` opens a bounded credentialed snapshot session using a protocol-valid temporary identity such as `msg_xxxxxxxx`, waits for `onlineSet`, formats the remote users, and closes the temporary connection. Workflow failures preserve the command-specific error message instead of replacing it with a generic room-operation response.
 
-Replica lifecycle is implemented independently through `ManagedReplicaController` and `ReplicaFactory`; replicas use the configured bot identity and are not blocked by this temporary-nick defect. The remote snapshot correction is to generate a protocol-valid identity such as `msg_xxxxxxxx` and preserve the request-specific failure message.
+Replica lifecycle is implemented independently through `ManagedReplicaController` and `ReplicaFactory`. Replicas use the configured bot identity and retain their own websocket engine while remaining owned by the master process.
 
 ## Persistence And Migration
 
