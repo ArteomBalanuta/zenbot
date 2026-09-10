@@ -219,7 +219,7 @@ func TestUserChatListenerLifecycleFailureIsLoggedAndWorkerWaitsForDispatchReturn
 	if !strings.Contains(logs.String(), "controller unavailable") {
 		t.Fatalf("controller failure was not logged: %q", logs.String())
 	}
-	if strings.Contains(logs.String(), "Saturn command") {
-		t.Fatalf("listener observed a command failure instead of source-style success: %q", logs.String())
+	if !strings.Contains(logs.String(), `Saturn command "restart" failed with status FAILED`) {
+		t.Fatalf("listener did not preserve the typed lifecycle failure: %q", logs.String())
 	}
 }

@@ -58,7 +58,7 @@ func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
 	}
 }
 
-func TestConditionalAgentSchemasMatchEncoderBranches(t *testing.T) {
+func TestConditionalAgentSchemaEncoderParity(t *testing.T) {
 	tests := []struct {
 		name     string
 		contract AgentArgumentContract

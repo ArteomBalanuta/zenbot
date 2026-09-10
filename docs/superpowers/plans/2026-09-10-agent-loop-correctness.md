@@ -10,6 +10,21 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-10-agent-loop-correctness-design.md`
 
+**Status:** Implemented and verified on 2026-09-11.
+
+**Verification evidence:**
+
+| Requirement | Regression evidence | Production invariant |
+|---|---|---|
+| 1. Synchronous actions and unknown outcomes | `TestExecutorCancelledActionDoesNotReturnBeforeActionStops`; `TestTurnEngineUnknownActionOutcomeDisablesToolsAndDoesNotRetry` | Action invocation is direct/synchronous; cancellation without a typed terminal result yields non-retryable `ACTION_OUTCOME_UNKNOWN`. |
+| 2. Verified business outcomes | `TestAgentCommandGatewayDoesNotVerifyLegacySuccessWithoutDelivery`; `TestUserChatListenerLifecycleFailureIsLoggedAndWorkerWaitsForDispatchReturn`; `TestMailGroupCQueueReturnsFailedWrite`; `TestUserServiceLastOnlineReturnsNotFoundForMissingRows`; access persistence-failure tests | Agent command execution requires typed outcome, committed effects, and delivery receipt where applicable; legacy status and dispatch alone do not prove success. |
+| 3. Intent retention | `TestTurnEngineThreeToolRoundsPreserveExactObjectiveAndTaskObligations` | A frozen request hash/objective and deterministic obligation reducer are rendered from trusted `TaskState` on every model cycle. |
+| 4. Authoritative routing | `TestManifestRejectsDuplicatePrimaryIntentOwners`; `TestAgentCatalogDeclaresAuthoritativePrimaryIntents`; `TestSaturnListRejectsCurrentRoomSoPresenceRoutesAreDisjoint` | Caller-visible manifests reject duplicate primary intents; `room_users` owns current-room presence and `saturn_list` owns other-room presence. |
+| 5. Truthful schemas | `TestOneOfValidationRequiresExactlyOneMatchingBranch`; `TestConstValidationRequiresMatchingTypedLiteral`; `TestConditionalAgentSchemaEncoderParity`; conditional database-query tests and schema fuzzing | Recursive `oneOf`/`const` validation, strict provider declarations, and schema-before-encoder validation enforce one accepted shape per branch. |
+| 6. Per-cycle context budgeting | `TestObservationStoreRetainsFullResultAndProjectsBoundedHeadTail`; `TestProjectTurnPreservesTaskAndAtomicBoundedObservation`; `TestEveryProviderRequestFitsMultiRoundBudgetAndKeepsProtocolAtomic`; `TestToolLoopEnforcesMaxPromptCharsBeforeProviderCall` | Full results remain request-local; every worker request passes through one projector with descriptor/aggregate limits and atomic call/result pruning. |
+
+**Final commands:** `go test -race ./internal/agent/...`, `go vet ./...`, `go test ./...`, `make check`, and `git diff --check` all passed. The race linker emitted only the host toolchain's known macOS `LC_DYSYMTAB` warning.
+
 ## Global Constraints
 
 - Implement Tasks 1 through 6 strictly in numeric order.
@@ -44,13 +59,13 @@
 - Extends: `turn.RecoveryInput` with `Effect contract.Effect` and `Idempotent bool`.
 - Produces: stable error code `ACTION_OUTCOME_UNKNOWN` for cancelled actions without a verified terminal result.
 
-- [ ] **Step 1: Add the failing executor regression test**
+- [x] **Step 1: Add the failing executor regression test**
 
   Add `TestExecutorCancelledActionDoesNotReturnBeforeActionStops` to `execution_test.go`. Use a real test tool whose `Execute` closes `started`, deliberately ignores its cancelled context until `release` closes, then returns `ctx.Err()`. Run `Executor.Execute` in a test goroutine, cancel after `started`, and assert that the result channel remains blocked for 20ms. Close `release`, receive the result, and assert `ErrorCode == "ACTION_OUTCOME_UNKNOWN"` and that the tool closed `finished` before the result arrived.
 
   The production mutation caught by this test is restoring the current action path through the detached `invoke` goroutine.
 
-- [ ] **Step 2: Run the test and witness the current early return**
+- [x] **Step 2: Run the test and witness the current early return**
 
   Run:
 
@@ -60,7 +75,7 @@
 
   Expected red result: the executor returns `TOOL_TIMEOUT` or cancellation before `release` is closed.
 
-- [ ] **Step 3: Split read and action invocation**
+- [x] **Step 3: Split read and action invocation**
 
   Refactor `execution.go` so panic normalization lives in a direct helper:
 
@@ -82,7 +97,7 @@
 
   Keep the existing result-channel/select behavior only in `invokeRead`. For `descriptor.Effect() == contract.Action`, call `invokeDirect` synchronously. When that call returns an error and `ctx.Err() != nil`, return `contract.ErrorResult(callID, toolName, "ACTION_OUTCOME_UNKNOWN", "action outcome is unknown after cancellation")`. A typed tool result, including a definite typed error, remains authoritative.
 
-- [ ] **Step 4: Run the executor package tests**
+- [x] **Step 4: Run the executor package tests**
 
   Run:
 
@@ -92,7 +107,7 @@
 
   Expected green result: read-only timeout tests still return `TOOL_TIMEOUT`; the new action test proves no early return.
 
-- [ ] **Step 5: Add the failing recovery test**
+- [x] **Step 5: Add the failing recovery test**
 
   Add a table row to `TestRecoveryPolicyChoosesBoundedCorrectionOrDegradation`:
 
@@ -112,7 +127,7 @@
 
   Add a `TurnEngine` test where an unknown action outcome is followed by available rounds; assert the next provider request contains no action tools and no second execution occurs.
 
-- [ ] **Step 6: Run the recovery tests and witness retry behavior**
+- [x] **Step 6: Run the recovery tests and witness retry behavior**
 
   Run:
 
@@ -122,11 +137,11 @@
 
   Expected red result: the current policy chooses `RETRY_MODEL` and the engine retains tools.
 
-- [ ] **Step 7: Make recovery effect-aware**
+- [x] **Step 7: Make recovery effect-aware**
 
   Extend `RecoveryInput`, look up the call descriptor in `TurnEngine.recoveryDecision`, and return `RecoveryFinalize` for `ACTION_OUTCOME_UNKNOWN` regardless of remaining rounds. Disable tools before terminal synthesis whenever this code appears so modified arguments cannot bypass exact-call deduplication.
 
-- [ ] **Step 8: Verify Task 1 and commit**
+- [x] **Step 8: Verify Task 1 and commit**
 
   Run:
 
@@ -181,11 +196,11 @@
 - Adds: `contract.Result.EffectsCommitted`, `DeliveryCount`, and `VerifiedRoomDelivery() bool`.
 - Produces: `contract.ActionSuccessResult(call, tool string, value any, deliveryCount int)`.
 
-- [ ] **Step 1: Write failing source-level business tests**
+- [x] **Step 1: Write failing source-level business tests**
 
   Change the lifecycle failure cases to require `model.FAILED` and the original controller error. Change `TestMailGroupCQueueIgnoresFailedWriteLikeSaturn` into `TestMailGroupCQueueReturnsFailedWrite` and require a non-nil error after dropping `mail`. Change comma-target access expectations from `first:User`/`second:User` to `first:Admin`/`second:Admin`, and add a two-target test where the second `GrantTrip` fails and the command returns `FAILED` without sending a success reply. Change missing last-online tests to assert `Found == false` at the repository boundary and `errors.Is(err, repository.ErrNotFound)` at the service boundary.
 
-- [ ] **Step 2: Run the source-level tests and witness all four false successes**
+- [x] **Step 2: Run the source-level tests and witness all four false successes**
 
   Run:
 
@@ -195,15 +210,15 @@
 
   Expected red result: lifecycle and mail errors are swallowed, the wrong role is granted, and missing last-online data renders placeholders.
 
-- [ ] **Step 3: Correct the four producers**
+- [x] **Step 3: Correct the four producers**
 
   In `restart_shutdown.go`, return `model.FAILED, err` from failed controller requests. In `MailService.QueueResolved`, return the `Exec` error. In the comma-target access branch, call `GrantTrip(ctx, trip, role)` and check each error before replying. Add `Found` to `LastOnlineRecord`, set it only after the first query scan succeeds, define `repository.ErrNotFound`, and have `UserService.LastOnline` return that sentinel when `Found` is false.
 
-- [ ] **Step 4: Re-run the source-level tests**
+- [x] **Step 4: Re-run the source-level tests**
 
   Run the command from Step 2 and confirm all targeted tests pass before changing the agent gateway.
 
-- [ ] **Step 5: Add failing gateway and tool-result tests**
+- [x] **Step 5: Add failing gateway and tool-result tests**
 
   Add tests asserting:
 
@@ -213,7 +228,7 @@
   - A verified result is the only result for which `suppressRegistryReply` returns true.
   - `Runner` never synthesizes `Completed the requested Saturn action.` and never persists an unverified result as tool-owned completion.
 
-- [ ] **Step 6: Run the gateway/live tests and witness boolean promotion**
+- [x] **Step 6: Run the gateway/live tests and witness boolean promotion**
 
   Run:
 
@@ -223,7 +238,7 @@
 
   Expected red result: `Executed:true` and empty messages are currently accepted and suppression does not inspect receipts.
 
-- [ ] **Step 7: Implement typed agent outcomes**
+- [x] **Step 7: Implement typed agent outcomes**
 
   Replace `Executed` with the approved gateway types. Populate delivery receipts only inside the successful send methods already captured by `agentCaptureEngine`. After a legacy command returns, map non-success status to `OutcomeRejected`, cancellation without a terminal result to `OutcomeUnknown`, and a successful command to `OutcomeSucceeded` with `EffectsCommitted:true`. A zero-message result has no delivery receipt.
 
@@ -237,7 +252,7 @@
 
   Require this predicate in `SaturnCommand`, `RunCommand`, reply suppression, and tool-owned persistence. Delete the runner fallback completion sentence.
 
-- [ ] **Step 8: Update gateway stubs mechanically and verify Task 2**
+- [x] **Step 8: Update gateway stubs mechanically and verify Task 2**
 
   Replace successful test fixtures with explicit typed successful outcomes and positive receipts. Do not give rejection fixtures success metadata merely to preserve old assertions.
 
@@ -281,11 +296,11 @@
 - Produces: `live.TaskPlanner` and constrained `SemanticTaskPlanner`.
 - Adds: `TurnEngine.Task *turn.TaskState` and current-tool capability projection.
 
-- [ ] **Step 1: Add failing contract/reducer unit tests**
+- [x] **Step 1: Add failing contract/reducer unit tests**
 
   Test that construction copies all slices, computes `RequestHash` from the exact objective, rejects blank/duplicate obligation IDs and dependency cycles, and prevents returned slices from mutating internal state. Test that a result satisfies an obligation only when its frozen provider tool name, normalized subject, dependencies, verified outcome, and required receipt all match. Assert errors and `ACTION_OUTCOME_UNKNOWN` never satisfy an obligation. Task 4 will replace tool-name identity with stable primary-intent identity after duplicate routes have been removed.
 
-- [ ] **Step 2: Run the new turn tests and witness missing types**
+- [x] **Step 2: Run the new turn tests and witness missing types**
 
   Run:
 
@@ -295,15 +310,15 @@
 
   Expected red result: the task-contract API does not exist.
 
-- [ ] **Step 3: Implement immutable contract and deterministic reducer**
+- [x] **Step 3: Implement immutable contract and deterministic reducer**
 
   Implement constructors that own their data, stable SHA-256 request hashing, cycle validation, normalized subjects, and append-only evidence records. `TaskState` is the only component allowed to change obligation status.
 
-- [ ] **Step 4: Add failing structured-planner tests**
+- [x] **Step 4: Add failing structured-planner tests**
 
   Model the planner after `SemanticCompletionGate`: require exactly one `submit_task_plan` call with arrays of constraints and obligations. Tests must reject provider tool names absent from the caller-filtered manifest, unknown dependencies, duplicate IDs, an objective supplied by the model that differs from the controller's exact prompt, and a second malformed response. The controller must overwrite—not trust—the model's objective and IDs.
 
-- [ ] **Step 5: Run and implement the planner**
+- [x] **Step 5: Run and implement the planner**
 
   Run:
 
@@ -313,11 +328,11 @@
 
   Implement one constrained planning request plus one bounded correction. Add `NewRegistryToolLoopWithPlanner`; keep the existing constructor using an objective-only deterministic planner for compatibility tests, while production composition injects `SemanticTaskPlanner`.
 
-- [ ] **Step 6: Add the failing three-tool drift integration test**
+- [x] **Step 6: Add the failing three-tool drift integration test**
 
   Script a plan containing three dependent obligations, then return three heterogeneous tool calls over separate cycles. Put instruction-like text in observation two asking the model to ignore the original objective. Assert every post-observation provider request contains the exact objective hash and pending obligations, the third obligation cannot complete before the first two, and the completion gate cannot finalize until all three typed outcomes are observed.
 
-- [ ] **Step 7: Run the drift test and witness missing semantic state**
+- [x] **Step 7: Run the drift test and witness missing semantic state**
 
   Run:
 
@@ -327,11 +342,11 @@
 
   Expected red result: current state exposes only counters and the gate can accept without deterministic obligations.
 
-- [ ] **Step 8: Integrate task state into every cycle**
+- [x] **Step 8: Integrate task state into every cycle**
 
   Build the task before the first ordinary completion. Inject a bounded controller-generated task-state message before each model call. Feed each call-bound result through `TaskState.Observe`. Before consulting the semantic gate, reject finalization when `Pending()` is nonempty or an unknown action outcome exists. Pass only tools still executable under the ledger and call budgets.
 
-- [ ] **Step 9: Verify Task 3 and commit**
+- [x] **Step 9: Verify Task 3 and commit**
 
   Run:
 
@@ -379,11 +394,11 @@
 - Adds: `RoomUserResolver.ResolveRoomUsers(context.Context, api.Context, string) (RoomUserSnapshot, error)` for managed-first, temporary-snapshot fallback.
 - Produces: registry manifest validation that rejects duplicate exposed primary intents.
 
-- [ ] **Step 1: Add failing intent-collision tests**
+- [x] **Step 1: Add failing intent-collision tests**
 
   Construct two allowed descriptors with `PrimaryIntent == "room_presence"` and assert `Registry.Manifest` fails. Mark one internal fallback and assert it is omitted from provider definitions. Add production-manifest assertions that exactly one exposed tool owns each of `room_presence`, `named_user_public_history`, and `trip_nicknames`.
 
-- [ ] **Step 2: Run and witness current collisions**
+- [x] **Step 2: Run and witness current collisions**
 
   Run:
 
@@ -393,19 +408,19 @@
 
   Expected red result: descriptors have no intent identity and the provider manifest includes both presence/history/nickname routes.
 
-- [ ] **Step 3: Implement descriptor and manifest invariants**
+- [x] **Step 3: Implement descriptor and manifest invariants**
 
   Add normalized primary-intent metadata. Require every model-facing descriptor to declare it. During manifest construction, reject repeated nonblank primary intents; omit internal fallbacks. Include primary intent in compact provider descriptions and task-planner capabilities. Migrate frozen Task 3 obligations from provider tool names to primary intents without changing their dependency or evidence semantics.
 
-- [ ] **Step 4: Make `room_users` authoritative**
+- [x] **Step 4: Make `room_users` authoritative**
 
   Replace the error instructing the model to call `saturn_list` with a `RoomUserResolver`. Its implementation checks the existing directory first and otherwise awaits the existing temporary snapshot workflow, returning structured users without requiring another model-selected tool. Keep the human `list` command registered, but mark its agent descriptor internal fallback so `saturn_list` is absent from provider definitions.
 
-- [ ] **Step 5: Remove database intent duplicates**
+- [x] **Step 5: Remove database intent duplicates**
 
   Remove `recent_messages_for_user` and `known_nicks_for_trip` from the model-facing `database_query` enum and dispatch. Keep repository methods used by `user_message_history` and `saturn_nicks`. Assign distinct primary intents to moderator trip-message lookup and nickname-based public history.
 
-- [ ] **Step 6: Verify manifest routing and commit**
+- [x] **Step 6: Verify manifest routing and commit**
 
   Run:
 
@@ -442,11 +457,11 @@
 - Adds: provider function definition field `strict: true` for supported contracts.
 - Produces: catalog-wide `AgentArgumentContract` schema/encoder parity coverage.
 
-- [ ] **Step 1: Add failing schema tests**
+- [x] **Step 1: Add failing schema tests**
 
   Add literal schemas proving: valid `const`; invalid const type; `oneOf` with fewer than two branches rejected; zero matching branches rejected; more than one matching branch rejected; nested error paths retained. Fuzz seeds must include ambiguous branches and malformed conditional schemas and assert no panic.
 
-- [ ] **Step 2: Run and witness unsupported keywords**
+- [x] **Step 2: Run and witness unsupported keywords**
 
   Run:
 
@@ -456,19 +471,19 @@
 
   Expected red result: `oneOf` and `const` are rejected as unsupported.
 
-- [ ] **Step 3: Implement recursive conditional validation**
+- [x] **Step 3: Implement recursive conditional validation**
 
   Allow schema nodes either to declare a normal `type` or a top-level `oneOf`. Validate every branch at construction. At value validation, count successful branches and require exactly one. Validate `const` by canonical JSON equality and require its value to match the node type.
 
-- [ ] **Step 4: Add failing command contract parity tests**
+- [x] **Step 4: Add failing command contract parity tests**
 
   For `automove`, assert configure requires source and destination while enable/disable reject them. For `kick`, assert exact/contains reject two targets and multiple accepts two. For each remaining database query branch, assert its required selector and reject irrelevant selectors. Each accepted schema fixture must successfully encode; each rejected fixture must fail before `Encode` is called.
 
-- [ ] **Step 5: Replace flat schemas with discriminated unions**
+- [x] **Step 5: Replace flat schemas with discriminated unions**
 
   Build `oneOf` branches using literal operation/mode `const` values and `additionalProperties:false`. Preserve the encoded Saturn command tails exactly. Add `strict:true` to provider function declarations in `providerToolDefinition` and update the live provider-manifest test to assert its presence without changing tool-choice behavior.
 
-- [ ] **Step 6: Verify Task 5 and commit**
+- [x] **Step 6: Verify Task 5 and commit**
 
   Run:
 
@@ -514,11 +529,11 @@
 - Produces: `assemble.ProjectTurn(messages, tools, taskState, observations, ContextInput) (Projection, error)` used before every provider call.
 - Enforces: `assemble.Config.MaxPromptChars` against the exact newest prompt.
 
-- [ ] **Step 1: Add failing observation projection tests**
+- [x] **Step 1: Add failing observation projection tests**
 
   Store a large object containing an array of rows and assert the full JSON remains retrievable by call ID while the model view is valid JSON, below its byte limit, reports the original count, sets `truncated:true`, and preserves bounded head/tail samples. Add Unicode string and malformed-result fixtures; malformed success data must become a typed invalid-result observation rather than sliced text.
 
-- [ ] **Step 2: Run and witness missing observation store**
+- [x] **Step 2: Run and witness missing observation store**
 
   Run:
 
@@ -528,17 +543,17 @@
 
   Expected red result: the observation storage/projection API does not exist.
 
-- [ ] **Step 3: Implement deterministic projections**
+- [x] **Step 3: Implement deterministic projections**
 
   Own full results in a call-ID map. For arrays, retain total count plus bounded head/tail elements; for objects, retain fields in lexical order until the byte ceiling; for strings, truncate by rune. Marshal after selection and reduce samples until the complete envelope fits. Never truncate serialized JSON bytes.
 
-- [ ] **Step 4: Add failing multi-round budget tests**
+- [x] **Step 4: Add failing multi-round budget tests**
 
   Configure a tiny but viable context budget. Script three tool rounds returning large observations, a semantic correction, terminal synthesis, and final reflection. For every captured `LlmRequest`, independently serialize messages and tools and assert estimated tokens plus reserve are within the configured maximum. Assert assistant tool calls and matching tool messages are either both present or both absent, and the immutable objective/task state is always present.
 
   Add an assembler test where `len([]rune(inv.Prompt())) > MaxPromptChars`; assert failure before `client.Complete` is called.
 
-- [ ] **Step 5: Run and witness follow-up overflow**
+- [x] **Step 5: Run and witness follow-up overflow**
 
   Run:
 
@@ -548,15 +563,15 @@
 
   Expected red result: initial assembly is bounded, but raw follow-up envelopes bypass `ContextBudgeter`, and prompt characters are not independently enforced.
 
-- [ ] **Step 6: Reproject before every provider call**
+- [x] **Step 6: Reproject before every provider call**
 
   Replace direct `llm.NewLlmRequest(messages, tools, ...)` construction in tool follow-up, semantic retry, terminal synthesis, and final reflection with one projector. Classify assistant-call/tool-result pairs as atomic high-priority context units. Preserve trusted policy, frozen task state, newest request, live manifest, and output reserve as required units; rank observations above ordinary history and prune older units deterministically.
 
-- [ ] **Step 7: Tighten result contracts**
+- [x] **Step 7: Tighten result contracts**
 
   Give `user_message_history.rows` a concrete item schema and `maxItems:500`. Replace `database_query`'s `type:any` result with a bounded object/row schema for its remaining operations. Enforce each descriptor's maximum model-result bytes before transcript insertion.
 
-- [ ] **Step 8: Verify Task 6 and commit**
+- [x] **Step 8: Verify Task 6 and commit**
 
   Run:
 
@@ -587,11 +602,11 @@
 - Consumes: all six completed runtime contracts.
 - Produces: no new runtime API.
 
-- [ ] **Step 1: Update architecture documentation from current code**
+- [x] **Step 1: Update architecture documentation from current code**
 
   Document synchronous action execution, unknown outcomes, verified delivery receipts, semantic task contracts, unique primary intents, conditional schemas, and per-cycle context projection. Remove statements that action deadlines forcibly stop arbitrary in-process work or that legacy status alone proves success.
 
-- [ ] **Step 2: Run focused mutation-oriented regressions**
+- [x] **Step 2: Run focused mutation-oriented regressions**
 
   Run:
 
@@ -602,7 +617,7 @@
   go test ./internal/agent/tool/contract ./internal/command/catalog -run 'OneOf|Const|Parity' -count=3
   ```
 
-- [ ] **Step 3: Run repository-wide verification**
+- [x] **Step 3: Run repository-wide verification**
 
   Run in this order and inspect every exit code:
 
@@ -616,11 +631,11 @@
   git status --short
   ```
 
-- [ ] **Step 4: Perform the six-requirement evidence audit**
+- [x] **Step 4: Perform the six-requirement evidence audit**
 
   For each numbered requirement, record the exact regression test and production invariant that proves it. Treat a green broad suite without the named regression as insufficient. Confirm no unrelated behavior or files were added.
 
-- [ ] **Step 5: Commit documentation and audit status**
+- [x] **Step 5: Commit documentation and audit status**
 
   After all verification succeeds, mark the plan status implemented with the command evidence and commit:
 

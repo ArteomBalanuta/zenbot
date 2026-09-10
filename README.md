@@ -108,7 +108,7 @@ Agent provider values:
 - `agent.creatorTrip` is required when the agent is enabled; no creator identity is compiled into the binary or tracked example.
 - `agent.apiKeyEnv` names the optional bearer-token environment variable.
 - `agent.thinkingEnabled` is sent as `chat_template_kwargs.enable_thinking`.
-- `agent.maxCompletionTokens`, timeout, retry, queue, prompt, and output values are enforced at their runtime boundaries.
+- `agent.maxCompletionTokens`, timeout, retry, queue, prompt, and output values are enforced at their runtime boundaries. `agent.maxPromptChars` is checked by Unicode code point before any provider call.
 - Keep `agent.maxCompletionTokens` close to the useful reply size. Very large values extend truncated provider generations without bypassing `agent.maxOutputChars`.
 
 Agent execution values:
@@ -121,7 +121,7 @@ Agent execution values:
 - `agent.memoryRawTurns` keeps the newest complete turns verbatim; older loaded turns are summarized into untrusted H2-backed memory without deleting their authoritative raw rows.
 - `agent.memorySummaryMaxChars` bounds the persisted summary projection.
 - `agent.contextMessageLimit` controls recent public room context; explicit named-user history can retrieve up to 500 public messages with timestamps and identity metadata.
-- `agent.maxContextTokens` supports ceilings up to 1,000,000 estimated tokens, while `agent.contextReserveTokens` reserves policy/request/output capacity. Budgeting drops whole semantic units and never slices JSON.
+- `agent.maxContextTokens` supports ceilings up to 1,000,000 estimated tokens, while `agent.contextReserveTokens` reserves policy/request/output capacity. The loop reprojects before every worker-model call, accounts for the live tool manifest, keeps the original objective/task state mandatory, drops assistant-call/tool-result pairs atomically, and never slices JSON.
 
 The complete `SATURN_AGENT_*` environment surface is listed in [.env.example](.env.example). Environment values take precedence over TOML. The ignored production `config.toml` remains the source of truth when no override is supplied.
 
@@ -137,9 +137,9 @@ Exact public mentions of the bot also enter the same room-scoped agent runtime. 
 
 Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose. Every proposed final answer passes through a separate model-backed semantic completion gate; unfinished planning or promises return to the bounded tool loop with evaluator feedback instead of being delivered.
 
-The model receives one checked, caller-filtered semantic manifest and can request multiple tools in one response. Each of the 59 exposed `saturn_<command>` tools has command-specific typed parameters, routing guidance, negative constraints, and valid examples; raw command strings and generic argument tails are not accepted. The five explicit non-actionable commands are `l`, `mine`, `whiskey`, `ws`, and `wsa`. There is no keyword router or preliminary discovery/model call.
+The model receives one checked, caller-filtered semantic manifest and can request multiple tools in one response. Every caller-visible operation has one unique primary intent. Each of the 59 exposed `saturn_<command>` tools has command-specific strict typed parameters, routing guidance, negative constraints, and valid examples; conditional commands use validated `oneOf`/`const` branches, and raw command strings or generic argument tails are not accepted. The five explicit non-actionable commands are `l`, `mine`, `whiskey`, `ws`, and `wsa`. There is no keyword router or preliminary discovery/model call.
 
-Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations. Correctable failures and semantically incomplete candidate answers retain the same authorized manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call, and an unsatisfied bounded result fails closed. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before execution.
+Action and command tools execute synchronously and sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. A cancelled action without a verified terminal result becomes non-retryable `ACTION_OUTCOME_UNKNOWN`. Command success requires typed committed/delivery outcomes rather than transport or legacy status alone. Full results remain request-local; the model receives descriptor-bounded, valid JSON observations. Correctable failures and semantically incomplete candidate answers retain the currently executable manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call, and an unsatisfied bounded result fails closed. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before synchronous execution.
 
 Moderators can request moderation actions through natural language. The configured creator receives direct admin and permanent-ban capabilities. The gateway still performs Saturn role checks and binds autonomous moderation actions to the reviewed author.
 
@@ -147,7 +147,7 @@ See [AGENTIC_ARCHITECTURE.md](AGENTIC_ARCHITECTURE.md) for the full flow and con
 
 ## Remote Room Listing And Replicas
 
-`*list <current-room>` reads the host engine's active-user snapshot without opening another connection. `*list <other-room>` opens a bounded credentialed snapshot session using a protocol-valid temporary identity such as `msg_xxxxxxxx`, waits for `onlineSet`, formats the remote users, and closes the temporary connection. Workflow failures preserve the command-specific error message instead of replacing it with a generic room-operation response.
+`room_users` is the agent's current-room-only presence source and accepts no room parameter. Requests about another room route to `saturn_list`; its underlying `*list <other-room>` workflow opens a bounded credentialed snapshot session using a protocol-valid temporary identity such as `msg_xxxxxxxx`, waits for `onlineSet`, formats the remote users, and closes the temporary connection. The agent adapter rejects same-room `saturn_list` calls before gateway execution. Workflow failures preserve the command-specific error message instead of replacing it with a generic room-operation response.
 
 Replica lifecycle is implemented independently through `ManagedReplicaController` and `ReplicaFactory`. Replicas use the configured bot identity and retain their own websocket engine while remaining owned by the master process.
 
