@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -12,7 +13,7 @@ type Lock struct {
 }
 
 func (u *Lock) GetAliases() []string {
-	return []string{"lock", "lockroom", "lockchannel"}
+	return []string{"lock", "lockroom"}
 }
 
 func (u *Lock) GetRole() *model.Role {
@@ -28,6 +29,5 @@ func (u *Lock) NewInstance(engine common.Engine, chatMessage *model.ChatMessage)
 }
 
 func (u *Lock) Execute() {
-	u.engine.Lock()
-	u.engine.SendChatMessage(u.chatMessage.Name, " room locked", u.chatMessage.IsWhisper)
+	_, _ = (&simpleLockCommand{commandBase: commandBase{engine: u.engine, message: u.chatMessage}}).Execute(context.Background())
 }

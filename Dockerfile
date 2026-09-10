@@ -1,45 +1,41 @@
-FROM golang:1.25.5-bookworm AS build
+# syntax=docker/dockerfile:1
 
-# Install sqlite3, and dos2unix
-RUN apt-get update && \
-    apt-get install -y sqlite3 dos2unix libc6-dev ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+ARG GO_VERSION=1.25.5
+ARG JAVA_VERSION=21
+ARG H2_VERSION=2.3.232
 
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY VERSION version.go ./
+COPY cmd ./cmd
+COPY internal ./internal
+COPY resources ./resources
+# pg_query_go backs the SQL policy with libpg_query and therefore requires CGO.
+RUN CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/zenbot ./cmd/zenbot
+
+FROM eclipse-temurin:${JAVA_VERSION}-jre AS h2
+ARG H2_VERSION
+ARG H2_SHA256=8dae62d22db8982c3dcb3826edb9c727c5d302063a67eef7d63d82de401f07d3
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && mkdir -p /opt/h2 \
+    && curl --fail --location --show-error --silent \
+       "https://repo.maven.apache.org/maven2/com/h2database/h2/${H2_VERSION}/h2-${H2_VERSION}.jar" \
+       --output /opt/h2/h2.jar \
+    && echo "${H2_SHA256}  /opt/h2/h2.jar" | sha256sum --check --strict \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM eclipse-temurin:${JAVA_VERSION}-jre
 WORKDIR /app
-
-COPY go.mod .
-COPY go.sum .
-
-COPY cmd cmd
-COPY internal internal
-COPY deploy deploy
-
-# Fix line endings for shell scripts
-RUN dos2unix deploy/*.sh
-
-# Make the script executable and run it
-RUN chmod +x deploy/create_db.sh
-RUN mkdir database
-RUN /bin/bash deploy/create_db.sh
-
-# Build with CGO for SQLite3 but static linking
-ENV CGO_ENABLED=1
-RUN go build \
-    -tags osusergo,netgo,sqlite_omit_load_extension \
-    -ldflags="-w -s -linkmode external -extldflags '-static'" \
-    -o ./target/zenbot \
-    ./cmd/zenbot
-
-RUN chmod +x ./target/zenbot
-
-
-## RUNTIME
-FROM scratch
-
-WORKDIR /app
-# Copy CA certificates
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /app/database/database.db /app/database/database.db
-COPY --from=build /app/target/zenbot /app/zenbot
-
+ENV H2_JAR=/opt/h2/h2.jar \
+    JAVA=java
+COPY --from=build /out/zenbot /app/zenbot
+COPY --from=build /src/resources /app/resources
+COPY --from=h2 /opt/h2/h2.jar /opt/h2/h2.jar
+COPY config.example.toml /app/config.toml
+RUN mkdir -p /app/database
+VOLUME ["/app/database"]
+STOPSIGNAL SIGTERM
 ENTRYPOINT ["/app/zenbot"]

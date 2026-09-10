@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
@@ -12,7 +13,7 @@ type UnbanAll struct {
 }
 
 func (u *UnbanAll) GetAliases() []string {
-	return []string{"unbanall", "uba"}
+	return []string{"unbanall", "pardonall"}
 }
 
 func (u *UnbanAll) GetRole() *model.Role {
@@ -28,6 +29,5 @@ func (u *UnbanAll) NewInstance(engine common.Engine, chatMessage *model.ChatMess
 }
 
 func (u *UnbanAll) Execute() {
-	u.engine.UnbanAll()
-	u.engine.SendChatMessage(u.chatMessage.Name, " unbanned all users", u.chatMessage.IsWhisper)
+	_, _ = (&simpleUnbanAllCommand{commandBase: commandBase{engine: u.engine, message: u.chatMessage}}).Execute(context.Background())
 }

@@ -19,7 +19,13 @@ func (l *UserLeftListener) Notify(jsonMessage string) {
 	}
 
 	usr := l.e.GetActiveUserByName(u.Name)
-	l.e.LogPresence(usr.Trip, usr.Name, usr.Hash, "left", l.e.GetChannel())
+	if usr == nil {
+		log.Printf("Ignoring leave for unknown user: %s", u.Name)
+		return
+	}
+	if _, err := l.e.LogPresence(usr.Trip, usr.Name, usr.Hash, "left", l.e.GetChannel()); err != nil {
+		log.Printf("could not audit leaving user: %v", err)
+	}
 
 	l.e.RemoveActiveUser(usr)
 	log.Printf("User left: %s", u.Name)

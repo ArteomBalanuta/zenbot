@@ -1,0 +1,9 @@
+.git
+.github
+.hermes
+.env
+.env.*
+config.toml
+database
+target
+*.log
