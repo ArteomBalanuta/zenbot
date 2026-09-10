@@ -228,6 +228,12 @@ func (liveAgentRepositoryStub) LoadAgentToolEvidence(context.Context, string, in
 func (liveAgentRepositoryStub) AppendAgentToolEvidence(context.Context, string, string, string, int64, int64) error {
 	return nil
 }
+func (liveAgentRepositoryStub) LoadAgentMemorySummary(context.Context, string, int64) (*repository.AgentMemorySummary, error) {
+	return nil, nil
+}
+func (liveAgentRepositoryStub) UpsertAgentMemorySummary(context.Context, repository.AgentMemorySummary) error {
+	return nil
+}
 
 type mainTestGateway struct{}
 

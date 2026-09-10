@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"zenbot/internal/repository"
 	"zenbot/internal/repository/h2"
 	"zenbot/internal/testutil/h2fixture"
 )
@@ -37,6 +38,35 @@ func TestAgentMemoryRepositoryRealH2IsolatesBoundsOrdersAndExpires(t *testing.T)
 	}
 }
 
+func TestAppendAgentTurnRollsBackConversationWhenEvidenceInsertFails(t *testing.T) {
+	db := h2fixture.Open(t, "agent-turn-rollback")
+	ctx := context.Background()
+	if _, err := db.DB.ExecContext(ctx, `ALTER TABLE agent_tool_memory ADD CONSTRAINT reject_forced_evidence CHECK (content <> '"force-failure"')`); err != nil {
+		t.Fatal(err)
+	}
+	record := repository.AgentTurnRecord{
+		IdentityKey:     "room|public",
+		User:            "question",
+		Assistant:       "answer",
+		Evidence:        []repository.AgentTurnEvidence{{ToolName: "room_users", Content: `"force-failure"`}},
+		CreatedOnMillis: 10,
+		ExpiresOnMillis: 20,
+	}
+	if err := db.AppendAgentTurn(ctx, record); err == nil {
+		t.Fatal("forced evidence failure committed")
+	}
+	var memoryCount, evidenceCount int
+	if err := db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_memory WHERE identity_key = $1`, record.IdentityKey).Scan(&memoryCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_tool_memory WHERE identity_key = $1`, record.IdentityKey).Scan(&evidenceCount); err != nil {
+		t.Fatal(err)
+	}
+	if memoryCount != 0 || evidenceCount != 0 {
+		t.Fatalf("partial turn persisted: memory=%d evidence=%d", memoryCount, evidenceCount)
+	}
+}
+
 func TestAgentMemoryRepositoryRejectsInvalidAndCancelledRequests(t *testing.T) {
 	var nilDB *h2.Database
 	if _, err := nilDB.LoadAgentMemory(context.Background(), "key", 0, 1); err == nil {
@@ -52,5 +82,29 @@ func TestAgentMemoryRepositoryRejectsInvalidAndCancelledRequests(t *testing.T) {
 	cancel()
 	if err := db.AppendAgentMemory(cancelled, "key", "user", "assistant", 1, 2); err == nil {
 		t.Fatal("cancelled append accepted")
+	}
+}
+
+func TestAgentMemorySummaryRepositoryRoundTripsLatestUnexpiredSummary(t *testing.T) {
+	db := h2fixture.Open(t, "agent-memory-summary")
+	ctx := context.Background()
+	want := repository.AgentMemorySummary{
+		IdentityKey:      "room|public",
+		Content:          "durable summary",
+		CoveredThroughID: 42,
+		Fingerprint:      "fingerprint",
+		CreatedOnMillis:  100,
+		ExpiresOnMillis:  200,
+	}
+	if err := db.UpsertAgentMemorySummary(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.LoadAgentMemorySummary(ctx, want.IdentityKey, 150)
+	if err != nil || got == nil || *got != want {
+		t.Fatalf("summary=%#v err=%v", got, err)
+	}
+	expired, err := db.LoadAgentMemorySummary(ctx, want.IdentityKey, 200)
+	if err != nil || expired != nil {
+		t.Fatalf("expired summary=%#v err=%v", expired, err)
 	}
 }

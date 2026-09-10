@@ -50,15 +50,24 @@ func TestDirectInvokerPassesPublicConversationContextAndSuppressesWhispers(t *te
 	if _, err := invoker.Invoke(context.Background(), &model.ChatMessage{Channel: "room", Name: "nick", Text: "current"}, "prompt"); err != nil {
 		t.Fatal(err)
 	}
-	if len(client.requests) != 1 || !strings.Contains(client.requests[0].Messages()[0].Content(), "direct room evidence") {
+	if len(client.requests) != 1 || !messagesContain(client.requests[0].Messages(), "direct room evidence") || strings.Contains(client.requests[0].Messages()[0].Content(), "direct room evidence") {
 		t.Fatalf("direct public request did not receive context: %#v", client.requests)
 	}
 	if _, err := invoker.Invoke(context.Background(), &model.ChatMessage{Channel: "room", Name: "nick", Text: "current", Whisper: true}, "prompt"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(client.requests[1].Messages()[0].Content(), "direct room evidence") {
-		t.Fatalf("direct whisper leaked public context: %s", client.requests[1].Messages()[0].Content())
+	if messagesContain(client.requests[1].Messages(), "direct room evidence") {
+		t.Fatalf("direct whisper leaked public context: %#v", client.requests[1].Messages())
 	}
+}
+
+func messagesContain(messages []llm.LlmMessage, text string) bool {
+	for _, message := range messages {
+		if strings.Contains(message.Content(), text) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDirectInvokerPersistDeliveryAppendsCandidateOnlyForPublicVisibleArtifact(t *testing.T) {

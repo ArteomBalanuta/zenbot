@@ -84,7 +84,10 @@ Agent execution values:
 - `agent.maxToolFailures` disables a failing tool for the remainder of that request.
 - `agent.toolTimeoutMillis` supplies the default timeout when a tool descriptor has no override.
 - `agent.memoryTurns` and `agent.memoryTtlHours` bound durable conversation memory.
+- `agent.memoryRawTurns` keeps the newest complete turns verbatim; older loaded turns are summarized into untrusted H2-backed memory without deleting their authoritative raw rows.
+- `agent.memorySummaryMaxChars` bounds the persisted summary projection.
 - `agent.contextMessageLimit` controls recent public room context; explicit named-user history can retrieve up to 500 public messages with timestamps and identity metadata.
+- `agent.maxContextTokens` supports ceilings up to 1,000,000 estimated tokens, while `agent.contextReserveTokens` reserves policy/request/output capacity. Budgeting drops whole semantic units and never slices JSON.
 
 The complete `SATURN_AGENT_*` environment surface is listed in [.env.example](.env.example). Environment values take precedence over TOML. The ignored production `config.toml` remains the source of truth when no override is supplied.
 
@@ -100,7 +103,7 @@ Exact public mentions of the bot also enter the same room-scoped agent runtime. 
 
 Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose.
 
-The model can request multiple tools in one response. Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations, the same authorized manifest is retained for correction calls, and the model synthesizes the final answer after observations.
+The model can request multiple tools in one response. Action and command tools execute sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. Tool errors are returned as observations. Correctable failures retain the authorized manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before execution.
 
 Moderators can request moderation actions through natural language. The configured creator receives direct admin and permanent-ban capabilities. The gateway still performs Saturn role checks and binds autonomous moderation actions to the reviewed author.
 

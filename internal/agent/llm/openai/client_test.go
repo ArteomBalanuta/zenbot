@@ -358,3 +358,12 @@ func TestRetryAfterHTTPDate(t *testing.T) {
 		t.Fatalf("zero=%v", got)
 	}
 }
+
+func FuzzDecodeResponseNeverPanicsOnProviderPayloadDrift(f *testing.F) {
+	f.Add([]byte(`{"choices":[{"message":{"content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1}}`))
+	f.Add([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{}}`))
+	f.Add([]byte(`{"usage":{"prompt_tokens":{"nested":true}}}`))
+	f.Fuzz(func(t *testing.T, payload []byte) {
+		_, _ = decodeResponse(payload)
+	})
+}

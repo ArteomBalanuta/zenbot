@@ -16,26 +16,28 @@ var (
 )
 
 type Config struct {
-	MaxConcurrent int
-	QueueCapacity int
+	MaxConcurrent  int
+	QueueCapacity  int
+	RequestTimeout time.Duration
 }
 
 type Runtime struct {
-	runner        Runner
-	sink          Sink
-	failureSink   FailureSink
-	ctx           context.Context
-	cancel        context.CancelFunc
-	jobs          chan Invocation
-	workers       sync.WaitGroup
-	executions    sync.WaitGroup
-	ambientDrains sync.WaitGroup
-	slots         chan struct{}
-	admission     chan struct{}
+	runner         Runner
+	sink           Sink
+	failureSink    FailureSink
+	ctx            context.Context
+	cancel         context.CancelFunc
+	jobs           chan Invocation
+	workers        sync.WaitGroup
+	executions     sync.WaitGroup
+	ambientDrains  sync.WaitGroup
+	slots          chan struct{}
+	admission      chan struct{}
+	requestTimeout time.Duration
 
 	mu               sync.Mutex
 	closed           bool
-	rooms            map[string]*sync.Mutex
+	locks            *keyedLocker
 	pendingAmbient   Invocation
 	ambientScheduled bool
 }
@@ -51,12 +53,15 @@ func NewWithFailureSink(config Config, runner Runner, sink Sink, failureSink Fai
 	if config.QueueCapacity < 0 {
 		return nil, errors.New("queue capacity must not be negative")
 	}
+	if config.RequestTimeout < 0 {
+		return nil, errors.New("request timeout must not be negative")
+	}
 	if runner == nil {
 		return nil, errors.New("runner must not be nil")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	jobCapacity := config.MaxConcurrent + config.QueueCapacity
-	rt := &Runtime{runner: runner, sink: sink, failureSink: failureSink, ctx: ctx, cancel: cancel, jobs: make(chan Invocation, jobCapacity), slots: make(chan struct{}, config.MaxConcurrent), admission: make(chan struct{}, jobCapacity), rooms: make(map[string]*sync.Mutex)}
+	rt := &Runtime{runner: runner, sink: sink, failureSink: failureSink, ctx: ctx, cancel: cancel, jobs: make(chan Invocation, jobCapacity), slots: make(chan struct{}, config.MaxConcurrent), admission: make(chan struct{}, jobCapacity), locks: newKeyedLocker(), requestTimeout: config.RequestTimeout}
 	rt.workers.Add(config.MaxConcurrent)
 	for range config.MaxConcurrent {
 		go rt.worker()
@@ -111,16 +116,21 @@ func (rt *Runtime) execute(invocation Invocation, admitted bool) {
 	if admitted {
 		defer func() { <-rt.admission }()
 	}
-	room := rt.roomLock(invocation.Context().MemoryKey())
-	room.Lock()
-	defer room.Unlock()
+	release := rt.locks.Acquire(invocation.Context().MemoryKey())
+	defer release()
 	select {
 	case rt.slots <- struct{}{}:
 		defer func() { <-rt.slots }()
 	case <-rt.ctx.Done():
 		return
 	}
-	ctx := observability.WithRequest(rt.ctx, observability.Request{
+	requestContext := rt.ctx
+	if rt.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		requestContext, cancel = context.WithTimeout(requestContext, rt.requestTimeout)
+		defer cancel()
+	}
+	ctx := observability.WithRequest(requestContext, observability.Request{
 		ID: invocation.RequestID(), Mode: string(invocation.Mode()),
 		Room: invocation.Context().Room(), Nick: invocation.Context().Nick(),
 	})
@@ -134,12 +144,16 @@ func (rt *Runtime) execute(invocation Invocation, admitted bool) {
 	result, err := rt.runner.Run(ctx, invocation)
 	if err != nil {
 		observability.Error(ctx, "agent.request.failed", err, "duration_ms", time.Since(started).Milliseconds())
-		if rt.ctx.Err() == nil && invocation.Mode().RequiresReply() && rt.failureSink != nil {
+		shutdownCancellation := errors.Is(err, context.Canceled) && rt.ctx.Err() != nil
+		if !shutdownCancellation && invocation.Mode().RequiresReply() && rt.failureSink != nil {
 			rt.failureSink.DeliverFailure(ctx, invocation, err)
 		}
 		return
 	}
 	if result.ShouldReply() == false || rt.ctx.Err() != nil || rt.sink == nil {
+		if result.ToolDeliveryOwned() && rt.ctx.Err() == nil {
+			rt.afterDelivery(ctx, invocation, result)
+		}
 		observability.Info(ctx, "agent.request.completed",
 			"duration_ms", time.Since(started).Milliseconds(),
 			"reply", false,
@@ -153,24 +167,33 @@ func (rt *Runtime) execute(invocation Invocation, admitted bool) {
 		return
 	}
 	observability.Info(ctx, "agent.delivery.completed", "output_chars", len([]rune(result.Text())))
-	if after, ok := rt.runner.(interface {
-		AfterDelivery(context.Context, Invocation, Result) error
-	}); ok {
-		if err := after.AfterDelivery(ctx, invocation, result); err != nil {
-			if strings.Contains(err.Error(), "agent tool evidence persistence failed") {
-				observability.Error(ctx, "agent.evidence.persistence_failed", err)
-			} else {
-				observability.Error(ctx, "agent.memory.persistence_failed", err)
-			}
-			return
-		}
-		observability.Debug(ctx, "agent.persistence.completed", "evidence_count", len(result.DurableEvidence()))
+	if !rt.afterDelivery(ctx, invocation, result) {
+		return
 	}
 	observability.Info(ctx, "agent.request.completed",
 		"duration_ms", time.Since(started).Milliseconds(),
 		"reply", true,
 		"evidence_count", len(result.DurableEvidence()),
 	)
+}
+
+func (rt *Runtime) afterDelivery(ctx context.Context, invocation Invocation, result Result) bool {
+	after, ok := rt.runner.(interface {
+		AfterDelivery(context.Context, Invocation, Result) error
+	})
+	if !ok {
+		return true
+	}
+	if err := after.AfterDelivery(ctx, invocation, result); err != nil {
+		if strings.Contains(err.Error(), "agent tool evidence persistence failed") {
+			observability.Error(ctx, "agent.evidence.persistence_failed", err)
+		} else {
+			observability.Error(ctx, "agent.memory.persistence_failed", err)
+		}
+		return false
+	}
+	observability.Debug(ctx, "agent.persistence.completed", "evidence_count", len(result.DurableEvidence()))
+	return true
 }
 
 // SubmitAmbient retains only the latest pending ambient request. Unlike Submit,
@@ -232,17 +255,6 @@ func (rt *Runtime) waitForOrdinary() {
 		case <-time.After(time.Millisecond):
 		}
 	}
-}
-
-func (rt *Runtime) roomLock(room string) *sync.Mutex {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	lock := rt.rooms[room]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		rt.rooms[room] = lock
-	}
-	return lock
 }
 
 // Close cancels in-flight runners, prevents new admission, and waits for workers.

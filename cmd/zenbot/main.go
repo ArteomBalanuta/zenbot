@@ -51,6 +51,7 @@ type agentRepositories interface {
 	repository.AgentUserMessageHistoryRepository
 	repository.AgentMemoryRepository
 	repository.AgentToolEvidenceRepository
+	repository.AgentMemorySummaryRepository
 }
 
 func newRoomSnapshotEngineOptions(c *config.Config, lifecycleErrors chan<- error, reply snapshot.ReplySink) factory.EngineOptions {
@@ -72,8 +73,16 @@ func roomSnapshotReplySink(send func(string, string, bool) (string, error)) snap
 	}
 }
 
-func newAgentMemory(resolved config.ResolvedAgentConfig, db agentRepositories) (*turn.TurnMemory, error) {
-	memory, err := turn.NewTurnMemory(live.PersistentMemoryStore{Repository: db, ToolEvidenceRepository: db, Turns: resolved.MemoryTurns, TTL: resolved.MemoryTTL})
+func newAgentMemory(resolved config.ResolvedAgentConfig, db agentRepositories, client llm.LlmClient) (*turn.TurnMemory, error) {
+	compactor := &turn.MemoryCompactor{Summarizer: live.ModelConversationSummarizer{Client: client, MaxOutputChars: resolved.MemorySummaryMaxChars}}
+	memory, err := turn.NewTurnMemory(live.PersistentMemoryStore{
+		Repository:             db,
+		ToolEvidenceRepository: db,
+		Turns:                  resolved.MemoryTurns,
+		TTL:                    resolved.MemoryTTL,
+		Compactor:              compactor,
+		RawTurnLimit:           resolved.MemoryRawTurns,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -189,10 +198,6 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if directory == nil {
 		return nil, fmt.Errorf("agent room directory is incomplete")
 	}
-	memory, err := newAgentMemory(resolved, conversationRepository)
-	if err != nil {
-		return nil, fmt.Errorf("agent memory: %w", err)
-	}
 	conversationContext, err := live.NewRepositoryConversationContextProvider(conversationRepository, resolved.ContextMessageLimit)
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
@@ -201,11 +206,15 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)
 	}
+	memory, err := newAgentMemory(resolved, conversationRepository, client)
+	if err != nil {
+		return nil, fmt.Errorf("agent memory: %w", err)
+	}
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent prompts: %w", err)
 	}
-	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker, MaxPromptChars: resolved.MaxPromptChars}, catalog)
+	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker, MaxPromptChars: resolved.MaxPromptChars, MaxContextTokens: resolved.MaxContextTokens, ContextReserveTokens: resolved.ContextReserveTokens}, catalog)
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}
@@ -244,7 +253,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent output finalizer: %w", err)
 	}
-	rt, err := runtime.NewWithFailureSink(runtime.Config{MaxConcurrent: resolved.MaxConcurrentRequests, QueueCapacity: resolved.QueueCapacity}, live.Runner{Assembler: assembler, Client: client, Finalizer: finalizer, ConversationContext: conversationContext, ToolLoop: toolLoop, Memory: memory}, sink, failure)
+	rt, err := runtime.NewWithFailureSink(runtime.Config{MaxConcurrent: resolved.MaxConcurrentRequests, QueueCapacity: resolved.QueueCapacity, RequestTimeout: time.Duration(resolved.RequestTimeoutMillis) * time.Millisecond}, live.Runner{Assembler: assembler, Client: client, Finalizer: finalizer, ConversationContext: conversationContext, ToolLoop: toolLoop, Memory: memory}, sink, failure)
 	if err != nil {
 		return nil, err
 	}
@@ -309,10 +318,6 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if directory == nil {
 		return nil, fmt.Errorf("agent room directory is incomplete")
 	}
-	memory, err := newAgentMemory(resolved, conversationRepository)
-	if err != nil {
-		return nil, fmt.Errorf("agent memory: %w", err)
-	}
 	conversationContext, err := live.NewRepositoryConversationContextProvider(conversationRepository, resolved.ContextMessageLimit)
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
@@ -321,11 +326,15 @@ func directAgentInvoker(c *config.Config, engine common.Engine, conversationRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)
 	}
+	memory, err := newAgentMemory(resolved, conversationRepository, client)
+	if err != nil {
+		return nil, fmt.Errorf("agent memory: %w", err)
+	}
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent prompts: %w", err)
 	}
-	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker, MaxPromptChars: resolved.MaxPromptChars}, catalog)
+	assembler, err := assemble.New(assemble.Config{CreatorTrip: resolved.CreatorTrip, NoReplyMarker: resolved.NoReplyMarker, MaxPromptChars: resolved.MaxPromptChars, MaxContextTokens: resolved.MaxContextTokens, ContextReserveTokens: resolved.ContextReserveTokens}, catalog)
 	if err != nil {
 		return nil, fmt.Errorf("agent assembler: %w", err)
 	}

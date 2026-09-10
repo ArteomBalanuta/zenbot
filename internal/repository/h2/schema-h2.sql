@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS agent_tool_memory (
   identity_key VARCHAR NOT NULL, tool_name VARCHAR NOT NULL, content VARCHAR NOT NULL,
   created_on BIGINT NOT NULL, expires_on BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_memory_summary (
+  identity_key VARCHAR PRIMARY KEY, content VARCHAR NOT NULL,
+  covered_through_id BIGINT NOT NULL, fingerprint VARCHAR NOT NULL,
+  created_on BIGINT NOT NULL, expires_on BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_messages_trip_created_on ON messages (trip, created_on DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_name_created_on ON messages (name, created_on DESC);
@@ -83,3 +88,4 @@ CREATE INDEX IF NOT EXISTS idx_presence_identity_created ON user_presence_log (t
 CREATE INDEX IF NOT EXISTS idx_agent_memory_identity_created ON agent_memory (identity_key, created_on DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_memory_expires ON agent_memory (expires_on);
 CREATE INDEX IF NOT EXISTS idx_agent_tool_memory_identity_created ON agent_tool_memory (identity_key, created_on DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_summary_expires ON agent_memory_summary (expires_on);

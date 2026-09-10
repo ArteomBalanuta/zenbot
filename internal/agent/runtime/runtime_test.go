@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -286,5 +287,46 @@ func TestRuntimeCallsPostDeliveryOnlyAfterSuccessfulVisibleSink(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRuntimePersistsConfirmedToolOwnedDeliveryWithoutSecondSinkMessage(t *testing.T) {
+	runner := &postDeliveryRunner{result: NewToolOwnedResult("tool-owned", "Completed the requested action.", nil)}
+	var sinkCalls atomic.Int32
+	rt := mustRuntime(t, Config{MaxConcurrent: 1, QueueCapacity: 1}, runner, SinkFunc(func(context.Context, Invocation, Result) error {
+		sinkCalls.Add(1)
+		return nil
+	}))
+	defer rt.Close()
+	if err := rt.Submit(invocation("tool-owned", "room")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return runner.persisted() == 1 })
+	if sinkCalls.Load() != 0 {
+		t.Fatalf("tool-owned delivery emitted %d duplicate sink messages", sinkCalls.Load())
+	}
+}
+
+func TestRuntimeAppliesRequestWideDeadline(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan error, 1)
+	rt := mustRuntime(t, Config{MaxConcurrent: 1, QueueCapacity: 1, RequestTimeout: 15 * time.Millisecond}, RunnerFunc(func(ctx context.Context, _ Invocation) (Result, error) {
+		close(started)
+		<-ctx.Done()
+		cancelled <- ctx.Err()
+		return Result{}, ctx.Err()
+	}), nil)
+	defer rt.Close()
+	if err := rt.Submit(invocation("deadline", "room")); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	select {
+	case err := <-cancelled:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("runner cancellation=%v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request deadline did not cancel runner")
 	}
 }

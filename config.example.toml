@@ -20,6 +20,7 @@ endpoint = "http://localhost:16261"
 model = ""
 apiKeyEnv = "SATURN_AGENT_API_KEY"
 timeoutSeconds = 30
+requestTimeoutMillis = 180000
 maxCompletionTokens = 1024
 thinkingEnabled = false
 maxConcurrentRequests = 2
@@ -34,10 +35,16 @@ maxToolCalls = 4
 maxCallsPerTool = 2
 maxToolFailures = 2
 maxPromptChars = 8000
+maxContextTokens = 16000
+contextReserveTokens = 2048
 maxOutputChars = 8000
 
 # Shared public room memory and bounded recent room context.
 memoryTurns = 30
+# Keep this many newest raw turns after compacting older durable history.
+memoryRawTurns = 20
+# Unicode-character ceiling for the persisted untrusted summary.
+memorySummaryMaxChars = 12000
 memoryTtlHours = 168
 creatorTrip = "YOUR_CREATOR_TRIP_HERE"
 ambientEnabled = false

@@ -1,0 +1,276 @@
+package live
+
+import (
+	"context"
+	"crypto/subtle"
+	"fmt"
+	"strings"
+
+	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/llm"
+	"zenbot/internal/agent/observability"
+	"zenbot/internal/agent/tool"
+	"zenbot/internal/agent/tool/contract"
+	"zenbot/internal/agent/tool/execution"
+	"zenbot/internal/agent/turn"
+)
+
+// TurnEngine owns the request-local model/tool feedback loop. It keeps the
+// model transcript, execution state, recovery bounds, and interruption policy
+// isolated from every other request.
+type TurnEngine struct {
+	Client    llm.LlmClient
+	Registry  *tool.Registry
+	Agent     api.Context
+	Allowed   []string
+	Limits    turn.ExecutionLimits
+	Interrupt turn.InterruptHook
+	Final     turn.FinalResponseValidator
+	Recovery  turn.RecoveryPolicy
+}
+
+func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, providerTools []any, initial llm.LlmResponse, state *turn.State) (llm.LlmResponse, []llm.LlmMessage, []toolBatchResult, error) {
+	if e.Client == nil || e.Registry == nil || state == nil {
+		return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent turn engine is incomplete")
+	}
+	hook := e.Interrupt
+	if hook == nil {
+		hook = turn.AllowAllInterruptHook{}
+	}
+	phase := turn.NewPhaseMachine()
+	if err := phase.Transition(turn.PhaseModel); err != nil {
+		return llm.LlmResponse{}, nil, nil, err
+	}
+	executor := &execution.Executor{
+		Registry:       e.Registry,
+		Ledger:         execution.NewLedger(toolBudgets(e.Allowed, e.Limits), normalizedFailureLimit(e.Limits)),
+		DefaultTimeout: e.Limits.ToolTimeout,
+	}
+	response := initial
+	all := make([]toolBatchResult, 0)
+	cycle := 0
+	for {
+		cycle++
+		calls := response.ToolCalls()
+		observability.Info(ctx, "agent.loop.cycle", "cycle", cycle, "tool_call_count", len(calls), "finish_reason", response.FinishReason())
+		if len(calls) == 0 {
+			final, finalMessages, err := e.finalize(ctx, phase, messages, response)
+			return final, finalMessages, all, err
+		}
+		if response.FinishReason() == "length" {
+			return llm.LlmResponse{}, nil, nil, fmt.Errorf("agent response was truncated")
+		}
+		if err := phase.Transition(turn.PhasePlan); err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		batchCalls := make([]execution.Call, 0, len(calls))
+		for _, call := range calls {
+			batchCalls = append(batchCalls, execution.FromLLM(call))
+		}
+		if err := phase.Transition(turn.PhaseGate); err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		observability.Info(ctx, "agent.tool.batch_started", "cycle", cycle, "tool_call_count", len(batchCalls))
+		batch, err := e.executeBatch(ctx, executor, hook, state, batchCalls)
+		if err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		if err := phase.Transition(turn.PhaseExecute); err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		failures := 0
+		for _, item := range batch {
+			if item.Result.IsError {
+				failures++
+			}
+		}
+		observability.Info(ctx, "agent.tool.batch_completed", "cycle", cycle, "tool_call_count", len(batch), "failure_count", failures)
+		all = append(all, batch...)
+		messages, err = appendRegistryProtocol(messages, response, batch)
+		if err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		if err := phase.Transition(turn.PhaseObserve); err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+
+		tools := providerTools
+		stage := fmt.Sprintf("llm.tool_follow_up.%d", cycle)
+		continueTools := e.recoveryDecision(batch, state.RemainingSteps()) == turn.RecoveryRetryModel
+		if !continueTools || !state.AdvanceStep() {
+			// Terminal synthesis has an independent reserve so observations from
+			// the last legal tool round are never discarded.
+			if err := phase.Transition(turn.PhaseFinalize); err != nil {
+				return llm.LlmResponse{}, nil, nil, err
+			}
+			tools = nil
+			stage = "llm.terminal_synthesis"
+		} else if err := phase.Transition(turn.PhaseModel); err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		response, err = e.Client.Complete(observability.WithStage(ctx, stage), llm.NewLlmRequest(messages, tools, false, nil, nil))
+		if err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return llm.LlmResponse{}, nil, nil, err
+		}
+		if phase.Phase() == turn.PhaseFinalize {
+			final, finalMessages, err := e.finalize(ctx, phase, messages, response)
+			return final, finalMessages, all, err
+		}
+	}
+}
+
+// ResumeAction executes one paused action after validating the opaque resume
+// token and re-running the current registry, schema, and capability checks.
+// A stale authorization therefore becomes a structured observation rather
+// than allowing a previously approved side effect to escape current policy.
+func (e TurnEngine) ResumeAction(ctx context.Context, pending turn.PendingAction, resumeToken string, current api.Context) (contract.Result, error) {
+	call := pending.Request.Call
+	if strings.TrimSpace(pending.ResumeToken) == "" || subtle.ConstantTimeCompare([]byte(pending.ResumeToken), []byte(strings.TrimSpace(resumeToken))) != 1 {
+		return contract.Result{}, fmt.Errorf("invalid action resume token")
+	}
+	if err := execution.ValidateBatchIdentity([]execution.Call{call}); err != nil {
+		return contract.Result{}, fmt.Errorf("invalid pending action: %w", err)
+	}
+	if pending.Request.Descriptor.Name() != call.Name || pending.Request.Descriptor.IsReadOnly() {
+		return contract.Result{}, fmt.Errorf("pending action contract does not match its call")
+	}
+	executor := &execution.Executor{
+		Registry:       e.Registry,
+		Ledger:         execution.NewLedger(toolBudgets(e.Allowed, e.Limits), normalizedFailureLimit(e.Limits)),
+		DefaultTimeout: e.Limits.ToolTimeout,
+	}
+	return executor.Execute(ctx, current, call), nil
+}
+
+func (e TurnEngine) recoveryDecision(batch []toolBatchResult, roundsRemaining int) turn.RecoveryDecision {
+	decision := turn.RecoveryRetryModel
+	for _, item := range batch {
+		if !item.Result.IsError {
+			continue
+		}
+		candidate := e.Recovery.Decide(turn.RecoveryInput{
+			ErrorCode:           item.Result.ErrorCode,
+			ToolRoundsRemaining: roundsRemaining,
+			HasObservations:     true,
+		})
+		if candidate != turn.RecoveryRetryModel {
+			return candidate
+		}
+	}
+	return decision
+}
+
+func (e TurnEngine) executeBatch(ctx context.Context, executor *execution.Executor, hook turn.InterruptHook, state *turn.State, calls []execution.Call) ([]toolBatchResult, error) {
+	if len(calls) > e.Limits.MaxToolCalls || !state.ReserveToolCalls(len(calls)) {
+		return nil, fmt.Errorf("agent tool call limit")
+	}
+	if err := execution.ValidateBatchIdentity(calls); err != nil {
+		return nil, fmt.Errorf("invalid agent tool call: %w", err)
+	}
+	if err := state.MarkToolAttempted(len(calls)); err != nil {
+		return nil, err
+	}
+	denied := make(map[string]contract.Result)
+	executable := make([]execution.Call, 0, len(calls))
+	for _, call := range calls {
+		registered, ok := e.Registry.Lookup(call.Name)
+		if !ok {
+			executable = append(executable, call)
+			continue
+		}
+		descriptor, err := registered.Descriptor(e.Agent)
+		if err != nil || descriptor.IsReadOnly() {
+			executable = append(executable, call)
+			continue
+		}
+		decision, err := hook.Review(ctx, turn.ActionRequest{Call: call, Descriptor: descriptor, Context: e.Agent})
+		if err != nil {
+			return nil, fmt.Errorf("review tool action %s: %w", call.Name, err)
+		}
+		switch decision.Outcome {
+		case turn.InterruptAllow:
+			executable = append(executable, call)
+		case turn.InterruptDeny:
+			denied[call.ID] = contract.ErrorResult(call.ID, call.Name, "ACTION_DENIED", decision.Reason)
+		case turn.InterruptPause:
+			return nil, &turn.PausedError{Pending: turn.PendingAction{Request: turn.ActionRequest{Call: call, Descriptor: descriptor, Context: e.Agent}, ResumeToken: decision.ResumeToken, Reason: decision.Reason}}
+		default:
+			return nil, fmt.Errorf("invalid interrupt outcome for %s", call.Name)
+		}
+	}
+	executed := execution.ExecuteAll(ctx, executor, e.Agent, executable)
+	byID := make(map[string]contract.Result, len(executed)+len(denied))
+	for index, call := range executable {
+		byID[call.ID] = executed[index]
+	}
+	for id, result := range denied {
+		byID[id] = result
+	}
+	batch := make([]toolBatchResult, 0, len(calls))
+	for _, call := range calls {
+		result := byID[call.ID]
+		if result.IsError {
+			_ = state.RecordToolFailure()
+		} else {
+			_ = state.RecordToolSuccess()
+		}
+		batch = append(batch, toolBatchResult{Call: call, Result: result})
+	}
+	return batch, nil
+}
+
+func (e TurnEngine) finalize(ctx context.Context, phase *turn.PhaseMachine, messages []llm.LlmMessage, response llm.LlmResponse) (llm.LlmResponse, []llm.LlmMessage, error) {
+	if phase.Phase() != turn.PhaseFinalize {
+		if err := phase.Transition(turn.PhaseFinalize); err != nil {
+			return llm.LlmResponse{}, nil, err
+		}
+	}
+	if err := e.Final.Validate(turn.FinalResponseInput{Response: response}); err != nil {
+		if transitionErr := phase.Transition(turn.PhaseReflect); transitionErr != nil {
+			return llm.LlmResponse{}, nil, err
+		}
+		reflectionMessages := append([]llm.LlmMessage(nil), messages...)
+		reflectionMessages = append(reflectionMessages,
+			llm.NewLlmMessage("assistant", response.Content(), response.ToolCalls(), ""),
+			llm.NewLlmMessage("user", "Produce one complete final answer to the newest request using the available observations. Do not call tools, repeat an earlier answer, or return an empty response.", nil, ""),
+		)
+		corrected, correctionErr := e.Client.Complete(observability.WithStage(ctx, "llm.final_reflection"), llm.NewLlmRequest(reflectionMessages, nil, false, nil, nil))
+		if correctionErr != nil {
+			return llm.LlmResponse{}, nil, correctionErr
+		}
+		if transitionErr := phase.Transition(turn.PhaseFinalize); transitionErr != nil {
+			return llm.LlmResponse{}, nil, transitionErr
+		}
+		if err := e.Final.Validate(turn.FinalResponseInput{Response: corrected, PriorAssistant: strings.TrimSpace(response.Content())}); err != nil {
+			return llm.LlmResponse{}, nil, fmt.Errorf("invalid final response after reflection: %w", err)
+		}
+		response = corrected
+		messages = reflectionMessages
+	}
+	if err := phase.Transition(turn.PhaseComplete); err != nil {
+		return llm.LlmResponse{}, nil, err
+	}
+	return response, messages, nil
+}
+
+func toolBudgets(allowed []string, limits turn.ExecutionLimits) map[string]int {
+	perTool := limits.MaxCallsPerTool
+	if perTool <= 0 {
+		perTool = limits.MaxToolCalls
+	}
+	budgets := make(map[string]int, len(allowed))
+	for _, name := range allowed {
+		budgets[name] = perTool
+	}
+	return budgets
+}
+
+func normalizedFailureLimit(limits turn.ExecutionLimits) int {
+	if limits.MaxToolFailures > 0 {
+		return limits.MaxToolFailures
+	}
+	return 2
+}

@@ -166,7 +166,7 @@ func TestRunnerSuppressesOrdinaryReplyForCorrectedCommandDelivery(t *testing.T) 
 	runner := Runner{Assembler: testLiveAssembler(t), Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "none"}, ToolLoop: loop}
 	inv := runtime.NewInvocation("runner-prose", runtime.NewContext("room", "caller", "", "", false, nil), "weather?", runtime.MENTION, "", false)
 	result, err := runner.Run(context.Background(), inv)
-	if err != nil || result.ShouldReply() || result.Text() != "" || len(result.DurableEvidence()) != 0 || gateway.calls != 1 {
+	if err != nil || result.ShouldReply() || !result.ToolDeliveryOwned() || result.Text() != "Completed the requested Saturn action." || len(result.DurableEvidence()) != 0 || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v gateway=%d", result, err, gateway.calls)
 	}
 }
@@ -182,15 +182,15 @@ func TestRunnerPassesPublicConversationContextAndSuppressesWhispers(t *testing.T
 	if _, err := runner.Run(context.Background(), public); err != nil {
 		t.Fatal(err)
 	}
-	if len(client.requests) != 1 || !strings.Contains(client.requests[0].Messages()[0].Content(), "room evidence") {
+	if len(client.requests) != 1 || !messagesContain(client.requests[0].Messages(), "room evidence") || strings.Contains(client.requests[0].Messages()[0].Content(), "room evidence") {
 		t.Fatalf("public request did not receive context: %#v", client.requests)
 	}
 	whisper := runtime.NewInvocation("whisper", runtime.NewContext("room", "nick", "", "", true, nil), "prompt", runtime.MENTION, "different", false)
 	if _, err := runner.Run(context.Background(), whisper); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(client.requests[1].Messages()[0].Content(), "room evidence") {
-		t.Fatalf("whisper leaked public context: %s", client.requests[1].Messages()[0].Content())
+	if messagesContain(client.requests[1].Messages(), "room evidence") {
+		t.Fatalf("whisper leaked public context: %#v", client.requests[1].Messages())
 	}
 }
 

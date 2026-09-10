@@ -16,10 +16,10 @@ func TestExampleConfigDocumentsAndResolvesProductionAgentSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
-		"endpoint", "model", "apiKeyEnv", "timeoutSeconds", "maxCompletionTokens",
+		"endpoint", "model", "apiKeyEnv", "timeoutSeconds", "requestTimeoutMillis", "maxCompletionTokens",
 		"thinkingEnabled", "maxConcurrentRequests", "maxSteps", "maxToolCallsPerTurn",
 		"toolTimeoutMillis", "maxToolCalls", "maxCallsPerTool", "maxToolFailures",
-		"maxPromptChars", "maxOutputChars", "memoryTurns", "memoryTtlHours",
+		"maxPromptChars", "maxContextTokens", "contextReserveTokens", "maxOutputChars", "memoryTurns", "memoryRawTurns", "memorySummaryMaxChars", "memoryTtlHours",
 		"maxRetries", "retryBackoffMillis", "creatorTrip", "ambientEnabled",
 		"ambientEveryMessages", "quietMinutes", "contextMessageLimit", "noReplyMarker",
 		"moderationEnabled", "moderationMessageBurstCount", "moderationMessageBurstWindowSeconds",
@@ -46,7 +46,7 @@ func TestExampleConfigDocumentsAndResolvesProductionAgentSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve example config: %v", err)
 	}
-	if cfg.DbPath != "database/database" || resolved.MemoryTurns != 30 || resolved.ContextMessageLimit != 60 || resolved.MaxPromptChars != 8000 || resolved.MaxCallsPerTool != 2 || resolved.MaxToolFailures != 2 {
+	if cfg.DbPath != "database/database" || resolved.MemoryTurns != 30 || resolved.MemoryRawTurns != 20 || resolved.MemorySummaryMaxChars != 12000 || resolved.ContextMessageLimit != 60 || resolved.MaxPromptChars != 8000 || resolved.MaxContextTokens != 16000 || resolved.ContextReserveTokens != 2048 || resolved.MaxCallsPerTool != 2 || resolved.MaxToolFailures != 2 {
 		t.Fatalf("example runtime values are stale: base=%+v agent=%+v", cfg, resolved.AgentConfig)
 	}
 }
@@ -69,6 +69,11 @@ func TestEnvironmentExampleDocumentsEveryAgentRuntimeOverride(t *testing.T) {
 		"SATURN_AGENT_AMBIENT_EVERY_MESSAGES",
 		"SATURN_AGENT_QUIET_MINUTES",
 		"SATURN_AGENT_CONTEXT_MESSAGE_LIMIT",
+		"SATURN_AGENT_MAX_CONTEXT_TOKENS",
+		"SATURN_AGENT_CONTEXT_RESERVE_TOKENS",
+		"SATURN_AGENT_REQUEST_TIMEOUT_MILLIS",
+		"SATURN_AGENT_MEMORY_RAW_TURNS",
+		"SATURN_AGENT_MEMORY_SUMMARY_MAX_CHARS",
 		"SATURN_AGENT_NO_REPLY_MARKER",
 		"SATURN_AGENT_MAX_RETRIES",
 		"SATURN_AGENT_RETRY_BACKOFF_MILLIS",

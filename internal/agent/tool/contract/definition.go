@@ -2,6 +2,7 @@ package contract
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -105,7 +106,31 @@ type Definition struct {
 	Parameters        json.RawMessage
 }
 
-func NewDefinition(d Descriptor) Definition { return Definition{d.name, d.description, d.Parameters()} }
+func NewDefinition(d Descriptor) Definition {
+	metadata := []string{
+		d.description,
+		"Label: " + d.label,
+		"Category: " + d.category,
+		"Access: " + string(d.access),
+		"Effect: " + string(d.effect),
+		"Result mode: " + string(d.mode),
+		fmt.Sprintf("Idempotent: %t", d.idempotent),
+	}
+	if len(d.capabilities) > 0 {
+		metadata = append(metadata, "Required capabilities: "+strings.Join(d.capabilities, ", "))
+	}
+	if len(d.prerequisites) > 0 {
+		metadata = append(metadata, "Required successful tools: "+strings.Join(d.prerequisites, ", "))
+	}
+	if len(d.reads) > 0 {
+		metadata = append(metadata, "Reads: "+strings.Join(d.reads, ", "))
+	}
+	if len(d.writes) > 0 {
+		metadata = append(metadata, "Writes: "+strings.Join(d.writes, ", "))
+	}
+	metadata = append(metadata, "When not to use: "+strings.Join(d.whenNotUse, " "))
+	return Definition{d.name, strings.Join(metadata, "\n"), d.Parameters()}
+}
 func (d Definition) JSON() json.RawMessage {
 	b, _ := json.Marshal(struct {
 		Name, Description string

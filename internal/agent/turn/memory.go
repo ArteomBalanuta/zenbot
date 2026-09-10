@@ -240,6 +240,32 @@ func (m TurnMemory) AppendContext(parent context.Context, ctx api.Context, user,
 	}
 	return nil
 }
+
+func (m TurnMemory) AppendTurnContext(parent context.Context, ctx api.Context, user, assistant string, evidence []PersistableEvidence, _ string) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	for _, item := range evidence {
+		if !validPersistableEvidence(item) {
+			return ErrInvalidEvidence
+		}
+	}
+	if atomic, ok := m.store.(interface {
+		AppendTurnContext(context.Context, api.Context, string, string, []PersistableEvidence) error
+	}); ok {
+		if err := atomic.AppendTurnContext(parent, ctx, user, assistant, evidence); err != nil {
+			return memoryError{sentinel: ErrMemoryPersistence, cause: err}
+		}
+		return nil
+	}
+	if err := m.AppendContext(parent, ctx, user, assistant, ""); err != nil {
+		return err
+	}
+	if ctx.Whisper() || len(evidence) == 0 {
+		return nil
+	}
+	return m.AppendToolEvidenceContext(parent, ctx, evidence)
+}
 func (m TurnMemory) AppendToolEvidence(ctx api.Context, es []EvidenceEntry, _ string) error {
 	for _, e := range es {
 		if strings.TrimSpace(e.Tool) == "" || strings.TrimSpace(e.Content) == "" {

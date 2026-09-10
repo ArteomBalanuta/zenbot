@@ -14,6 +14,7 @@ type AgentConfig struct {
 	Model                                     string         `toml:"model"`
 	APIKeyEnv                                 string         `toml:"apiKeyEnv"`
 	TimeoutMillis                             int            `toml:"timeoutMillis"`
+	RequestTimeoutMillis                      int            `toml:"requestTimeoutMillis"`
 	MaxTokens                                 int            `toml:"maxTokens"`
 	ThinkingEnabled                           bool           `toml:"thinkingEnabled"`
 	MaxSteps                                  int            `toml:"maxSteps"`
@@ -22,6 +23,8 @@ type AgentConfig struct {
 	MaxCallsPerTool                           int            `toml:"maxCallsPerTool"`
 	MaxToolFailures                           int            `toml:"maxToolFailures"`
 	MaxPromptChars                            int            `toml:"maxPromptChars"`
+	MaxContextTokens                          int            `toml:"maxContextTokens"`
+	ContextReserveTokens                      int            `toml:"contextReserveTokens"`
 	MaxRetries                                int            `toml:"maxRetries"`
 	RetryBackoffMillis                        int            `toml:"retryBackoffMillis"`
 	Ambient                                   bool           `toml:"ambient"`
@@ -30,6 +33,8 @@ type AgentConfig struct {
 	QuietMinutes                              int            `toml:"quietMinutes"`
 	ContextMessageLimit                       int            `toml:"contextMessageLimit"`
 	MemoryTurns                               int            `toml:"memoryTurns"`
+	MemoryRawTurns                            int            `toml:"memoryRawTurns"`
+	MemorySummaryMaxChars                     int            `toml:"memorySummaryMaxChars"`
 	MemoryTtlMinutes                          int            `toml:"memoryTtlMinutes"`
 	NoReplyMarker                             string         `toml:"noReplyMarker"`
 	MaxOutputChars                            int            `toml:"maxOutputChars"`
@@ -79,12 +84,15 @@ type ResolvedAgentConfig struct {
 const (
 	defaultEndpoint                            = "http://localhost:16261"
 	defaultTimeoutMillis                       = 30000
+	defaultRequestTimeoutMillis                = 180000
 	defaultMaxTokens                           = 1024
 	defaultMaxSteps                            = 5
 	defaultMaxTools                            = 4
 	defaultMaxCallsPerTool                     = 2
 	defaultMaxToolFailures                     = 2
 	defaultMaxPromptChars                      = 8000
+	defaultMaxContextTokens                    = 16000
+	defaultContextReserveTokens                = 2048
 	defaultMaxRetries                          = 2
 	defaultRetryBackoffMillis                  = 250
 	defaultToolTimeoutMillis                   = 10000
@@ -92,6 +100,8 @@ const (
 	defaultQuietMinutes                        = 15
 	defaultContextMessageLimit                 = 60
 	defaultMemoryTurns                         = 30
+	defaultMemoryRawTurns                      = 20
+	defaultMemorySummaryMaxChars               = 12000
 	defaultMemoryTtlMinutes                    = 10080
 	defaultNoReplyMarker                       = "[[SATURN_NO_REPLY]]"
 	defaultMaxOutputChars                      = 8000
@@ -125,13 +135,16 @@ func (c AgentConfig) Validate() error {
 	if c.TimeoutMillis <= 0 {
 		return fmt.Errorf("agent.timeoutMillis must be positive")
 	}
-	for name, v := range map[string]int{"maxTokens": c.MaxTokens, "maxSteps": c.MaxSteps, "maxTools": c.MaxTools, "maxToolCalls": c.MaxToolCalls, "maxCallsPerTool": c.MaxCallsPerTool, "maxToolFailures": c.MaxToolFailures, "maxPromptChars": c.MaxPromptChars, "maxConcurrentRequests": c.MaxConcurrentRequests, "toolTimeoutMillis": c.ToolTimeoutMillis} {
+	for name, v := range map[string]int{"maxTokens": c.MaxTokens, "maxSteps": c.MaxSteps, "maxTools": c.MaxTools, "maxToolCalls": c.MaxToolCalls, "maxCallsPerTool": c.MaxCallsPerTool, "maxToolFailures": c.MaxToolFailures, "maxPromptChars": c.MaxPromptChars, "maxContextTokens": c.MaxContextTokens, "contextReserveTokens": c.ContextReserveTokens, "maxConcurrentRequests": c.MaxConcurrentRequests, "toolTimeoutMillis": c.ToolTimeoutMillis, "requestTimeoutMillis": c.RequestTimeoutMillis} {
 		if v <= 0 {
 			return fmt.Errorf("agent.%s must be positive", name)
 		}
 		if v > maxConfigLimit {
 			return fmt.Errorf("agent.%s exceeds maximum %d", name, maxConfigLimit)
 		}
+	}
+	if c.ContextReserveTokens >= c.MaxContextTokens {
+		return fmt.Errorf("agent.contextReserveTokens must be smaller than maxContextTokens")
 	}
 	for name, v := range map[string]int{"maxRetries": c.MaxRetries, "retryBackoffMillis": c.RetryBackoffMillis, "queueCapacity": c.QueueCapacity} {
 		if v < 0 {
@@ -166,6 +179,12 @@ func (c AgentConfig) Validate() error {
 	}
 	if c.MemoryTurns < 1 || c.MemoryTurns > maxMemoryTurns {
 		return fmt.Errorf("agent.memoryTurns must be between 1 and %d", maxMemoryTurns)
+	}
+	if c.MemoryRawTurns < 1 || c.MemoryRawTurns > c.MemoryTurns {
+		return fmt.Errorf("agent.memoryRawTurns must be between 1 and memoryTurns")
+	}
+	if c.MemorySummaryMaxChars < 1 || c.MemorySummaryMaxChars > maxConfigLimit {
+		return fmt.Errorf("agent.memorySummaryMaxChars must be between 1 and %d", maxConfigLimit)
 	}
 	if c.MemoryTtlMinutes < 1 || c.MemoryTtlMinutes > maxMemoryTtlMinutes {
 		return fmt.Errorf("agent.memoryTtlMinutes must be between 1 and %d", maxMemoryTtlMinutes)
@@ -231,6 +250,12 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 	if v.MaxPromptChars == 0 {
 		v.MaxPromptChars = defaultMaxPromptChars
 	}
+	if v.MaxContextTokens == 0 {
+		v.MaxContextTokens = defaultMaxContextTokens
+	}
+	if v.ContextReserveTokens == 0 {
+		v.ContextReserveTokens = defaultContextReserveTokens
+	}
 	if v.MaxToolCalls == 0 {
 		v.MaxToolCalls = defaultMaxTools
 	}
@@ -258,6 +283,9 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 	if v.TimeoutMillis, err = r.Int("timeoutMillis", v.TimeoutMillis); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
+	if v.RequestTimeoutMillis, err = r.Int("requestTimeoutMillis", v.RequestTimeoutMillis); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
 	if v.MaxTokens, err = r.Int("maxTokens", v.MaxTokens); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
@@ -282,6 +310,12 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 	if v.MaxPromptChars, err = r.Int("maxPromptChars", v.MaxPromptChars); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
+	if v.MaxContextTokens, err = r.Int("maxContextTokens", v.MaxContextTokens); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
+	if v.ContextReserveTokens, err = r.Int("contextReserveTokens", v.ContextReserveTokens); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
 	if v.MaxRetries, err = r.Int("maxRetries", v.MaxRetries); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
@@ -302,6 +336,18 @@ func (c AgentConfig) Resolve(r ValueReader) (ResolvedAgentConfig, error) {
 		return ResolvedAgentConfig{}, err
 	}
 	if v.MemoryTurns, err = r.Int("memoryTurns", v.MemoryTurns); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
+	if v.MemoryRawTurns == 0 {
+		v.MemoryRawTurns = min(defaultMemoryRawTurns, v.MemoryTurns)
+	}
+	if v.MemoryRawTurns, err = r.Int("memoryRawTurns", v.MemoryRawTurns); err != nil {
+		return ResolvedAgentConfig{}, err
+	}
+	if v.MemorySummaryMaxChars == 0 {
+		v.MemorySummaryMaxChars = defaultMemorySummaryMaxChars
+	}
+	if v.MemorySummaryMaxChars, err = r.Int("memorySummaryMaxChars", v.MemorySummaryMaxChars); err != nil {
 		return ResolvedAgentConfig{}, err
 	}
 	if v.MemoryTtlMinutes, err = r.Int("memoryTtlMinutes", v.MemoryTtlMinutes); err != nil {
@@ -349,12 +395,15 @@ func (c *AgentConfig) applyExecutionDefaults() {
 		c.APIKeyEnv = DefaultAPIKeyEnv
 	}
 	defaults := map[*int]int{
-		&c.TimeoutMillis:      defaultTimeoutMillis,
-		&c.MaxTokens:          defaultMaxTokens,
-		&c.MaxSteps:           defaultMaxSteps,
-		&c.MaxTools:           defaultMaxTools,
-		&c.MaxRetries:         defaultMaxRetries,
-		&c.RetryBackoffMillis: defaultRetryBackoffMillis,
+		&c.TimeoutMillis:        defaultTimeoutMillis,
+		&c.RequestTimeoutMillis: defaultRequestTimeoutMillis,
+		&c.MaxTokens:            defaultMaxTokens,
+		&c.MaxSteps:             defaultMaxSteps,
+		&c.MaxTools:             defaultMaxTools,
+		&c.MaxRetries:           defaultMaxRetries,
+		&c.RetryBackoffMillis:   defaultRetryBackoffMillis,
+		&c.MaxContextTokens:     defaultMaxContextTokens,
+		&c.ContextReserveTokens: defaultContextReserveTokens,
 	}
 	for destination, fallback := range defaults {
 		if *destination == 0 {
@@ -507,14 +556,17 @@ func withAgentEnvironmentAliases(reader ValueReader) ValueReader {
 	aliases := map[string]string{
 		"enabled": "SATURN_AGENT_ENABLED", "endpoint": "SATURN_AGENT_ENDPOINT",
 		"model": "SATURN_AGENT_MODEL", "apiKeyEnv": "SATURN_AGENT_API_KEY_ENV",
-		"thinkingEnabled": "SATURN_AGENT_THINKING_ENABLED", "maxTokens": "SATURN_AGENT_MAX_COMPLETION_TOKENS", "maxSteps": "SATURN_AGENT_MAX_STEPS",
+		"requestTimeoutMillis": "SATURN_AGENT_REQUEST_TIMEOUT_MILLIS",
+		"thinkingEnabled":      "SATURN_AGENT_THINKING_ENABLED", "maxTokens": "SATURN_AGENT_MAX_COMPLETION_TOKENS", "maxSteps": "SATURN_AGENT_MAX_STEPS",
 		"maxTools": "SATURN_AGENT_MAX_TOOL_CALLS_PER_TURN", "maxRetries": "SATURN_AGENT_MAX_RETRIES",
 		"maxToolCalls": "SATURN_AGENT_MAX_TOOL_CALLS", "maxCallsPerTool": "SATURN_AGENT_MAX_CALLS_PER_TOOL",
 		"maxToolFailures": "SATURN_AGENT_MAX_TOOL_FAILURES", "maxPromptChars": "SATURN_AGENT_MAX_PROMPT_CHARS",
+		"maxContextTokens": "SATURN_AGENT_MAX_CONTEXT_TOKENS", "contextReserveTokens": "SATURN_AGENT_CONTEXT_RESERVE_TOKENS",
 		"retryBackoffMillis": "SATURN_AGENT_RETRY_BACKOFF_MILLIS", "ambient": "SATURN_AGENT_AMBIENT_ENABLED",
 		"creatorTrip": "SATURN_AGENT_CREATOR_TRIP", "ambientEveryMessages": "SATURN_AGENT_AMBIENT_EVERY_MESSAGES",
 		"quietMinutes": "SATURN_AGENT_QUIET_MINUTES", "contextMessageLimit": "SATURN_AGENT_CONTEXT_MESSAGE_LIMIT",
-		"memoryTurns": "SATURN_AGENT_MEMORY_TURNS", "noReplyMarker": "SATURN_AGENT_NO_REPLY_MARKER",
+		"memoryTurns": "SATURN_AGENT_MEMORY_TURNS", "memoryRawTurns": "SATURN_AGENT_MEMORY_RAW_TURNS",
+		"memorySummaryMaxChars": "SATURN_AGENT_MEMORY_SUMMARY_MAX_CHARS", "noReplyMarker": "SATURN_AGENT_NO_REPLY_MARKER",
 		"maxOutputChars":        "SATURN_AGENT_MAX_OUTPUT_CHARS",
 		"maxConcurrentRequests": "SATURN_AGENT_MAX_CONCURRENT_REQUESTS", "queueCapacity": "SATURN_AGENT_QUEUE_CAPACITY",
 		"toolTimeoutMillis": "SATURN_AGENT_TOOL_TIMEOUT_MILLIS", "moderationEnabled": "SATURN_AGENT_MODERATION_ENABLED",

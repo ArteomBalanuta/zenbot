@@ -2,7 +2,9 @@ package h2
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,7 +12,7 @@ import (
 	"zenbot/internal/repository"
 )
 
-const loadAgentMemorySQL = `SELECT role, content FROM (
+const loadAgentMemorySQL = `SELECT id, role, content, created_on FROM (
   SELECT id, role, content, created_on FROM agent_memory
   WHERE identity_key = $1 AND expires_on > $2 AND role IN ('user', 'assistant')
   ORDER BY created_on DESC, id DESC LIMIT $3
@@ -46,7 +48,7 @@ func (d *Database) LoadAgentMemory(ctx context.Context, key string, nowMillis in
 	out := []repository.AgentMemoryMessage{}
 	for rows.Next() {
 		var message repository.AgentMemoryMessage
-		if err := rows.Scan(&message.Role, &message.Content); err != nil {
+		if err := rows.Scan(&message.ID, &message.Role, &message.Content, &message.CreatedOnMillis); err != nil {
 			return nil, fmt.Errorf("load agent memory: %w", err)
 		}
 		if message.Role != "user" && message.Role != "assistant" || strings.TrimSpace(message.Content) == "" {
@@ -58,6 +60,57 @@ func (d *Database) LoadAgentMemory(ctx context.Context, key string, nowMillis in
 		return nil, fmt.Errorf("load agent memory: %w", err)
 	}
 	return out, nil
+}
+
+func (d *Database) LoadAgentMemorySummary(ctx context.Context, key string, nowMillis int64) (*repository.AgentMemorySummary, error) {
+	if d == nil || d.DB == nil {
+		return nil, fmt.Errorf("load agent memory summary: database is not initialized")
+	}
+	if strings.TrimSpace(key) == "" || nowMillis < 0 {
+		return nil, fmt.Errorf("load agent memory summary: key and clock are invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("load agent memory summary: %w", err)
+	}
+	row := repository.AgentMemorySummary{IdentityKey: key}
+	err := d.DB.QueryRowContext(ctx, `SELECT content, covered_through_id, fingerprint, created_on, expires_on FROM agent_memory_summary WHERE identity_key = $1 AND expires_on > $2`, key, nowMillis).Scan(&row.Content, &row.CoveredThroughID, &row.Fingerprint, &row.CreatedOnMillis, &row.ExpiresOnMillis)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load agent memory summary: %w", err)
+	}
+	if strings.TrimSpace(row.Content) == "" || row.CoveredThroughID < 1 || strings.TrimSpace(row.Fingerprint) == "" || row.ExpiresOnMillis <= row.CreatedOnMillis {
+		return nil, fmt.Errorf("load agent memory summary: invalid stored summary")
+	}
+	return &row, nil
+}
+
+func (d *Database) UpsertAgentMemorySummary(ctx context.Context, summary repository.AgentMemorySummary) error {
+	if d == nil || d.DB == nil {
+		return fmt.Errorf("upsert agent memory summary: database is not initialized")
+	}
+	if strings.TrimSpace(summary.IdentityKey) == "" || strings.TrimSpace(summary.Content) == "" || summary.CoveredThroughID < 1 || strings.TrimSpace(summary.Fingerprint) == "" || summary.ExpiresOnMillis <= summary.CreatedOnMillis {
+		return fmt.Errorf("upsert agent memory summary: invalid summary")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("upsert agent memory summary: %w", err)
+	}
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("upsert agent memory summary: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_memory_summary WHERE identity_key = $1`, summary.IdentityKey); err != nil {
+		return fmt.Errorf("upsert agent memory summary delete: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO agent_memory_summary(identity_key, content, covered_through_id, fingerprint, created_on, expires_on) VALUES ($1,$2,$3,$4,$5,$6)`, summary.IdentityKey, summary.Content, summary.CoveredThroughID, summary.Fingerprint, summary.CreatedOnMillis, summary.ExpiresOnMillis); err != nil {
+		return fmt.Errorf("upsert agent memory summary insert: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("upsert agent memory summary commit: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) AppendAgentMemory(ctx context.Context, key, user, assistant string, createdOnMillis, expiresOnMillis int64) error {
@@ -94,6 +147,54 @@ func (d *Database) AppendAgentMemory(ctx context.Context, key, user, assistant s
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("append agent memory commit: %w", err)
+	}
+	return nil
+}
+
+func (d *Database) AppendAgentTurn(ctx context.Context, record repository.AgentTurnRecord) error {
+	if d == nil || d.DB == nil {
+		return fmt.Errorf("append agent turn: database is not initialized")
+	}
+	if strings.TrimSpace(record.IdentityKey) == "" || strings.TrimSpace(record.User) == "" || strings.TrimSpace(record.Assistant) == "" {
+		return fmt.Errorf("append agent turn: identity and exchange content are required")
+	}
+	if record.ExpiresOnMillis <= record.CreatedOnMillis {
+		return fmt.Errorf("append agent turn: expiry must be after creation")
+	}
+	for _, evidence := range record.Evidence {
+		if strings.TrimSpace(evidence.ToolName) == "" || strings.TrimSpace(evidence.Content) == "" {
+			return fmt.Errorf("append agent turn: evidence is invalid")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("append agent turn: %w", err)
+	}
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("append agent turn: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_memory WHERE expires_on <= $1`, record.CreatedOnMillis); err != nil {
+		return fmt.Errorf("append agent turn memory cleanup: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_tool_memory WHERE expires_on <= $1`, record.CreatedOnMillis); err != nil {
+		return fmt.Errorf("append agent turn evidence cleanup: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_memory_summary WHERE expires_on <= $1`, record.CreatedOnMillis); err != nil {
+		return fmt.Errorf("append agent turn summary cleanup: %w", err)
+	}
+	for _, message := range []struct{ role, content string }{{"user", record.User}, {"assistant", record.Assistant}} {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO agent_memory(identity_key, role, content, created_on, expires_on) VALUES ($1,$2,$3,$4,$5)`, record.IdentityKey, message.role, message.content, record.CreatedOnMillis, record.ExpiresOnMillis); err != nil {
+			return fmt.Errorf("append agent turn %s: %w", message.role, err)
+		}
+	}
+	for _, evidence := range record.Evidence {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO agent_tool_memory(identity_key, tool_name, content, created_on, expires_on) VALUES ($1,$2,$3,$4,$5)`, record.IdentityKey, evidence.ToolName, evidence.Content, record.CreatedOnMillis, record.ExpiresOnMillis); err != nil {
+			return fmt.Errorf("append agent turn evidence: %w", err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("append agent turn commit: %w", err)
 	}
 	return nil
 }
@@ -168,3 +269,4 @@ func (d *Database) AppendAgentToolEvidence(ctx context.Context, key, toolName, c
 
 var _ repository.AgentMemoryRepository = (*Database)(nil)
 var _ repository.AgentToolEvidenceRepository = (*Database)(nil)
+var _ repository.AgentTurnRepository = (*Database)(nil)

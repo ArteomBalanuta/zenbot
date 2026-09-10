@@ -32,6 +32,7 @@ type ToolLoop struct {
 	allowed   []string
 	general   bool
 	Limits    turn.ExecutionLimits
+	Interrupt turn.InterruptHook
 }
 
 func ToolLoopLimits() turn.ExecutionLimits { return turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1} }
@@ -145,7 +146,7 @@ func (l ToolLoop) CompleteWithEvidenceAndHistorical(ctx context.Context, inv run
 		return l.completeRequiredHistory(ctx, inv, agent, prepared, first, state)
 	}
 	if l.general {
-		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state)
+		response, _, batch, loopErr := completeRegistryLoop(ctx, l.Client, l.Registry, agent, prepared.Messages(), prepared.Tools(), first, l.allowed, l.Limits, state, l.Interrupt)
 		if loopErr != nil {
 			return Completion{}, loopErr
 		}

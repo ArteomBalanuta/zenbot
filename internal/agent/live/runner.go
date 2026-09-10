@@ -154,7 +154,11 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 	}
 	if suppressReply {
 		observability.Info(ctx, "agent.response.suppressed", "tool_attempted", meta.ToolAttempted)
-		return runtime.NewResultWithEvidence(inv.RequestID(), "", false, nil), nil
+		memoryText := strings.TrimSpace(response.Content())
+		if memoryText == "" {
+			memoryText = "Completed the requested Saturn action."
+		}
+		return runtime.NewToolOwnedResult(inv.RequestID(), memoryText, evidence), nil
 	}
 	observability.Debug(ctx, "agent.response.finalization_started",
 		"finish_reason", response.FinishReason(),
@@ -182,16 +186,10 @@ func (r Runner) loadHistoricalEvidence(ctx context.Context, inv runtime.Invocati
 	return r.Memory.LoadHistoricalEvidenceContext(ctx, apiContext(inv))
 }
 func (r Runner) AfterDelivery(ctx context.Context, inv runtime.Invocation, result runtime.Result) error {
-	if r.Memory == nil || !result.ShouldReply() {
+	if r.Memory == nil || (!result.ShouldReply() && !result.ToolDeliveryOwned()) {
 		return nil
 	}
-	if err := r.Memory.AppendContext(ctx, apiContext(inv), inv.Prompt(), result.Text(), inv.RequestID()); err != nil {
-		return err
-	}
-	if inv.Context().Whisper() || len(result.DurableEvidence()) == 0 {
-		return nil
-	}
-	if err := r.Memory.AppendToolEvidenceContext(ctx, apiContext(inv), result.DurableEvidence()); err != nil {
+	if err := r.Memory.AppendTurnContext(ctx, apiContext(inv), inv.Prompt(), result.Text(), result.DurableEvidence(), inv.RequestID()); err != nil {
 		return fmt.Errorf("agent tool evidence persistence failed: %w", err)
 	}
 	return nil

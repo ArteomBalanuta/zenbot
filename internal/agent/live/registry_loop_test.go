@@ -197,6 +197,24 @@ func TestExecuteRegistryBatchFansOutIndependentReadOnlyCalls(t *testing.T) {
 	}
 }
 
+func TestExecuteRegistryBatchRejectsDuplicateCallIDsBeforeExecution(t *testing.T) {
+	read := &correctingReadTool{}
+	registry := agenttool.NewRegistry([]agenttool.Tool{read}, []string{read.Name()})
+	executor := &execution.Executor{Registry: registry}
+	agent, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	state := turn.NewState(turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	_, _, err := executeRegistryBatch(context.Background(), executor, agent, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2}, state, []execution.Call{
+		{ID: "same", Name: read.Name(), Arguments: json.RawMessage(`{"value":"one"}`)},
+		{ID: "same", Name: read.Name(), Arguments: json.RawMessage(`{"value":"two"}`)},
+	})
+	if err == nil {
+		t.Fatal("duplicate call IDs were accepted")
+	}
+	if read.calls.Load() != 0 {
+		t.Fatalf("tool executed %d times before identity validation", read.calls.Load())
+	}
+}
+
 func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing.T) {
 	read := &correctingReadTool{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
@@ -269,5 +287,52 @@ func TestRegistryToolLoopHonorsConfiguredFailureBudget(t *testing.T) {
 	messages := client.requests[2].Messages()
 	if !strings.Contains(messages[len(messages)-1].Content(), "TOOL_DISABLED") {
 		t.Fatalf("disabled observation missing: %#v", messages[len(messages)-1])
+	}
+	if len(client.requests[2].Tools()) != 0 {
+		t.Fatalf("disabled tool remained available during degradation: %#v", client.requests[2].Tools())
+	}
+}
+
+func TestRegistryToolLoopReservesTerminalSynthesisAfterLastToolRound(t *testing.T) {
+	read := &correctingReadTool{}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("one", read.Name(), map[string]any{"value": "first"})}, "tool_calls"),
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("two", read.Name(), map[string]any{"value": "second"})}, "tool_calls"),
+		llm.NewLlmResponse("answer from both observations", nil, "stop"),
+	}}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 2, MaxCallsPerTool: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := runtime.NewInvocation("terminal-reserve", runtime.NewContext("room", "caller", "", "", false, nil), "read twice", runtime.MENTION, "", false)
+	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+	if err != nil {
+		t.Fatalf("last-round observations were discarded: %v", err)
+	}
+	if completion.Response.Content() != "answer from both observations" || read.calls.Load() != 2 || len(client.requests) != 3 {
+		t.Fatalf("completion=%#v tool_calls=%d provider_calls=%d", completion, read.calls.Load(), len(client.requests))
+	}
+	if len(client.requests[2].Tools()) != 0 {
+		t.Fatalf("terminal synthesis retained tools: %#v", client.requests[2].Tools())
+	}
+}
+
+func TestRegistryToolLoopReflectsOnceOnInvalidFinalResponse(t *testing.T) {
+	read := &correctingReadTool{}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(" ", nil, "stop"),
+		llm.NewLlmResponse("recovered final answer", nil, "stop"),
+	}}
+	loop, err := NewRegistryToolLoop(testLiveAssembler(t), client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := runtime.NewInvocation("final-reflection", runtime.NewContext("room", "caller", "", "", false, nil), "answer me", runtime.MENTION, "", false)
+	completion, err := loop.CompleteWithEvidence(context.Background(), inv, nil, "")
+	if err != nil || completion.Response.Content() != "recovered final answer" || len(client.requests) != 2 {
+		t.Fatalf("completion=%#v requests=%d err=%v", completion, len(client.requests), err)
+	}
+	if len(client.requests[1].Tools()) != 0 {
+		t.Fatalf("reflection exposed tools: %#v", client.requests[1].Tools())
 	}
 }

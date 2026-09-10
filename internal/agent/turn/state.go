@@ -41,6 +41,13 @@ func (s *State) AdvanceStep() bool {
 	s.steps++
 	return true
 }
+func (s *State) RemainingSteps() int {
+	remaining := s.limits.MaxSteps - s.steps
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
 func (s *State) ReserveToolCalls(n int) bool {
 	if n < 0 || s.reserved+n > s.limits.MaxToolCalls {
 		return false

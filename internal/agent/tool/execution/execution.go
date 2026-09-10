@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,24 @@ func FromLLM(c llm.LlmToolCall) Call {
 	return Call{c.ID(), c.Name(), json.RawMessage(c.RawArguments())}
 }
 func Key(c Call) string { return c.Name + ":" + string(contract.CanonicalJSON(c.Arguments)) }
+
+func ValidateBatchIdentity(calls []Call) error {
+	seen := make(map[string]struct{}, len(calls))
+	for _, call := range calls {
+		id := strings.TrimSpace(call.ID)
+		if id == "" {
+			return fmt.Errorf("tool call ID must not be blank")
+		}
+		if strings.TrimSpace(call.Name) == "" {
+			return fmt.Errorf("tool call name must not be blank for %s", id)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("duplicate tool call ID: %s", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
 
 type Ledger struct {
 	mu          sync.Mutex
@@ -144,6 +164,10 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	}()
+	defer func() {
+		result.CallID = c.ID
+		result.ToolName = c.Name
+	}()
 	if ctx.Err() != nil {
 		code := "TOOL_BATCH_CANCELLED"
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -245,36 +269,40 @@ func Conflict(a, b contract.Descriptor) bool {
 }
 func ExecuteAll(ctx context.Context, e *Executor, agent api.Context, calls []Call) []contract.Result {
 	out := make([]contract.Result, len(calls))
-	for i := 0; i < len(calls); {
-		t, ok := e.Registry.Find(agent, calls[i].Name)
-		var d contract.Descriptor
-		if ok {
-			d, _ = t.Descriptor(agent)
+	if len(calls) == 0 {
+		return out
+	}
+	if e == nil || e.Registry == nil {
+		for index, call := range calls {
+			out[index] = contract.ErrorResult(call.ID, call.Name, "UNKNOWN_TOOL", "unknown tool")
 		}
-		if !ok || !Safe(d) {
-			out[i] = e.Execute(ctx, agent, calls[i])
-			i++
+		return out
+	}
+	stages, err := (BatchPlanner{Registry: e.Registry}).Plan(agent, calls)
+	if err != nil {
+		for index, call := range calls {
+			out[index] = contract.ErrorResult(call.ID, call.Name, "INVALID_TOOL_PROTOCOL", err.Error())
+		}
+		return out
+	}
+	cursor := 0
+	for _, stage := range stages {
+		if !stage.Parallel {
+			out[cursor] = e.Execute(ctx, agent, stage.Calls[0])
+			cursor++
 			continue
 		}
-		j := i + 1
-		for j < len(calls) {
-			nt, nok := e.Registry.Find(agent, calls[j].Name)
-			if !nok {
-				break
-			}
-			nd, er := nt.Descriptor(agent)
-			if er != nil || !Safe(nd) || Conflict(d, nd) {
-				break
-			}
-			j++
-		}
 		var wg sync.WaitGroup
-		for k := i; k < j; k++ {
+		for offset, call := range stage.Calls {
+			index := cursor + offset
 			wg.Add(1)
-			go func(k int) { defer wg.Done(); out[k] = e.Execute(ctx, agent, calls[k]) }(k)
+			go func() {
+				defer wg.Done()
+				out[index] = e.Execute(ctx, agent, call)
+			}()
 		}
 		wg.Wait()
-		i = j
+		cursor += len(stage.Calls)
 	}
 	return out
 }

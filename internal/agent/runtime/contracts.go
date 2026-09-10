@@ -117,6 +117,7 @@ func (i Invocation) CreatedOn() time.Time       { return i.createdOn }
 type Result struct {
 	correlationID, text, errorCode string
 	shouldReply                    bool
+	toolDeliveryOwned              bool
 	durableEvidence                []turn.PersistableEvidence
 }
 
@@ -126,13 +127,17 @@ func NewResult(correlationID, text string, shouldReply bool) Result {
 func NewResultWithEvidence(correlationID, text string, shouldReply bool, evidence []turn.PersistableEvidence) Result {
 	return Result{correlationID: correlationID, text: text, shouldReply: shouldReply, durableEvidence: append([]turn.PersistableEvidence(nil), evidence...)}
 }
+func NewToolOwnedResult(correlationID, memoryText string, evidence []turn.PersistableEvidence) Result {
+	return Result{correlationID: correlationID, text: memoryText, toolDeliveryOwned: true, durableEvidence: append([]turn.PersistableEvidence(nil), evidence...)}
+}
 func NewErrorResult(correlationID, errorCode string) Result {
 	return Result{correlationID: correlationID, errorCode: errorCode}
 }
-func (r Result) CorrelationID() string { return r.correlationID }
-func (r Result) Text() string          { return r.text }
-func (r Result) ShouldReply() bool     { return r.shouldReply }
-func (r Result) ErrorCode() string     { return r.errorCode }
+func (r Result) CorrelationID() string   { return r.correlationID }
+func (r Result) Text() string            { return r.text }
+func (r Result) ShouldReply() bool       { return r.shouldReply }
+func (r Result) ToolDeliveryOwned() bool { return r.toolDeliveryOwned }
+func (r Result) ErrorCode() string       { return r.errorCode }
 func (r Result) DurableEvidence() []turn.PersistableEvidence {
 	return append([]turn.PersistableEvidence(nil), r.durableEvidence...)
 }

@@ -152,3 +152,43 @@ func TestExecutorUsesConfiguredDefaultTimeoutWhenDescriptorHasNone(t *testing.T)
 		t.Fatalf("result=%#v", got)
 	}
 }
+
+func TestExecutorBindsResultIdentityToOriginatingCall(t *testing.T) {
+	c := ctx(t)
+	f := &fake{
+		name: "lookup",
+		d:    desc(t, "lookup", contract.ReadOnly, []string{"rows"}, nil, true, 0, nil),
+		fn: func(context.Context) (contract.Result, error) {
+			return contract.Result{CallID: "wrong-call", ToolName: "wrong-tool", Content: `"ok"`}, nil
+		},
+	}
+	executor := &Executor{Registry: tool.NewRegistry([]tool.Tool{f}, []string{"lookup"})}
+	result := executor.Execute(context.Background(), c, Call{ID: "call-7", Name: "lookup", Arguments: json.RawMessage(`{}`)})
+	if result.IsError {
+		t.Fatalf("Execute returned error: %#v", result)
+	}
+	if result.CallID != "call-7" || result.ToolName != "lookup" {
+		t.Fatalf("result identity=(%q, %q), want (%q, %q)", result.CallID, result.ToolName, "call-7", "lookup")
+	}
+}
+
+func TestValidateBatchIdentityRejectsBlankAndDuplicateCallIDs(t *testing.T) {
+	tests := []struct {
+		name  string
+		calls []Call
+	}{
+		{name: "blank id", calls: []Call{{ID: " ", Name: "lookup"}}},
+		{name: "blank name", calls: []Call{{ID: "one", Name: " "}}},
+		{name: "duplicate id", calls: []Call{{ID: "same", Name: "lookup"}, {ID: "same", Name: "other"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateBatchIdentity(tc.calls); err == nil {
+				t.Fatalf("ValidateBatchIdentity(%#v) succeeded; want protocol error", tc.calls)
+			}
+		})
+	}
+	if err := ValidateBatchIdentity([]Call{{ID: "one", Name: "lookup"}, {ID: "two", Name: "lookup"}}); err != nil {
+		t.Fatalf("unique call identities rejected: %v", err)
+	}
+}

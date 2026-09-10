@@ -25,17 +25,23 @@ flowchart TD
     J --> K[Runtime admission and memory-key lock]
     K --> L[Runner]
     L --> M[Load durable memory]
-    M --> N[Load historical tool evidence]
+    M --> MA{Raw memory exceeds threshold?}
+    MA -->|yes| MB[Summarize oldest complete turns and persist coverage cursor]
+    MA -->|no| N[Load historical tool evidence]
+    MB --> N
     N --> O[Load recent public room context]
-    O --> P[Assembler]
+    O --> P[Semantic context budget and assembler]
     P --> Q[OpenAI-compatible completion]
     Q --> R{Tool calls present?}
     R -->|no| S[OutputFinalizer]
-    R -->|yes| T[Registry tool loop]
-    T --> U[Validate manifest, capability, schema and budget]
-    U --> V[Execute ordered batch]
-    V --> W[Append assistant tool_calls and tool observations]
-    W --> Q
+    R -->|yes| T[TurnEngine PLAN and GATE]
+    T --> U[Validate identity, manifest, capability, schema, budget and HITL]
+    U --> V[Execute dependency-aware stages]
+    V --> W[OBSERVE: append assistant tool_calls and matching observations]
+    W --> WA{Recovery decision}
+    WA -->|retry| Q
+    WA -->|degrade or bounds reached| WB[Tool-free terminal synthesis]
+    WB --> S
     S --> X{Visible reply?}
     X -->|yes| Y[Runtime sink sends room or whisper message]
     X -->|no| Z[Silent completion]
@@ -62,15 +68,15 @@ Invocation modes are:
 
 ### Runtime And State Isolation
 
-`internal/agent/runtime/runtime.go` provides bounded admission, cancellation, and per-memory-key ordering. Each invocation creates a fresh turn state and a fresh tool execution ledger. Tool counts, failures, duplicate keys, and successful prerequisites never cross request boundaries.
+`internal/agent/runtime/runtime.go` provides bounded admission, whole-request deadlines, cancellation, and per-memory-key ordering. Its reference-counted keyed locks are reclaimed after each request. Each invocation creates a fresh turn state and a fresh tool execution ledger. Tool counts, failures, duplicate keys, successful prerequisites, and provider transcripts never cross request boundaries.
 
 Public turns use `<room>|public` as the memory namespace, so users in one room can continue a shared conversation. Whispers use trip, then hash, then nick identity in a private namespace. Different rooms never share memory.
 
-The runtime invokes `AfterDelivery` only after a visible response is successfully sent. This prevents a provider response that never reached chat from becoming conversational history.
+The runtime invokes `AfterDelivery` only after a visible response is successfully sent. A successful `ROOM_DELIVERY` tool owns delivery, suppresses the duplicate model reply, and still produces one memory artifact after tool success. This prevents undelivered provider text from becoming history without making command-backed turns disappear from memory.
 
 ### Prompt Assembly
 
-`internal/agent/assemble/assemble.go` combines:
+`internal/agent/assemble/assemble.go` and `internal/agent/assemble/context.go` combine:
 
 - the extracted prompt resources under `resources/agent`
 - immutable invocation metadata and current user prompt
@@ -79,7 +85,7 @@ The runtime invokes `AfterDelivery` only after a visible response is successfull
 - reusable historical tool evidence
 - the capability-filtered provider tool manifest
 
-`agent.maxPromptChars` is enforced during assembly. Current prompt intent remains the active task; history and room messages are supporting context.
+The context budget operates on complete semantic units and never slices serialized JSON. It supports a configured ceiling up to 1,000,000 estimated tokens, reserves output/policy capacity, deduplicates repeated source fingerprints, and retains the newest high-priority units first. The current request is always the final active task. Durable summaries, memory, historical evidence, and room rows are separate untrusted user-role context; none are interpolated into the system role.
 
 Named-user profile/history requests require fresh `user_message_history` evidence. That tool reads up to 500 latest `PUBLIC` rows across rooms by default, or one specified room, with timestamps, nick, trip, hash, channel, and text.
 
@@ -106,7 +112,7 @@ type Tool interface {
 }
 ```
 
-A descriptor defines the stable name, label, capability description, negative guidance, strict JSON parameter schema, result schema, access, effect, result mode, idempotency, timeout, prerequisites, and resource reads/writes. Construction validates every registered descriptor before the live loop is accepted.
+A descriptor defines the stable name, label, capability description, negative guidance, strict JSON parameter schema, result schema, access, effect, result mode, idempotency, timeout, prerequisites, and resource reads/writes. Construction recursively validates every registered descriptor and rejects unsupported schema keywords before the live loop is accepted. `contract.NewDefinition` projects the routing metadata into the provider-visible function description, while the JSON parameter schema remains the source of truth for arguments.
 
 The standard result envelope is:
 
@@ -138,9 +144,9 @@ Expected command validation or authorization failures become `COMMAND_REJECTED` 
 
 The complete command mapping is in [COMMAND_TOOL_INVENTORY.md](COMMAND_TOOL_INVENTORY.md).
 
-## Tool Loop
+## Tool Loop And State Machine
 
-The active generalized loop is split between `internal/agent/live/tool_loop.go`, `internal/agent/live/registry_loop.go`, and `internal/agent/tool/execution/execution.go`.
+The active generalized loop is coordinated by `internal/agent/live/turn_engine.go`. `internal/agent/live/tool_loop.go` owns initial assembly and the deterministic fresh-user-history policy, while `internal/agent/live/registry_loop.go` adapts protocol messages and delegates generalized execution. The closed phases are `ASSEMBLE -> MODEL -> PLAN -> GATE -> EXECUTE -> OBSERVE`, followed by another model cycle or `FINALIZE -> COMPLETE`. `REFLECT`, `PAUSED`, and `FAILED` are explicit bounded branches.
 
 1. The registry computes descriptors for the current trusted context and hides unauthorized tools.
 2. The assembler sends one provider request with all eligible definitions.
@@ -151,8 +157,10 @@ The active generalized loop is split between `internal/agent/live/tool_loop.go`,
 7. Consecutive independent calls may execute concurrently only when every descriptor is read-only, idempotent, prerequisite-free, and resource-compatible.
 8. Any action, command, dependency, or resource conflict creates an ordering barrier and executes sequentially in provider order.
 9. Results are restored to source order and appended as one assistant `tool_calls` message followed by matching `tool` observations.
-10. The same authorized manifest is sent to the provider for correction or final synthesis.
-11. The loop exits when no tool calls remain or returns an error when a configured bound is exceeded.
+10. `RecoveryPolicy` keeps the authorized manifest only for correctable failures such as invalid arguments, unknown tools, execution failures, and timeouts. Terminal failures such as a disabled tool switch immediately to tool-free degradation.
+11. Reaching the tool-round bound reserves one independent tool-free terminal synthesis call, so the newest observations are never discarded.
+12. Empty, truncated, tool-calling, or repeated final content receives at most one tool-free reflection call before failing closed.
+13. Stateful calls pass through `InterruptHook`. The default allows existing behavior; deny becomes an `ACTION_DENIED` observation and pause returns a typed checkpoint before side effects. `TurnEngine.ResumeAction` verifies the resume token and re-runs current registry, schema, and capability checks.
 
 The relevant bounds are:
 
@@ -176,6 +184,10 @@ The model cannot directly send websocket payloads, write the database, change it
 ## Memory And Evidence
 
 `internal/agent/turn/memory.go` and `internal/agent/live/memory.go` adapt H2 repositories into bounded memory. Conversation rows are loaded by memory key, TTL, and turn count. Public and whisper contexts remain separate.
+
+When loaded history exceeds `memoryRawTurns`, `ModelConversationSummarizer` sends complete oldest user/assistant pairs to a tool-free summarization request. Raw text remains in an untrusted user-role payload. H2 stores the resulting summary, source fingerprint, and covered row ID in `agent_memory_summary`; subsequent loads exclude covered rows and prepend the summary to the raw tail. Raw `agent_memory` rows remain authoritative until TTL cleanup.
+
+Conversation, assistant outcome, and reusable tool evidence are committed through one `AppendAgentTurn` transaction. A failed evidence insert rolls back the whole turn, preventing half-written conversational state.
 
 Reusable tool evidence is persisted only for successful eligible model-data tools. Command room-delivery results are not replayed as fresh facts. Required named-user history is fetched again instead of reusing an old prose profile.
 
@@ -236,12 +248,15 @@ binary or published in the tracked examples.
 
 The local real `config.toml`, `.env`, and database files are intentionally ignored and excluded from Docker build contexts. `make run` mounts the chosen config rather than baking environment-specific values into the image.
 
+The main hardening controls are `requestTimeoutMillis`, `maxSteps`, `maxToolCallsPerTurn`, `maxCallsPerTool`, `maxToolFailures`, `toolTimeoutMillis`, `maxContextTokens`, `contextReserveTokens`, `memoryTurns`, `memoryRawTurns`, and `memorySummaryMaxChars`. The tracked examples document matching `SATURN_AGENT_*` environment aliases. `memoryRawTurns` must not exceed `memoryTurns`; HITL remains default-allow unless composition supplies another `InterruptHook`.
+
 ## Verification Map
 
+- `internal/agent/live/turn_engine_test.go`: closed loop recovery, reflection, terminal synthesis, interruption, and authorization revalidation on resume
 - `internal/agent/live/registry_loop_test.go`: correction loop, multi-tool ordering, parallel read fan-out, per-tool and failure limits
 - `internal/agent/tool/execution/execution_test.go`: validation, authorization, cancellation, default/descriptor timeouts, ledger behavior
 - `internal/agent/tool/*_test.go`: schemas and individual tool contracts
 - `internal/agent/runtime/*_test.go`: admission, cancellation, memory-key ordering, ambient coalescing
-- `internal/agent/turn/*_test.go`: freshness, evidence, memory, and policy state
+- `internal/agent/turn/*_test.go`: phases, recovery, freshness, evidence, memory compaction, and policy state
 - `cmd/zenbot/live_agent_test.go`: production composition, contextual command visibility, moderator/admin role propagation
-- `internal/repository/h2/agent_*_test.go`: persistent context, memory, schema, SQL, and 500-message history
+- `internal/repository/h2/agent_*_test.go`: atomic turns, persisted summaries, context, schema, SQL, and 500-message history
