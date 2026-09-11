@@ -370,9 +370,15 @@ func resolveKickSelection(engine common.Engine, mode string, rawTargets []string
 	targets := make([]*model.User, 0, len(rawTargets))
 	seen := make(map[string]struct{}, len(rawTargets))
 	for _, rawTarget := range rawTargets {
-		target, err := activeModerationTarget(engine, rawTarget)
-		if err != nil {
-			return nil, err
+		var target *model.User
+		if mode == "contains" {
+			target = activeModerationTargetByCanonicalName(engine, rawTarget)
+		} else {
+			var err error
+			target, err = activeModerationTarget(engine, rawTarget)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if target == nil {
 			if mode == "exact" {
@@ -391,6 +397,25 @@ func resolveKickSelection(engine common.Engine, mode string, rawTargets []string
 		return nil, repository.ErrNotFound
 	}
 	return targets, nil
+}
+
+// activeModerationTargetByCanonicalName resolves a source-owned nickname
+// literally. Unlike raw command operands, canonical names must not have a
+// leading mention marker stripped a second time.
+func activeModerationTargetByCanonicalName(engine common.Engine, name string) *model.User {
+	if user := engine.GetActiveUserByName(name); user != nil {
+		return user
+	}
+	users := engine.GetActiveUsers()
+	if users == nil {
+		return nil
+	}
+	for user := range *users {
+		if user != nil && strings.EqualFold(user.Name, name) {
+			return user
+		}
+	}
+	return nil
 }
 
 type unbanCommand struct{ commandBase }

@@ -41,11 +41,7 @@ func (c *shadowBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	if mode == "contains" {
 		return c.shadowBanContaining(ctx, target)
 	}
-	normalized, err := util.NormalizeNickTarget(&target)
-	if err != nil {
-		return model.FAILED, err
-	}
-	return c.shadowBanSingle(ctx, normalized)
+	return c.shadowBanSingle(ctx, target)
 }
 
 func (c *shadowBanCommand) shadowBanContaining(ctx context.Context, pattern string) (model.Status, error) {
@@ -70,10 +66,7 @@ func (c *shadowBanCommand) shadowBanContaining(ctx context.Context, pattern stri
 	selected := make([]*model.User, 0, len(candidateNames))
 	seen := make(map[string]struct{}, len(candidateNames))
 	for _, name := range candidateNames {
-		current, err := activeModerationTarget(c.engine, name)
-		if err != nil {
-			return model.FAILED, err
-		}
+		current := activeModerationTargetByCanonicalName(c.engine, name)
 		if current == nil {
 			continue
 		}
@@ -102,10 +95,11 @@ func (c *shadowBanCommand) shadowBanContaining(ctx context.Context, pattern stri
 }
 
 func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (model.Status, error) {
-	user, err := activeModerationTarget(c.engine, target)
+	normalized, err := util.NormalizeNickTarget(&target)
 	if err != nil {
 		return model.FAILED, err
 	}
+	user := activeModerationTargetByCanonicalName(c.engine, normalized)
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
@@ -116,7 +110,7 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
-		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("shadow_banned: %s trip: %s hash: %s", target, user.Trip, user.Hash)); err != nil {
+		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("shadow_banned: %s trip: %s hash: %s", normalized, user.Trip, user.Hash)); err != nil {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
@@ -125,13 +119,13 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := s.Persist(ctx, repository.ShadowBanRecord{Name: target}); err != nil {
+	if err := s.Persist(ctx, repository.ShadowBanRecord{Name: normalized}); err != nil {
 		return model.FAILED, err
 	}
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, "banned: "+target); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "banned: "+normalized); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

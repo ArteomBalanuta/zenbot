@@ -103,6 +103,21 @@ func TestModerationSelectorAuditKickValidModesResolveBeforeEffects(t *testing.T)
 	}
 }
 
+func TestModerationSelectorAuditKickContainsPreservesSourceCanonicalNames(t *testing.T) {
+	engine := &commandEngineStub{users: map[string]*model.User{
+		"plain":   {Name: "alice"},
+		"literal": {Name: "@alice"},
+	}}
+	definition, _ := commandDefinitionFor("kick")
+	status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!kick -c alice"}).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.raws, []string{
+		`{"cmd":"kick","nick":"@alice"}`,
+		`{"cmd":"kick","nick":"alice"}`,
+	}) {
+		t.Fatalf("status=%v err=%v frames=%v", status, err, engine.raws)
+	}
+}
+
 func TestModerationSelectorAuditKickStopsAfterCancellationOrSendFailure(t *testing.T) {
 	users := map[string]*model.User{"first": {Name: "First"}, "second": {Name: "Second"}}
 	definition, _ := commandDefinitionFor("kick")

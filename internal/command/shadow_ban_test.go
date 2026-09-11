@@ -281,6 +281,31 @@ func TestShadowBanSelectorsResolveUnicodeCanonicalNamesAndStopAfterPartialExit(t
 	})
 }
 
+func TestShadowBanNormalizesRawInputOnceAndPreservesSourceCanonicalNames(t *testing.T) {
+	definition, _ := commandDefinitionFor("shadowban")
+	t.Run("double marker resolves literal at-name", func(t *testing.T) {
+		repo := &shadowBanRepositoryStub{}
+		literal := &model.User{Name: "@alice", Trip: "literal-trip", Hash: "literal-hash"}
+		plain := &model.User{Name: "alice", Trip: "plain-trip", Hash: "plain-hash"}
+		engine := newShadowBanEngine(repo, map[string]*model.User{"@alice": literal, "alice": plain})
+		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban @@alice"}).Execute(context.Background())
+		if status != model.SUCCESSFUL || err != nil || len(repo.persisted) != 1 || repo.persisted[0].Name != "@alice" || !equalStrings(engine.kicked, []string{"@alice"}) {
+			t.Fatalf("status=%v err=%v persisted=%+v kicked=%v", status, err, repo.persisted, engine.kicked)
+		}
+	})
+	t.Run("contains keeps distinct source names", func(t *testing.T) {
+		repo := &shadowBanRepositoryStub{}
+		engine := newShadowBanEngine(repo, map[string]*model.User{
+			"plain":   {Name: "alice", Trip: "plain-trip"},
+			"literal": {Name: "@alice", Trip: "literal-trip"},
+		})
+		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban -c alice"}).Execute(context.Background())
+		if status != model.SUCCESSFUL || err != nil || len(repo.persisted) != 2 || repo.persisted[0].Name != "@alice" || repo.persisted[1].Name != "alice" || !equalStrings(engine.kicked, []string{"@alice", "alice"}) {
+			t.Fatalf("status=%v err=%v persisted=%+v kicked=%v", status, err, repo.persisted, engine.kicked)
+		}
+	})
+}
+
 func TestUnshadowBanSingleAndAllDeleteUseRepositoryAndNoAgentPath(t *testing.T) {
 	repo := &shadowBanRepositoryStub{records: []repository.ShadowBanRecord{{Hash: "hash", Trip: "trip", Name: "nick"}}, removeCount: 1, removeAllCount: 3}
 	engine := newShadowBanEngine(repo, nil)
