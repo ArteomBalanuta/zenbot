@@ -594,16 +594,15 @@ func getJSON(ctx context.Context, c *http.Client, u string, v any) error {
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
 		return fmt.Errorf("http status %d", r.StatusCode)
 	}
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(v); err != nil {
+	// A one-day forecast is far smaller than 1 MiB. Bound streaming bodies too,
+	// and reject trailing data without decoding an arbitrary second JSON value.
+	const maxProviderJSON = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxProviderJSON+1))
+	if err != nil {
 		return err
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("provider returned trailing JSON data")
+	if len(body) > maxProviderJSON {
+		return fmt.Errorf("provider JSON exceeds %d bytes", maxProviderJSON)
 	}
-	return nil
+	return json.Unmarshal(body, v)
 }

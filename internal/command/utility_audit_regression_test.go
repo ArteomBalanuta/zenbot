@@ -70,7 +70,7 @@ func auditUtilityServer(t *testing.T) *httptest.Server {
 		case "/forecast":
 			body = `{"timezone":"UTC","current_weather":{"time":"2026-09-11T12:00","temperature":21}}`
 		case "/sun":
-			body = `{"results":{"date":"2026-09-11","utc_offset":0}}`
+			body = `{"results":{"date":"2026-09-11","timezone":"UTC","utc_offset":0}}`
 		case "/time":
 			body = `{"dateTime":"2026-09-11T12:00:00Z","timeZone":"UTC"}`
 		}

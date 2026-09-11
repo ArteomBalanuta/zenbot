@@ -297,6 +297,7 @@ type TimeService struct {
 
 type solarResults struct {
 	Date      string `json:"date"`
+	Timezone  string `json:"timezone"`
 	Sunrise   string `json:"sunrise"`
 	Sunset    string `json:"sunset"`
 	First     string `json:"first_light"`
@@ -343,32 +344,30 @@ func solarDuration(value string) (string, error) {
 	return value, nil
 }
 
+func solarOffsetMatchesDate(current time.Time, minutes int) bool {
+	start := time.Date(current.Year(), current.Month(), current.Day(), 0, 0, 0, 0, current.Location())
+	end := start.AddDate(0, 0, 1)
+	// Daily solar metadata may use either side of a timezone transition.
+	// Walk actual zone boundaries, not assumptions about when DST changes.
+	for at := start; at.Before(end); {
+		_, offset := at.Zone()
+		if offset%60 == 0 && offset/60 == minutes {
+			return true
+		}
+		_, next := at.ZoneBounds()
+		if next.IsZero() || !next.After(at) {
+			break
+		}
+		at = next
+	}
+	return false
+}
+
 func (s *TimeService) Get(ctx context.Context, location string) (string, error) {
 	client := utilityHTTPClient(s.HTTP)
 	r, err := geocode(ctx, client, s.GeoURL, location)
 	if err != nil {
 		return "", err
-	}
-	sun := s.SunriseURL
-	if sun == "" {
-		sun = "https://api.sunrisesunset.io/json?lat=%s&lng=%s"
-	}
-	sunURL, err := utilityURL(fmt.Sprintf(sun, url.QueryEscape(r.Lat), url.QueryEscape(r.Lng)))
-	if err != nil {
-		return "", err
-	}
-	var sr struct {
-		Status  string        `json:"status"`
-		Results *solarResults `json:"results"`
-	}
-	if err := getJSON(ctx, client, sunURL.String(), &sr); err != nil {
-		return "", err
-	}
-	if (sr.Status != "" && sr.Status != "OK") || sr.Results == nil {
-		return "", fmt.Errorf("solar provider failed")
-	}
-	if _, err := time.Parse("2006-01-02", sr.Results.Date); err != nil {
-		return "", fmt.Errorf("invalid solar date")
 	}
 	tz := s.TimezoneURL
 	if tz == "" {
@@ -393,20 +392,49 @@ func (s *TimeService) Get(ctx context.Context, location string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	offset := metricUnavailable
-	if sr.Results.UTCOffset != nil {
-		minutes := *sr.Results.UTCOffset
-		if minutes < -24*60 || minutes > 24*60 {
-			return "", fmt.Errorf("invalid UTC offset")
-		}
-		sign := "+"
-		if minutes < 0 {
-			sign = "-"
-			minutes = -minutes
-		}
-		offset = fmt.Sprintf("%s%02d:%02d", sign, minutes/60, minutes%60)
+	// Freeze the solar query to this clock snapshot, including across midnight.
+	date := current.Format("2006-01-02")
+	sun := s.SunriseURL
+	if sun == "" {
+		sun = "https://api.sunrisesunset.io/json?lat=%s&lng=%s"
 	}
-	lines := []string{"today: " + sr.Results.Date, "time: " + current.Format(time.RFC1123), "zone: " + tr.TimeZone, "UTC offset: " + offset}
+	sunURL, err := utilityURL(fmt.Sprintf(sun, url.QueryEscape(r.Lat), url.QueryEscape(r.Lng)))
+	if err != nil {
+		return "", err
+	}
+	query := sunURL.Query()
+	query.Set("date", date)
+	query.Set("timezone", tr.TimeZone)
+	sunURL.RawQuery = query.Encode()
+	var sr struct {
+		Status  string        `json:"status"`
+		TZID    string        `json:"tzid"`
+		Results *solarResults `json:"results"`
+	}
+	if err := getJSON(ctx, client, sunURL.String(), &sr); err != nil {
+		return "", err
+	}
+	if (sr.Status != "" && sr.Status != "OK") || sr.Results == nil {
+		return "", fmt.Errorf("solar provider failed")
+	}
+	if sr.Results.Date != date || sr.Results.Timezone != tr.TimeZone || (sr.TZID != "" && sr.TZID != tr.TimeZone) {
+		return "", fmt.Errorf("solar date or timezone disagrees with current clock")
+	}
+	_, seconds := current.Zone()
+	if seconds%60 != 0 {
+		return "", fmt.Errorf("current UTC offset is not in whole minutes")
+	}
+	if sr.Results.UTCOffset != nil && !solarOffsetMatchesDate(current, *sr.Results.UTCOffset) {
+		return "", fmt.Errorf("solar UTC offset disagrees with requested date and timezone")
+	}
+	minutes := seconds / 60
+	sign := "+"
+	if minutes < 0 {
+		sign = "-"
+		minutes = -minutes
+	}
+	offset := fmt.Sprintf("%s%02d:%02d", sign, minutes/60, minutes%60)
+	lines := []string{"today: " + date, "time: " + current.Format(time.RFC1123), "zone: " + tr.TimeZone, "UTC offset: " + offset}
 	for _, field := range []struct{ label, value string }{{"sun rise", sr.Results.Sunrise}, {"sun set", sr.Results.Sunset}, {"first light", sr.Results.First}, {"last light", sr.Results.Last}, {"dawn", sr.Results.Dawn}, {"dusk", sr.Results.Dusk}, {"solar noon", sr.Results.Noon}, {"golden hour", sr.Results.Golden}} {
 		value, err := solarClock(field.value)
 		if err != nil {

@@ -76,7 +76,7 @@ func TestUtilityAuditTimePreservesFractionalUTCOffset(t *testing.T) {
 		case "/geo":
 			return auditJSON(`{"geonames":[{"countryName":"India","lat":"28.6","lng":"77.2"}]}`), nil
 		case "/sun":
-			return auditJSON(`{"results":{"date":"2026-09-11","utc_offset":330}}`), nil
+			return auditJSON(`{"results":{"date":"2026-09-11","timezone":"Asia/Kolkata","utc_offset":330}}`), nil
 		default:
 			return auditJSON(`{"dateTime":"2026-09-11T12:00:00+05:30","timeZone":"Asia/Kolkata"}`), nil
 		}

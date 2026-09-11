@@ -45,7 +45,7 @@ func TestTimeGetUsesSingleSeparatorsAndThinSpaceAlignment(t *testing.T) {
 		case "/geo":
 			_, _ = w.Write([]byte(`{"geonames":[{"countryName":"Japan","lat":"35.6","lng":"139.6"}]}`))
 		case "/sun":
-			_, _ = w.Write([]byte(`{"results":{"date":"2026-03-26","sunrise":"6:00 AM","sunset":"6:00 PM","first_light":"5:30 AM","last_light":"6:30 PM","dawn":"5:45 AM","dusk":"6:15 PM","solar_noon":"12:00 PM","golden_hour":"5:15 PM","day_length":"12:00:00","utc_offset":540}}`))
+			_, _ = w.Write([]byte(`{"results":{"date":"2026-03-26","timezone":"Asia/Tokyo","sunrise":"6:00 AM","sunset":"6:00 PM","first_light":"5:30 AM","last_light":"6:30 PM","dawn":"5:45 AM","dusk":"6:15 PM","solar_noon":"12:00 PM","golden_hour":"5:15 PM","day_length":"12:00:00","utc_offset":540}}`))
 		case "/time":
 			_, _ = w.Write([]byte(`{"dateTime":"2026-03-26T12:00:00+09:00","timeZone":"Asia/Tokyo"}`))
 		default:

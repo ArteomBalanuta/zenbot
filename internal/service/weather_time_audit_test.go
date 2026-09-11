@@ -17,7 +17,7 @@ import (
 
 const auditGeo = `{"geonames":[{"name":"City","countryName":"Country","lat":"48.8","lng":"2.3"}]}`
 const auditForecast = `{"timezone":"UTC","current_weather":{"temperature":21,"windspeed":7,"weathercode":0,"time":"2026-09-11T12:15"},"daily":{"time":["2026-09-10","2026-09-11"],"uv_index_max":["99","4.2"],"sunrise":["2026-09-10T06:00","2026-09-11T06:30"]},"hourly":{"time":["2026-09-10T12:00","2026-09-11T12:00"],"apparent_temperature":["999","20.1"],"relative_humidity_2m":["99",null]}}`
-const auditSun = `{"status":"OK","results":{"date":"2026-09-11","utc_offset":0}}`
+const auditSun = `{"status":"OK","results":{"date":"2026-09-11","timezone":"UTC","utc_offset":0}}`
 const auditClock = `{"dateTime":"2026-09-11T12:15:00.1234567","timeZone":"UTC"}`
 
 func auditProviderClient(geo, forecast, sun, clock string) *http.Client {
@@ -109,12 +109,13 @@ func TestWeatherMissingCurrentMetricsAreUnavailable(t *testing.T) {
 
 func TestTimeServicePreservesSignedMinuteOffsetsAndParsesLocalTimestamp(t *testing.T) {
 	for _, tc := range []struct {
-		offset int
-		want   string
-	}{{330, "+05:30"}, {345, "+05:45"}, {-210, "-03:30"}, {-30, "-00:30"}, {0, "+00:00"}} {
-		sun := fmt.Sprintf(`{"results":{"date":"2026-09-11","utc_offset":%d}}`, tc.offset)
-		got, err := auditTimeService(auditProviderClient(auditGeo, auditForecast, sun, auditClock)).Get(context.Background(), "City")
-		if err != nil || !strings.Contains(got, tc.want) || !strings.Contains(got, "Fri, 11 Sep 2026 12:15:00 UTC") || !strings.Contains(got, "unavailable") {
+		offset     int
+		want, zone string
+	}{{330, "+05:30", "Asia/Kolkata"}, {345, "+05:45", "Asia/Kathmandu"}, {-210, "-03:30", "America/St_Johns"}, {0, "+00:00", "UTC"}} {
+		sun := fmt.Sprintf(`{"results":{"date":"2026-01-11","timezone":%q,"utc_offset":%d}}`, tc.zone, tc.offset)
+		clock := fmt.Sprintf(`{"dateTime":"2026-01-11T12:15:00.1234567","timeZone":%q}`, tc.zone)
+		got, err := auditTimeService(auditProviderClient(auditGeo, auditForecast, sun, clock)).Get(context.Background(), "City")
+		if err != nil || !strings.Contains(got, tc.want) || !strings.Contains(got, "Sun, 11 Jan 2026 12:15:00") || !strings.Contains(got, "unavailable") {
 			t.Errorf("offset=%d got=%s err=%v", tc.offset, got, err)
 		}
 	}
@@ -126,8 +127,8 @@ func TestTimeServiceRejectsMalformedProviderData(t *testing.T) {
 		{"invalid timestamp", auditSun, strings.Replace(auditClock, "2026-09-11T12:15:00.1234567", "invalid", 1)},
 		{"empty sun", `{}`, auditClock}, {"sun business error", `{"status":"INVALID_REQUEST","results":null}`, auditClock},
 		{"invalid day", strings.Replace(auditSun, "2026-09-11", "yesterday", 1), auditClock},
-		{"invalid sunrise", `{"results":{"date":"2026-09-11","sunrise":"soon"}}`, auditClock},
-		{"invalid duration", `{"results":{"date":"2026-09-11","day_length":"all day"}}`, auditClock},
+		{"invalid sunrise", `{"results":{"date":"2026-09-11","timezone":"UTC","sunrise":"soon"}}`, auditClock},
+		{"invalid duration", `{"results":{"date":"2026-09-11","timezone":"UTC","day_length":"all day"}}`, auditClock},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := auditTimeService(auditProviderClient(auditGeo, auditForecast, tc.sun, tc.clock)).Get(context.Background(), "City")
