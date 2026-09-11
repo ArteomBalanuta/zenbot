@@ -87,8 +87,9 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 			resultErr = nil
 		}
 		result.Messages = append([]string(nil), capturing.messages...)
-		if result.Status == commandgateway.OutcomeSucceeded {
+		if result.Status == commandgateway.OutcomeSucceeded || capturing.dataObserved {
 			result.Data = append(result.Data[:0:0], capturing.data...)
+			result.DataObserved = capturing.dataObserved
 		}
 		count := capturing.actionCount + mutations.Count()
 		if count > 0 {

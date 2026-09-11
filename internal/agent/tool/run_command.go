@@ -77,7 +77,7 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 	}
 	definition, _ := commandcatalog.AgentEntryByAlias(name)
 	if failure, rejected := commandExecutionFailure(t.Name(), executed, definition.Agent.AllowsSilentAction); rejected {
-		return failure, nil
+		return failure.ValidateObservedData(commandResultSchema(runCommandResultSchemaJSON)), nil
 	}
 	return commandExecutionSuccess(t.Name(), executed), nil
 }
@@ -117,6 +117,9 @@ func commandExecutionFailure(toolName string, execution commandgateway.Execution
 		}
 		if execution.Delivery != nil {
 			result.DeliveryCount = execution.Delivery.Count
+		}
+		if execution.DataObserved && json.Valid(execution.Data) {
+			result.ObservedData = json.RawMessage(commandExecutionSuccess(toolName, execution).Content)
 		}
 		return result, true
 	}

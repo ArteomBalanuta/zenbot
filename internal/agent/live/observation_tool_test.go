@@ -64,6 +64,48 @@ func TestReadToolResultReconstructsOmittedUnicodeDataWithoutRepeatingAction(t *t
 	}
 }
 
+func TestReadToolResultRecoversErrorObservationSeparatelyFromErrorText(t *testing.T) {
+	store := assemble.NewObservationStore()
+	original := contract.ActionErrorResult("remote", "saturn_list", "ACTION_OUTCOME_UNKNOWN", "safe failed delivery", contract.EffectUnknown)
+	original.ObservedData = json.RawMessage(`{"room":"lounge","count":2,"users":["` + strings.Repeat("😀alice", 1000) + `","bob"]}`)
+	store.Store(original, 512)
+	reader := NewReadToolResult(store)
+	var recovered strings.Builder
+	for offset := 0; ; {
+		args, _ := json.Marshal(map[string]any{"callId": "remote", "field": "observedData", "offset": offset, "limit": 333})
+		result, err := reader.Execute(context.Background(), api.Context{}, args)
+		if err != nil || result.IsError || len(result.Content) > resultPageBytes {
+			t.Fatalf("page=%+v err=%v", result, err)
+		}
+		var page struct {
+			Content, Status, Code, EffectState string
+			DeliveryCount, NextOffset          int
+			Done                               bool
+		}
+		if err := json.Unmarshal([]byte(result.Content), &page); err != nil {
+			t.Fatal(err)
+		}
+		if page.Status != "error" || page.Code != "ACTION_OUTCOME_UNKNOWN" || page.EffectState != "UNKNOWN" || page.DeliveryCount != 0 || result.EffectsCommitted {
+			t.Fatalf("receipt=%+v", page)
+		}
+		recovered.WriteString(page.Content)
+		if page.Done {
+			break
+		}
+		if page.NextOffset <= offset {
+			t.Fatal("page did not advance")
+		}
+		offset = page.NextOffset
+	}
+	if recovered.String() != string(original.ObservedData) {
+		t.Fatal("lost full error observation")
+	}
+	result, err := reader.Execute(context.Background(), api.Context{}, json.RawMessage(`{"callId":"remote"}`))
+	if err != nil || result.IsError || !strings.Contains(result.Content, "safe failed delivery") || strings.Contains(result.Content, "alice") {
+		t.Fatalf("old error content changed: %+v err=%v", result, err)
+	}
+}
+
 func TestReadToolResultRejectsUnknownAndOutOfRangePages(t *testing.T) {
 	store := assemble.NewObservationStore()
 	store.Store(contract.SuccessResult("known", "lookup", map[string]any{"count": 2}), 512)

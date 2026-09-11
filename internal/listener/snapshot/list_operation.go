@@ -37,6 +37,7 @@ func (ListRoomOperation) Apply(context RoomSnapshotContext, snapshot Snapshot) (
 	}
 	result := Success(formatUsers(users))
 	result.Data = append(json.RawMessage(nil), data...)
+	result.DataObserved = true
 	return result, nil
 }
 

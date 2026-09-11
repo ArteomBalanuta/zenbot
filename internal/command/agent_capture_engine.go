@@ -24,6 +24,7 @@ type agentCaptureEngine struct {
 	deliveryCount       int
 	actionCount         int
 	data                json.RawMessage
+	dataObserved        bool
 	snapshotCompletions []agentSnapshotCompletion
 	snapshotStatus      commandgateway.OutcomeStatus
 }
@@ -327,8 +328,9 @@ func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error
 			}
 			completionErr = errors.Join(completionErr, operationErr)
 		}
-		if result.Outcome == snapshot.OutcomeSuccess && len(result.Data) > 0 && (!completion.whisper || e.invocationWhisper) {
+		if (result.Outcome == snapshot.OutcomeSuccess || result.DataObserved) && json.Valid(result.Data) && (!completion.whisper || e.invocationWhisper) {
 			e.data = append(json.RawMessage(nil), result.Data...)
+			e.dataObserved = result.DataObserved
 		}
 		if message != "" && result.Outcome != snapshot.OutcomeFailed && result.DeliveryCount > 0 {
 			if completion.whisper && !e.invocationWhisper {

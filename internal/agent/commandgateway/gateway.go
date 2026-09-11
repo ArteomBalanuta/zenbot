@@ -36,6 +36,8 @@ type Execution struct {
 	Messages         []string
 	Delivery         *DeliveryReceipt
 	Data             json.RawMessage
+	// DataObserved is producer-owned validity, independent of effect status.
+	DataObserved bool
 }
 
 type Gateway interface {

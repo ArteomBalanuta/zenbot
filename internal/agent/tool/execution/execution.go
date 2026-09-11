@@ -165,6 +165,9 @@ func (e *Executor) executePrepared(ctx context.Context, agent api.Context, p pre
 	observability.Info(ctx, "agent.tool.started", "tool", c.Name, "tool_call_id", c.ID)
 	defer func() {
 		result.CallID, result.ToolName = c.ID, c.Name
+		if result.IsError {
+			result = result.ValidateObservedData(d.ResultSchema())
+		}
 		if e != nil && e.Ledger != nil && p.admitted {
 			e.Ledger.finish(c, d, result, invoked)
 		}

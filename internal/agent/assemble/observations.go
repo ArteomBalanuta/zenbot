@@ -179,6 +179,7 @@ func NewObservationStore() *ObservationStore {
 }
 
 func (store *ObservationStore) Store(result contract.Result, maxBytes int) ObservationView {
+	result.ObservedData = append(json.RawMessage(nil), result.ObservedData...)
 	view := projectObservation(result, maxBytes)
 	if store == nil {
 		return view
@@ -206,6 +207,7 @@ func (store *ObservationStore) Full(callID string) (contract.Result, bool) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	result, found := store.results[callID]
+	result.ObservedData = append(json.RawMessage(nil), result.ObservedData...)
 	return result, found
 }
 
@@ -243,11 +245,26 @@ func projectObservation(result contract.Result, maxBytes int) ObservationView {
 		maxBytes = contract.DefaultMaxModelResultBytes
 	}
 	view := ObservationView{CallID: result.CallID, Tool: result.ToolName, Status: "success", RelatedCallID: result.RelatedCallID, EffectsCommitted: result.EffectsCommitted, EffectState: result.EffectState, DeliveryCount: result.DeliveryCount, ActionCount: result.ActionCount}
+	content := result.Content
 	if result.IsError {
 		view.Status, view.Code, view.Message = "error", result.ErrorCode, result.Content
-		return fitObservationMessage(view, maxBytes)
+		if !json.Valid(result.ObservedData) {
+			return fitObservationMessage(view, maxBytes)
+		}
+		content = string(result.ObservedData)
+		view.Data = result.ObservedData
+		// Reserve space for source facts when both the error and data are large.
+		// The complete error text remains available through full retrieval.
+		if len(view.JSON()) > maxBytes {
+			view.Data = nil
+			base := view
+			base.Message = ""
+			baseBytes := len(base.JSON())
+			messageBudget := baseBytes + min(256, max(0, (maxBytes-baseBytes)/3))
+			view = fitObservationMessage(view, messageBudget)
+		}
 	}
-	value, valid := decodeObservationJSON(result.Content)
+	value, valid := decodeObservationJSON(content)
 	if !valid {
 		view.Status, view.Code, view.Message = "error", "INVALID_TOOL_RESULT", "Tool result was not valid JSON."
 		return fitObservationMessage(view, maxBytes)

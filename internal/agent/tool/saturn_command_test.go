@@ -25,6 +25,34 @@ func agentCommandDefinition(t *testing.T, canonical string) commandcatalog.Entry
 	return commandcatalog.Entry{}
 }
 
+func TestSaturnCommandErrorObservationRequiresMarkedDeclaredData(t *testing.T) {
+	for _, tc := range []struct {
+		name, data   string
+		marked, want bool
+	}{
+		{"valid", `{"room":"lounge","count":0,"returnedCount":0,"truncated":false,"users":[]}`, true, true},
+		{"unmarked", `{"room":"lounge","count":0,"returnedCount":0,"truncated":false,"users":[]}`, false, false},
+		{"wrong shape", `{"private":"diagnostic"}`, true, false},
+		{"malformed", `{"room":`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller, _ := api.NewContext("room", "caller", "", "", false, nil)
+			gateway := &runCommandGatewayStub{result: commandgateway.Execution{Status: commandgateway.OutcomeUnknown, Data: json.RawMessage(tc.data), DataObserved: tc.marked}, err: errors.New("driver secret")}
+			command := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "list"), Gateway: gateway}
+			result, err := command.Execute(context.Background(), caller, json.RawMessage(`{"room":"lounge"}`))
+			if err != nil || (len(result.ObservedData) > 0) != tc.want || result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || result.EffectState != contract.EffectUnknown || result.ActionCount != 0 || result.DeliveryCount != 0 || strings.Contains(string(result.Envelope()), "driver secret") {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if tc.want {
+				descriptor, _ := command.Descriptor(caller)
+				if err := contract.ValidateResult(descriptor.ResultSchema(), result.ObservedData); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func TestSaturnCommandDescriptorCarriesCatalogIdentityAndCapabilityPolicy(t *testing.T) {
 	public, _ := api.NewContext("room", "caller", "", "", false, []string{})
 	weather := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather")}

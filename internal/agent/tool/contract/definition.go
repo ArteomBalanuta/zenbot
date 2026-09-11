@@ -154,6 +154,9 @@ type Result struct {
 	ActionCount                          int
 	EffectState                          EffectState
 	RelatedCallID                        string
+	// ObservedData carries independently observed data on an error result.
+	// It must satisfy the tool's declared result schema before publication.
+	ObservedData json.RawMessage
 }
 
 func SuccessResult(call, tool string, value any) Result {
@@ -200,7 +203,20 @@ func (r Result) WithError(code, message string) Result {
 
 func (r Result) Envelope() json.RawMessage {
 	if r.IsError {
+		if json.Valid(r.ObservedData) {
+			b, _ := json.Marshal(map[string]any{"status": "error", "data": r.ObservedData, "error": map[string]string{"code": r.ErrorCode, "message": r.Content}})
+			return b
+		}
 		return ErrorEnvelope(r.ErrorCode, r.Content)
 	}
 	return SuccessEnvelope([]byte(r.Content))
+}
+
+// ValidateObservedData drops invalid optional evidence without replacing the
+// original error or changing execution receipts and retry barriers.
+func (r Result) ValidateObservedData(schema json.RawMessage) Result {
+	if len(r.ObservedData) > 0 && ValidateResult(schema, r.ObservedData) != nil {
+		r.ObservedData = nil
+	}
+	return r
 }

@@ -85,6 +85,9 @@ type OperationResult struct {
 	Outcome OperationOutcome
 	Reply   string
 	Data    json.RawMessage
+	// DataObserved is set by the producer after constructing valid source data,
+	// independently of subsequent delivery, flush or cancellation outcomes.
+	DataObserved bool
 	// Counts describe successful outward writes, including delivered replies.
 	// Temporary-session join frames are setup and never contribute.
 	ActionCount   int

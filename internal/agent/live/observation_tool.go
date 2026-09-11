@@ -25,8 +25,8 @@ func NewReadToolResult(store *assemble.ObservationStore) ReadToolResult {
 func (ReadToolResult) Name() string { return readToolResultName }
 
 func (tool ReadToolResult) Descriptor(api.Context) (contract.Descriptor, error) {
-	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"callId":{"type":"string","minLength":1},"field":{"type":"string","enum":["content","arguments"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":6000}},"required":["callId"]}`)
-	return contract.NewDescriptor(tool.Name(), "Read retained tool result", "Read retained evidence by its original callId from an observation or current-turn result index, without rerunning the tool. field defaults to content (original result JSON or error text); use arguments for the original call arguments. offset and limit count Unicode characters, defaulting to 0 and 6000. Pages shrink to fit their byte budget. Concatenate content pages in order using actual nextOffset until done is true. Each page includes the original execution receipt.", "evidence", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, time.Second, json.RawMessage(`{"type":"object"}`), []string{"retained_tool_results"}, nil, []string{"Use only for retained results from this invocation, especially truncated or pruned observations. Do not rerun actions to recover their outputs."}, contract.WithPrimaryIntent("read_retained_tool_result"))
+	parameters := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"callId":{"type":"string","minLength":1},"field":{"type":"string","enum":["content","arguments","observedData"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":6000}},"required":["callId"]}`)
+	return contract.NewDescriptor(tool.Name(), "Read retained tool result", "Read retained evidence by its original callId from an observation or current-turn result index, without rerunning the tool. field defaults to content (original result JSON or error text); use arguments for the original call arguments, or observedData for separately retained data on an error result. offset and limit count Unicode characters, defaulting to 0 and 6000. Pages shrink to fit their byte budget. Concatenate content pages in order using actual nextOffset until done is true. Each page includes the original execution receipt.", "evidence", contract.AccessUser, contract.ReadOnly, contract.ModelData, parameters, nil, nil, true, time.Second, json.RawMessage(`{"type":"object"}`), []string{"retained_tool_results"}, nil, []string{"Use only for retained results from this invocation, especially truncated or pruned observations. Do not rerun actions to recover their outputs."}, contract.WithPrimaryIntent("read_retained_tool_result"))
 }
 
 func (tool ReadToolResult) Execute(ctx context.Context, agent api.Context, arguments json.RawMessage) (contract.Result, error) {
@@ -60,6 +60,12 @@ func (tool ReadToolResult) Execute(ctx context.Context, agent api.Context, argum
 		return contract.ErrorResult("", tool.Name(), "RESULT_NOT_FOUND", "No retained result has this callId. Use an original callId from the current-turn result index or a prior tool observation."), nil
 	}
 	content := original.Content
+	if input.Field == "observedData" {
+		if len(original.ObservedData) == 0 {
+			return contract.ErrorResult("", tool.Name(), "RESULT_NOT_FOUND", "No separate observation data was retained for this callId."), nil
+		}
+		content = string(original.ObservedData)
+	}
 	if input.Field == "arguments" {
 		arguments, found := tool.store.CallArguments(input.CallID)
 		if !found {

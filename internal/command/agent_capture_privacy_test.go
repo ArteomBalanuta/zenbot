@@ -179,6 +179,39 @@ func TestAgentCapturePrivacyFailedSendsCreateNoReceipts(t *testing.T) {
 	}
 }
 
+func TestAgentCaptureFailedSnapshotRequiresMarkedValidVisibleData(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		marked, private, callerPrivate bool
+		data                           string
+		want                           bool
+	}{
+		{"public observed", true, false, false, `{"room":"lounge","count":2}`, true},
+		{"private suppressed", true, true, false, `{"secret":"roster"}`, false},
+		{"private caller", true, true, true, `{"secret":"roster"}`, true},
+		{"unmarked", false, false, false, `{"room":"lounge","count":2}`, false},
+		{"malformed", true, false, false, `{"room":`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &capturePrivacySnapshotEngine{commandEngineStub: &commandEngineStub{}}
+			capture := &agentCaptureEngine{Engine: engine, invocationWhisper: tc.callerPrivate}
+			if err := capture.SubmitRoomSnapshot(snapshot.RoomSnapshotRequest{Whisper: tc.private}); err != nil {
+				t.Fatal(err)
+			}
+			data := json.RawMessage(tc.data)
+			engine.request.OnComplete(snapshot.OperationResult{Outcome: snapshot.OutcomeFailed, OutcomeUnknown: true, Data: data, DataObserved: tc.marked, Error: errors.New("driver secret")})
+			data[0] = 'x'
+			_ = capture.awaitSnapshotCompletions(context.Background())
+			if (len(capture.data) > 0) != tc.want || capture.snapshotStatus != commandgateway.OutcomeUnknown || capture.actionCount != 0 || capture.deliveryCount != 0 || len(capture.messages) != 0 {
+				t.Fatalf("data=%s state=%s actions=%d deliveries=%d messages=%v", capture.data, capture.snapshotStatus, capture.actionCount, capture.deliveryCount, capture.messages)
+			}
+			if tc.want && string(capture.data) != tc.data {
+				t.Fatalf("callback data was not cloned: %s", capture.data)
+			}
+		})
+	}
+}
+
 func TestAgentCapturePrivacyRetainsPrivateSnapshotForPrivateInvocation(t *testing.T) {
 	const secret = "private snapshot result"
 	engine := &capturePrivacySnapshotEngine{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}}
