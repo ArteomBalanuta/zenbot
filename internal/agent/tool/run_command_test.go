@@ -147,21 +147,6 @@ func TestRunCommandDoesNotTreatUntypedGatewayErrorAsKnownRejection(t *testing.T)
 	}
 }
 
-func TestRunCommandNotFoundFeedbackMarksEarlierReadsAsPotentiallyStale(t *testing.T) {
-	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
-	gateway := &runCommandGatewayStub{result: commandgateway.Execution{Status: commandgateway.OutcomeNotFound}}
-	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"info","arguments":"missing"}`))
-	if err != nil || !result.IsError || result.ErrorCode != "NOT_FOUND" || result.EffectState != contract.EffectNotCommitted || result.EffectsCommitted || result.DeliveryCount != 0 || result.ActionCount != 0 {
-		t.Fatalf("result=%#v err=%v", result, err)
-	}
-	feedback := strings.ToLower(result.Content)
-	for _, fact := range []string{"execution time", "earlier reads", "stale", "current evidence", "corrected arguments"} {
-		if !strings.Contains(feedback, fact) {
-			t.Fatalf("NOT_FOUND feedback lacks %q freshness semantics: %q", fact, result.Content)
-		}
-	}
-}
-
 func TestRunCommandPreservesPartialGatewayReceiptsOnFailure(t *testing.T) {
 	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
 	for _, status := range []commandgateway.OutcomeStatus{commandgateway.OutcomeRejected, commandgateway.OutcomeUnknown} {

@@ -118,7 +118,7 @@ func commandExecutionFailure(toolName string, execution commandgateway.Execution
 	case commandgateway.OutcomeUnknown:
 		return failure("ACTION_OUTCOME_UNKNOWN", "action outcome is unknown; do not repeat it", contract.EffectUnknown)
 	case commandgateway.OutcomeNotFound:
-		return failure("NOT_FOUND", "requested record was not found at command execution time; earlier reads may now be stale, so reassess using current evidence or corrected arguments before retrying", state)
+		return failure("NOT_FOUND", "requested record was not found; inspect the target or choose another available source", state)
 	case commandgateway.OutcomeSucceeded:
 		if !execution.EffectsCommitted || execution.Action == nil || execution.Action.Count <= 0 {
 			return failure("UNVERIFIED_ACTION_OUTCOME", "command completion was not verified", contract.EffectUnknown)
