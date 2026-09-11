@@ -26,13 +26,18 @@ func (c *sqlCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, fmt.Errorf("raw SQL query capability is not configured")
 	}
 	table, err := b.SQLCommand.Query(ctx, query)
+	var text string
+	if err == nil {
+		text = "Result: \\n" + renderSaturnSQLTable(table)
+		observeCommandData(&c.commandBase, commandTextObservation{Text: text}, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper")
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return model.FAILED, ctxErr
 	}
 	if err != nil {
 		return model.FAILED, err
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, "Result: \\n"+renderSaturnSQLTable(table), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+	if _, err := c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

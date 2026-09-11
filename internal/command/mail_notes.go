@@ -126,10 +126,8 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e != nil {
 		return model.FAILED, e
 	}
-	if err := ctx.Err(); err != nil {
-		return model.FAILED, err
-	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, "'s notes: \\n ```Text \\n"+fmt.Sprint(ns)+"\\n```", true); err != nil {
+	text := "'s notes: \\n ```Text \\n" + fmt.Sprint(ns) + "\\n```"
+	if err := observeAndReply(ctx, &c.commandBase, text, true); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

@@ -18,6 +18,7 @@ func (c *howToCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
+	observeCommandData(&commandBase{engine: c.engine, message: c.message}, commandTextObservation{Text: moderationGuidePayload}, c.message.IsWhisper)
 	_, err := c.engine.SendAddressedMessage(c.message.Name, moderationGuidePayload, c.message.IsWhisper)
 	if err != nil {
 		return model.FAILED, err

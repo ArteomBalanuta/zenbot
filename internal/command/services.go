@@ -32,7 +32,8 @@ func (c *pingCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e != nil {
 		return model.FAILED, e
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, fmt.Sprintf("response time: %d milliseconds", d.Milliseconds()), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+	text := fmt.Sprintf("response time: %d milliseconds", d.Milliseconds())
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -56,7 +57,7 @@ func (c *weatherCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e != nil {
 		return model.FAILED, e
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, v, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, v, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -87,7 +88,7 @@ func (c *timeCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e != nil {
 		return model.FAILED, e
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, v, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, v, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

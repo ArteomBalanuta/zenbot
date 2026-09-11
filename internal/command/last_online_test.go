@@ -16,16 +16,20 @@ import (
 )
 
 type lastOnlineCommandQueriesStub struct {
-	record repository.LastOnlineRecord
-	err    error
-	calls  int
-	target string
+	record          repository.LastOnlineRecord
+	err             error
+	calls           int
+	registeredCalls int
+	nicksCalls      int
+	target          string
 }
 
 func (s *lastOnlineCommandQueriesStub) RegisteredUsers(context.Context) ([]repository.RegisteredUser, error) {
+	s.registeredCalls++
 	return nil, nil
 }
 func (s *lastOnlineCommandQueriesStub) NicksByTrip(context.Context, string) ([]string, error) {
+	s.nicksCalls++
 	return nil, nil
 }
 func (s *lastOnlineCommandQueriesStub) BasicUserData(context.Context, string, string) (string, error) {

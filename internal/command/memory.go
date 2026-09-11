@@ -20,7 +20,8 @@ func (c *memoryCommand) Execute(ctx context.Context) (model.Status, error) {
 	runtime.GC()
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	if err := replyContext(ctx, &c.commandBase, formatMemoryReport(stats)); err != nil {
+	text := formatMemoryReport(stats)
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

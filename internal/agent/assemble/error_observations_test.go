@@ -58,3 +58,27 @@ func TestErrorObservationDoesNotTruncateWhenErrorAndDataFit(t *testing.T) {
 		t.Fatalf("fitting observation was truncated: %s", view.JSON())
 	}
 }
+
+func TestErrorObservationBoundsUTF8TextAndKeepsFullEvidenceRetrievable(t *testing.T) {
+	text := strings.Repeat("😀café source fact ", 1200)
+	observed, err := json.Marshal(map[string]any{
+		"messages":       []string{},
+		"deliveredCount": 0,
+		"actionCount":    0,
+		"data":           map[string]string{"text": text},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := contract.ActionErrorResult("text", "saturn_weather", "ACTION_OUTCOME_UNKNOWN", "delivery failed safely", contract.EffectUnknown)
+	result.ObservedData = observed
+	store := NewObservationStore()
+	view := store.Store(result, 800)
+	if !json.Valid(view.JSON()) || len(view.JSON()) > 800 || !view.Truncated || view.Code != "ACTION_OUTCOME_UNKNOWN" || view.DeliveryCount != 0 {
+		t.Fatalf("bounded text view=%s", view.JSON())
+	}
+	full, found := store.Full("text")
+	if !found || string(full.ObservedData) != string(observed) || !strings.Contains(string(full.ObservedData), "😀café source fact") {
+		t.Fatal("full UTF-8 text evidence was not retained")
+	}
+}

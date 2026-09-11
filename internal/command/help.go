@@ -24,6 +24,7 @@ func (c *helpCommand) Execute(ctx context.Context) (model.Status, error) {
 		fmtHelp(helpExamples, c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix()),
 	}, "")
 	payload = strings.ReplaceAll(payload, "\\\\n", "\\n")
+	observeCommandData(&c.commandBase, commandTextObservation{Text: payload}, true)
 	if _, err := c.engine.SendWhisperMessage(c.message.Name, payload); err != nil {
 		return model.FAILED, err
 	}

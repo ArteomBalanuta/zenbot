@@ -130,10 +130,6 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	if err != nil && execution.Status != commandgateway.OutcomeRejected && execution.Status != commandgateway.OutcomeNotFound {
 		execution.Status = commandgateway.OutcomeUnknown
 	}
-	if definition.Canonical != "list" && definition.Canonical != "restart" && definition.Canonical != "shutdown" {
-		execution.Data = nil
-		execution.DataObserved = false
-	}
 	// Optional source facts must satisfy the closed command result contract on
 	// success as well as failure. Invalid facts do not erase action receipts.
 	if len(execution.Data) > 0 && contract.ValidateResult(descriptor.ResultSchema(), []byte(commandExecutionSuccess(t.Name(), execution).Content)) != nil {

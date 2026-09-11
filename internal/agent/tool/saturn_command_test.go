@@ -198,6 +198,75 @@ func TestNonListSaturnCommandsDoNotAdvertiseRemoteRosterData(t *testing.T) {
 	}
 }
 
+func TestOrdinarySaturnCommandsAcceptOnlyClosedTextObservationData(t *testing.T) {
+	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	descriptor, err := (agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather")}).Descriptor(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, valid := range []string{
+		`{"messages":[],"deliveredCount":0,"actionCount":0}`,
+		`{"messages":[],"deliveredCount":0,"actionCount":0,"data":{"text":"sunny 🌤️"}}`,
+	} {
+		if err := contract.ValidateResult(descriptor.ResultSchema(), json.RawMessage(valid)); err != nil {
+			t.Fatalf("valid ordinary result %s rejected: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{
+		`{"messages":[],"deliveredCount":0,"actionCount":0,"data":"sunny"}`,
+		`{"messages":[],"deliveredCount":0,"actionCount":0,"data":{"text":"sunny","room":"lounge"}}`,
+		`{"messages":[],"deliveredCount":0,"actionCount":0,"data":{"room":"lounge"}}`,
+	} {
+		if err := contract.ValidateResult(descriptor.ResultSchema(), json.RawMessage(invalid)); err == nil {
+			t.Fatalf("invalid ordinary result %s was accepted", invalid)
+		}
+	}
+}
+
+func TestOrdinarySaturnCommandDropsInvalidOptionalTextWithoutLosingReceipts(t *testing.T) {
+	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	for _, tc := range []struct {
+		name, data string
+		wantData   bool
+	}{
+		{"valid empty text", `{"text":""}`, true},
+		{"unexpected field", `{"text":"sunny","diagnostic":"private"}`, false},
+		{"wrong shape", `"sunny"`, false},
+		{"malformed", `{"text":`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway := &runCommandGatewayStub{result: commandgateway.Execution{
+				Status:           commandgateway.OutcomeUnknown,
+				EffectsCommitted: true,
+				Action:           &commandgateway.ActionReceipt{Count: 2},
+				DataObserved:     true,
+				Data:             json.RawMessage(tc.data),
+			}}
+			command := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather"), Gateway: gateway}
+			result, err := command.Execute(context.Background(), caller, json.RawMessage(`{"location":"Chisinau"}`))
+			if err != nil || result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || result.EffectState != contract.EffectUnknown || result.ActionCount != 2 || result.DeliveryCount != 0 || result.EffectsCommitted != true || (len(result.ObservedData) > 0) != tc.wantData {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestOrdinarySaturnCommandSuccessKeepsOptionalTextCompatible(t *testing.T) {
+	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	execution := verifiedCommandExecution("weather delivered")
+	execution.DataObserved = true
+	execution.Data = json.RawMessage(`{"text":"sunny"}`)
+	command := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather"), Gateway: &runCommandGatewayStub{result: execution}}
+	result, err := command.Execute(context.Background(), caller, json.RawMessage(`{"location":"Chisinau"}`))
+	if err != nil || result.IsError || result.DeliveryCount != 1 || result.ActionCount != 1 || !strings.Contains(result.Content, `"data":{"text":"sunny"}`) {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	descriptor, _ := command.Descriptor(caller)
+	if err := contract.ValidateResult(descriptor.ResultSchema(), json.RawMessage(result.Content)); err != nil {
+		t.Fatalf("optional text broke success compatibility: %v", err)
+	}
+}
+
 func TestSaturnModerationReviewRejectsKickBeforeGateway(t *testing.T) {
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")

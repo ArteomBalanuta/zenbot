@@ -39,7 +39,7 @@ func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, text); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

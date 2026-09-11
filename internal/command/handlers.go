@@ -196,7 +196,8 @@ func (c *infoUserCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.FAILED, nil
 	}
-	if err := replyContext(ctx, &c.commandBase, "\n User trip: "+user.Trip+"\n User hash: "+user.Hash); err != nil {
+	text := "\n User trip: " + user.Trip + "\n User hash: " + user.Hash
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

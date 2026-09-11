@@ -14,7 +14,7 @@ import (
 
 const runCommandName = "run_command"
 
-const baseCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}`
+const baseCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"object","additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"]}},"required":["messages","deliveredCount","actionCount"]}`
 const listCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"object","additionalProperties":false,"properties":{"room":{"type":"string"},"users":{"type":"array","items":{"type":"string"}},"count":{"type":"integer"},"returnedCount":{"type":"integer"},"truncated":{"type":"boolean"}},"required":["room","users","count","returnedCount","truncated"]}},"required":["messages","deliveredCount","actionCount"]}`
 const runCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"any"}},"required":["messages","deliveredCount","actionCount"]}`
 

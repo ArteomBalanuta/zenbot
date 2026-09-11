@@ -23,7 +23,7 @@ func (t *observedFailureAction) Execute(context.Context, api.Context, json.RawMe
 	t.calls.Add(1)
 	r := contract.ActionErrorResult("", t.Name(), "ACTION_OUTCOME_UNKNOWN", strings.Repeat("safe acknowledgment failure ", 1000), contract.EffectUnknown)
 	if t.observed {
-		r.ObservedData = json.RawMessage(`{"room":"lounge","count":2,"users":["alice","bob"]}`)
+		r.ObservedData = json.RawMessage(`{"messages":[],"deliveredCount":0,"actionCount":0,"data":{"text":"source weather fact: 21°C in Chișinău"}}`)
 	}
 	return r, nil
 }
@@ -57,7 +57,7 @@ func TestThreeRoundFinalContextRetainsErrorFactsAndUnknownReceipt(t *testing.T) 
 			for i, request := range client.requests {
 				assertRequestWithinBudget(t, i, request, 2400, 100)
 				assertAtomicToolProtocol(t, i, request.Messages())
-				if messagesContain(request.Messages(), `"room":"lounge"`) != observed || messagesContain(request.Messages(), `"count":2`) != observed {
+				if messagesContain(request.Messages(), "source weather fact") != observed || messagesContain(request.Messages(), "21°C") != observed {
 					t.Fatalf("round %d lost/invented observed facts", i)
 				}
 				if !messagesContain(request.Messages(), "ACTION_OUTCOME_UNKNOWN") || !messagesContain(request.Messages(), `"effectState":"UNKNOWN"`) || !messagesContain(request.Messages(), `"deliveryCount":0`) {

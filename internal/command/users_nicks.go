@@ -36,7 +36,8 @@ func (c *usersCommand) Execute(ctx context.Context) (model.Status, error) {
 			return model.FAILED, err
 		}
 	}
-	if err := replyContext(ctx, &c.commandBase, "Users: \\n"+formatRegisteredUsers(users)); err != nil {
+	text := "Users: \\n" + formatRegisteredUsers(users)
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -63,7 +64,7 @@ func (c *nicksCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, strings.Join(nicks, ",")); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, strings.Join(nicks, ","), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

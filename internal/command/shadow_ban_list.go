@@ -23,16 +23,15 @@ func (c *shadowBanListCommand) Execute(ctx context.Context) (model.Status, error
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := ctx.Err(); err != nil {
-		return model.FAILED, err
-	}
+	text := "No users has been banned."
 	if len(records) == 0 {
-		if err := replyContext(ctx, &c.commandBase, "No users has been banned."); err != nil {
+		if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
 	}
-	if err := replyContext(ctx, &c.commandBase, "Banned hashes, trips, names: \\n"+formatShadowBanRecords(records)); err != nil {
+	text = "Banned hashes, trips, names: \\n" + formatShadowBanRecords(records)
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

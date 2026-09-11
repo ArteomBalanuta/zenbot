@@ -49,7 +49,7 @@ func (c *versionCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, release.Version(), c.message.IsWhisper); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, release.Version(), c.message.IsWhisper); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -61,7 +61,7 @@ func (c *apeCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, " "+saturnApe, c.message.IsWhisper); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, " "+saturnApe, c.message.IsWhisper); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -81,7 +81,7 @@ func (c *coinCommand) Execute(ctx context.Context) (model.Status, error) {
 	if n.Int64() == 0 {
 		state = "head"
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, state, false); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, state, false); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -101,7 +101,8 @@ func (c *pingUtilityCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err != nil {
 		return model.FAILED, err
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, fmt.Sprintf("response time: %d milliseconds", elapsed.Milliseconds()), false); err != nil {
+	text := fmt.Sprintf("response time: %d milliseconds", elapsed.Milliseconds())
+	if err := observeAndReply(ctx, &c.commandBase, text, false); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

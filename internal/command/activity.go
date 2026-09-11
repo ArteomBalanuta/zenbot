@@ -29,10 +29,8 @@ func (c *activityCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := ctx.Err(); err != nil {
-		return model.FAILED, err
-	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, "Stats: \\n"+result, activityWhisper(c.message)); err != nil {
+	text := "Stats: \\n" + result
+	if err := observeAndReply(ctx, &c.commandBase, text, activityWhisper(c.message)); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

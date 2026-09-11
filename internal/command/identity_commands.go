@@ -219,11 +219,9 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := ctx.Err(); err != nil {
-		return model.FAILED, err
-	}
+	whisper := c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"
 	if len(ms) == 0 {
-		if _, err := c.send(ctx, "No messages found."); err != nil {
+		if err := observeAndReply(ctx, &c.commandBase, "No messages found.", whisper); err != nil {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
@@ -235,7 +233,7 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		b.WriteString(m.Name + "#" + m.Trip + ": " + msg)
 		b.WriteString("\n")
 	}
-	if _, err := c.send(ctx, escapeJava(b.String())); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, escapeJava(b.String()), whisper); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
