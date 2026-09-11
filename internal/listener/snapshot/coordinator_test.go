@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -117,7 +118,7 @@ func TestCoordinatorCompletesRequestAfterPublishingReply(t *testing.T) {
 	if !c.OnSnapshot(s.id, `{"cmd":"onlineSet","users":[]}`) {
 		t.Fatal("snapshot was not accepted")
 	}
-	if completed != (OperationResult{Outcome: OutcomeSuccess, Reply: "remote users"}) {
+	if completed.Outcome != OutcomeSuccess || completed.Reply != "remote users" || len(completed.Data) != 0 {
 		t.Fatalf("completion result=%+v", completed)
 	}
 	if len(events) != 2 || events[0] != "reply" || events[1] != "completion" {
@@ -125,6 +126,32 @@ func TestCoordinatorCompletesRequestAfterPublishingReply(t *testing.T) {
 	}
 	if completionFlushed != 1 || completionClosed != 1 {
 		t.Fatalf("completion observed flushed=%d closed=%d, want terminal session lifecycle", completionFlushed, completionClosed)
+	}
+}
+
+func TestCoordinatorClonesTypedDataAcrossOutcomeAndCompletionObservers(t *testing.T) {
+	s := &fakeSession{id: "list-session"}
+	operation := &recordingOperation{result: OperationResult{
+		Outcome: OutcomeSuccess,
+		Reply:   "remote users",
+		Data:    json.RawMessage(`{"room":"lounge","users":[],"count":0,"returnedCount":0,"truncated":false}`),
+	}}
+	var completed OperationResult
+	c := NewRoomSnapshotCoordinatorWithOutcome(fakeFactory{session: s}, nil, ParseUsers, time.Second, func(_ RoomSnapshotRequest, result OperationResult) {
+		for index := range result.Data {
+			result.Data[index] = 'x'
+		}
+	})
+	req := request(operation)
+	req.OnComplete = func(result OperationResult) { completed = result }
+	if err := c.Submit(req); err != nil {
+		t.Fatal(err)
+	}
+	if !c.OnSnapshot(s.id, `{"cmd":"onlineSet","users":[]}`) {
+		t.Fatal("snapshot was not accepted")
+	}
+	if got, want := string(completed.Data), `{"room":"lounge","users":[],"count":0,"returnedCount":0,"truncated":false}`; got != want {
+		t.Fatalf("completion data=%s, want %s", got, want)
 	}
 }
 

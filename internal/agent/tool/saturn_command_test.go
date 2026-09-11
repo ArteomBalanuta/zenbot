@@ -126,6 +126,50 @@ func TestSaturnListRejectsCurrentRoomSoPresenceRoutesAreDisjoint(t *testing.T) {
 	}
 }
 
+func TestSaturnListReturnsTypedRemoteRosterAlongsideDeliveryReceipts(t *testing.T) {
+	wantData := json.RawMessage(`{"room":"lounge","users":["alice","bob"],"count":2,"returnedCount":2,"truncated":false}`)
+	executed := verifiedCommandExecution("remote users")
+	executed.Data = append(json.RawMessage(nil), wantData...)
+	gateway := &runCommandGatewayStub{result: executed}
+	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "list"), Gateway: gateway}
+
+	result, err := tool.Execute(context.Background(), caller, json.RawMessage(`{"room":"lounge"}`))
+	if err != nil || result.IsError || result.DeliveryCount != 1 || result.ActionCount != 1 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	var content struct {
+		Messages       []string        `json:"messages"`
+		DeliveredCount int             `json:"deliveredCount"`
+		ActionCount    int             `json:"actionCount"`
+		Data           json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if len(content.Messages) != 1 || content.Messages[0] != "remote users" || content.DeliveredCount != 1 || content.ActionCount != 1 || string(content.Data) != string(wantData) {
+		t.Fatalf("content=%s", result.Content)
+	}
+	descriptor, _ := tool.Descriptor(caller)
+	if err := contract.ValidateResult(descriptor.ResultSchema(), []byte(result.Content)); err != nil {
+		t.Fatalf("typed result violates saturn_list schema: %v", err)
+	}
+}
+
+func TestNonListSaturnCommandsDoNotAdvertiseRemoteRosterData(t *testing.T) {
+	caller, _ := api.NewContextWithCapabilities("programming", "caller", "", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	for _, canonical := range []string{"weather", "kick"} {
+		descriptor, err := (agenttool.SaturnCommand{Definition: agentCommandDefinition(t, canonical)}).Descriptor(caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema := string(descriptor.ResultSchema())
+		if strings.Contains(schema, `"room"`) || strings.Contains(schema, `"users"`) || strings.Contains(schema, `"returnedCount"`) || strings.Contains(schema, `"truncated"`) {
+			t.Fatalf("saturn_%s advertises unrelated remote roster data: %s", canonical, schema)
+		}
+	}
+}
+
 func TestSaturnModerationCommandCannotRetargetReviewedAuthor(t *testing.T) {
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")

@@ -35,7 +35,11 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	if required, restricted := requiredCommandCapability(definition); restricted {
 		capabilities = []string{string(required)}
 	}
-	result := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}`)
+	resultSchema := baseCommandResultSchemaJSON
+	if definition.Canonical == "list" {
+		resultSchema = listCommandResultSchemaJSON
+	}
+	result := commandResultSchema(resultSchema)
 	resultMode := contract.RoomDelivery
 	writes := []string{"commands", "room_delivery"}
 	if definition.Canonical == "kick" {
@@ -106,6 +110,9 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	}
 	if failure, rejected := commandExecutionFailure(t.Name(), execution, definition.Canonical == "kick"); rejected {
 		return failure, nil
+	}
+	if definition.Canonical != "list" {
+		execution.Data = nil
 	}
 	return commandExecutionSuccess(t.Name(), execution), nil
 }

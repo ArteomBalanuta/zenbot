@@ -86,6 +86,9 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 			resultErr = nil
 		}
 		result.Messages = append([]string(nil), capturing.messages...)
+		if result.Status == commandgateway.OutcomeSucceeded {
+			result.Data = append(result.Data[:0:0], capturing.data...)
+		}
 		if capturing.actionCount > 0 {
 			result.EffectsCommitted = true
 			result.Action = &commandgateway.ActionReceipt{Count: capturing.actionCount}

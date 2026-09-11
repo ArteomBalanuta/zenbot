@@ -14,6 +14,14 @@ import (
 
 const runCommandName = "run_command"
 
+const baseCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}`
+const listCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"object","additionalProperties":false,"properties":{"room":{"type":"string"},"users":{"type":"array","items":{"type":"string"}},"count":{"type":"integer"},"returnedCount":{"type":"integer"},"truncated":{"type":"boolean"}},"required":["room","users","count","returnedCount","truncated"]}},"required":["messages","deliveredCount","actionCount"]}`
+const runCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"any"}},"required":["messages","deliveredCount","actionCount"]}`
+
+func commandResultSchema(schema string) json.RawMessage {
+	return append(json.RawMessage(nil), schema...)
+}
+
 // RunCommand exposes a compact capability-aware command subset through the trusted command gateway.
 type RunCommand struct{ Gateway commandgateway.Gateway }
 
@@ -32,7 +40,7 @@ func (t RunCommand) Descriptor(caller api.Context) (contract.Descriptor, error) 
 	if err != nil {
 		return contract.Descriptor{}, err
 	}
-	result := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}`)
+	result := commandResultSchema(runCommandResultSchemaJSON)
 	return contract.NewDescriptor(runCommandName, "Run Saturn command", "Run one capability-approved Saturn informational or moderation command and return its successfully delivered output. Invoke this tool immediately when the newest user request asks to run an enum-listed command; successful output is delivered directly to the room. Do not answer with instructions, a command snippet, a promise, or simulated output instead of invoking it. Commands always execute in provider order.", "commands", contract.AccessUser, contract.Action, contract.RoomDelivery, parameters, nil, nil, false, 10*time.Second, result, nil, []string{"commands", "room_delivery"}, []string{"Do not use for commands absent from the contextual enum or when no command execution is requested.", "Do not run this action concurrently with another command."})
 }
 
@@ -78,7 +86,11 @@ func commandExecutionSuccess(toolName string, execution commandgateway.Execution
 		actionCount = execution.Action.Count
 	}
 	messages := append([]string{}, execution.Messages...)
-	result := contract.ActionSuccessResult("", toolName, map[string]any{"messages": messages, "deliveredCount": deliveryCount, "actionCount": actionCount}, deliveryCount)
+	payload := map[string]any{"messages": messages, "deliveredCount": deliveryCount, "actionCount": actionCount}
+	if len(execution.Data) > 0 {
+		payload["data"] = append(json.RawMessage(nil), execution.Data...)
+	}
+	result := contract.ActionSuccessResult("", toolName, payload, deliveryCount)
 	result.ActionCount = actionCount
 	return result
 }
@@ -106,7 +118,7 @@ func commandExecutionFailure(toolName string, execution commandgateway.Execution
 	case commandgateway.OutcomeUnknown:
 		return failure("ACTION_OUTCOME_UNKNOWN", "action outcome is unknown; do not repeat it", contract.EffectUnknown)
 	case commandgateway.OutcomeNotFound:
-		return failure("NOT_FOUND", "requested record was not found; inspect the target or choose another available source", state)
+		return failure("NOT_FOUND", "requested record was not found at command execution time; earlier reads may now be stale, so reassess using current evidence or corrected arguments before retrying", state)
 	case commandgateway.OutcomeSucceeded:
 		if !execution.EffectsCommitted || execution.Action == nil || execution.Action.Count <= 0 {
 			return failure("UNVERIFIED_ACTION_OUTCOME", "command completion was not verified", contract.EffectUnknown)

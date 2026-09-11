@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -69,6 +70,7 @@ const (
 type OperationResult struct {
 	Outcome OperationOutcome
 	Reply   string
+	Data    json.RawMessage
 }
 
 func Success(reply ...string) OperationResult { return result(OutcomeSuccess, reply...) }
@@ -271,7 +273,7 @@ func (w *workflow) receive(payload string) bool {
 		w.coordinator.mu.Unlock()
 		result = Failed(errString(opErr))
 		if w.coordinator.outcome != nil {
-			w.coordinator.outcome(w.request, result)
+			w.coordinator.outcome(w.request, cloneOperationResult(result))
 		}
 		w.publishFailure()
 	} else {
@@ -298,7 +300,7 @@ func (w *workflow) fail(state WorkflowState, err error) bool {
 	result := OperationResult{Outcome: OutcomeFailed, Reply: errString(err)}
 	w.publishFailure()
 	if w.coordinator.outcome != nil {
-		w.coordinator.outcome(w.request, result)
+		w.coordinator.outcome(w.request, cloneOperationResult(result))
 	}
 	if w.session != nil {
 		_ = w.session.Close()
@@ -318,7 +320,7 @@ func (w *workflow) stopTimer() {
 
 func (w *workflow) publish(result OperationResult) {
 	if w.coordinator.outcome != nil {
-		w.coordinator.outcome(w.request, result)
+		w.coordinator.outcome(w.request, cloneOperationResult(result))
 	}
 	if result.Reply != "" && w.coordinator.reply != nil {
 		w.coordinator.reply(w.request, result.Reply)
@@ -327,8 +329,13 @@ func (w *workflow) publish(result OperationResult) {
 
 func (w *workflow) complete(result OperationResult) {
 	if w.request.OnComplete != nil {
-		w.request.OnComplete(result)
+		w.request.OnComplete(cloneOperationResult(result))
 	}
+}
+
+func cloneOperationResult(result OperationResult) OperationResult {
+	result.Data = append(json.RawMessage(nil), result.Data...)
+	return result
 }
 func (w *workflow) publishFailure() {
 	if w.coordinator.reply != nil && w.request.ReplyMessage != "" {

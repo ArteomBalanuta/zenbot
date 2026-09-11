@@ -2,7 +2,9 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -33,6 +35,18 @@ func (e *gatewayEngine) IsUserAuthorized(_ *model.User, _ *model.Role) bool { re
 type snapshotGatewayEngine struct {
 	*gatewayEngine
 	requests chan snapshot.RoomSnapshotRequest
+}
+
+type blockingAuditSnapshotGatewayEngine struct {
+	*snapshotGatewayEngine
+	auditStarted chan struct{}
+	releaseAudit chan struct{}
+}
+
+func (e *blockingAuditSnapshotGatewayEngine) LogCommand(context.Context, model.CommandAuditRecord) (int64, error) {
+	close(e.auditStarted)
+	<-e.releaseAudit
+	return 1, nil
 }
 
 func (e *snapshotGatewayEngine) SubmitRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
@@ -252,6 +266,75 @@ func TestAgentCommandGatewayWaitsForEverySnapshotBackedCommandOutcome(t *testing
 			}
 		})
 	}
+}
+
+func TestAgentCommandGatewayPreservesTypedRemoteListDataAndDeliveryReceipts(t *testing.T) {
+	engine := &blockingAuditSnapshotGatewayEngine{
+		snapshotGatewayEngine: &snapshotGatewayEngine{
+			gatewayEngine: &gatewayEngine{
+				commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}},
+				authorized:        true,
+			},
+			requests: make(chan snapshot.RoomSnapshotRequest, 1),
+		},
+		auditStarted: make(chan struct{}),
+		releaseAudit: make(chan struct{}),
+	}
+	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	completed := make(chan struct {
+		result CommandExecution
+		err    error
+	}, 1)
+	go func() {
+		result, err := NewAgentCommandGateway(engine).Execute(context.Background(), caller, "list", "lounge")
+		completed <- struct {
+			result CommandExecution
+			err    error
+		}{result: result, err: err}
+	}()
+
+	request := <-engine.requests
+	<-engine.auditStarted
+	operationResult, err := request.Operation.Apply(snapshot.RoomSnapshotContext{TargetChannel: request.TargetChannel}, snapshot.Snapshot{Users: []*model.User{
+		{Name: "bob", Hash: "b"},
+		{Name: "alice", Hash: "a", Trip: "known"},
+		{Name: "duplicate", Hash: "other", Trip: "known"},
+		nil,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantData := append(json.RawMessage(nil), operationResult.Data...)
+	request.OnComplete(operationResult)
+	for index := range operationResult.Data {
+		operationResult.Data[index] = 'x'
+	}
+	close(engine.releaseAudit)
+
+	select {
+	case execution := <-completed:
+		if execution.err != nil || execution.result.Status != commandgateway.OutcomeSucceeded || !execution.result.EffectsCommitted || execution.result.Action == nil || execution.result.Action.Count != 1 || execution.result.Delivery == nil || execution.result.Delivery.Count != 1 || len(execution.result.Messages) != 1 {
+			t.Fatalf("execution=%+v", execution)
+		}
+		if got := commandExecutionData(t, execution.result); !reflect.DeepEqual(got, wantData) {
+			t.Fatalf("data=%s, want %s", got, wantData)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("gateway did not resume after typed snapshot completion")
+	}
+}
+
+func commandExecutionData(t *testing.T, execution CommandExecution) json.RawMessage {
+	t.Helper()
+	field := reflect.ValueOf(execution).FieldByName("Data")
+	if !field.IsValid() {
+		t.Fatal("commandgateway.Execution.Data is missing")
+	}
+	data, ok := field.Interface().(json.RawMessage)
+	if !ok {
+		t.Fatalf("commandgateway.Execution.Data has type %s, want json.RawMessage", field.Type())
+	}
+	return append(json.RawMessage(nil), data...)
 }
 
 func TestAgentCommandGatewayDoesNotVerifyLegacySuccessWithoutDelivery(t *testing.T) {

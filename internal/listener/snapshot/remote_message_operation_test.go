@@ -14,7 +14,7 @@ func TestRemoteMessageOperationAllIsMeIsEmpty(t *testing.T) {
 		TargetChannel: "target",
 		SendRaw:       func(string) error { called++; return nil },
 	}, Snapshot{Users: []*model.User{{Name: "temporary", Isme: true}}})
-	if err != nil || result != Empty(" target is empty") || called != 0 {
+	if err != nil || result.Outcome != OutcomeEmpty || result.Reply != " target is empty" || len(result.Data) != 0 || called != 0 {
 		t.Fatalf("result=%+v err=%v sends=%d", result, err, called)
 	}
 }
@@ -25,7 +25,7 @@ func TestRemoteMessageOperationSendsOneRawChat(t *testing.T) {
 		TargetChannel: "target",
 		SendRaw:       func(value string) error { raw = value; return nil },
 	}, Snapshot{Users: []*model.User{{Name: "temporary", Isme: true}, {Name: "member"}}})
-	if err != nil || result != Success("sent successfully.") {
+	if err != nil || result.Outcome != OutcomeSuccess || result.Reply != "sent successfully." || len(result.Data) != 0 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	var payload map[string]string

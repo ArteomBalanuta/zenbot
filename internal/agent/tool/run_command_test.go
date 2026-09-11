@@ -59,8 +59,11 @@ func TestRunCommandDescriptorIsClosedBoundedAction(t *testing.T) {
 	if json.Unmarshal(d.Parameters(), &parameters) != nil || !slices.Contains(parameters.Properties["command"].Enum, "lastseen") || slices.Contains(parameters.Properties["command"].Enum, "mute") {
 		t.Fatalf("parameters=%s", d.Parameters())
 	}
-	if string(d.ResultSchema()) != `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"}},"required":["messages","deliveredCount","actionCount"]}` {
+	if string(d.ResultSchema()) != `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"any"}},"required":["messages","deliveredCount","actionCount"]}` {
 		t.Fatalf("result=%s", d.ResultSchema())
+	}
+	if err := contract.ValidateResult(d.ResultSchema(), json.RawMessage(`{"messages":[],"deliveredCount":0,"actionCount":0}`)); err != nil {
+		t.Fatalf("optional typed data broke commands without domain data: %v", err)
 	}
 }
 
@@ -107,12 +110,55 @@ func TestRunCommandNormalizesCallsGatewayOnceAndRejectsFailure(t *testing.T) {
 	}
 }
 
+func TestRunCommandReturnsTypedRemoteListDataAlongsideReceipts(t *testing.T) {
+	caller, _ := api.NewContext("programming", "caller", "", "", false, []string{})
+	wantData := json.RawMessage(`{"room":"lounge","users":["alice","bob"],"count":2,"returnedCount":2,"truncated":false}`)
+	executed := verifiedCommandExecution("remote users")
+	executed.Data = append(json.RawMessage(nil), wantData...)
+	tool := agenttool.RunCommand{Gateway: &runCommandGatewayStub{result: executed}}
+	result, err := tool.Execute(context.Background(), caller, json.RawMessage(`{"command":"list","arguments":"lounge"}`))
+	if err != nil || result.IsError || result.DeliveryCount != 1 || result.ActionCount != 1 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	var content struct {
+		Messages       []string        `json:"messages"`
+		DeliveredCount int             `json:"deliveredCount"`
+		ActionCount    int             `json:"actionCount"`
+		Data           json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(content.Messages, []string{"remote users"}) || content.DeliveredCount != 1 || content.ActionCount != 1 || !slices.Equal(content.Data, wantData) {
+		t.Fatalf("content=%s", result.Content)
+	}
+	descriptor, _ := tool.Descriptor(caller)
+	if err := contract.ValidateResult(descriptor.ResultSchema(), []byte(result.Content)); err != nil {
+		t.Fatalf("typed result violates run_command schema: %v", err)
+	}
+}
+
 func TestRunCommandDoesNotTreatUntypedGatewayErrorAsKnownRejection(t *testing.T) {
 	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
 	gateway := &runCommandGatewayStub{err: errors.New("command validation failed")}
 	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"ping"}`))
 	if err != nil || !result.IsError || result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || result.EffectState != contract.EffectUnknown || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
+	}
+}
+
+func TestRunCommandNotFoundFeedbackMarksEarlierReadsAsPotentiallyStale(t *testing.T) {
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	gateway := &runCommandGatewayStub{result: commandgateway.Execution{Status: commandgateway.OutcomeNotFound}}
+	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"info","arguments":"missing"}`))
+	if err != nil || !result.IsError || result.ErrorCode != "NOT_FOUND" || result.EffectState != contract.EffectNotCommitted || result.EffectsCommitted || result.DeliveryCount != 0 || result.ActionCount != 0 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	feedback := strings.ToLower(result.Content)
+	for _, fact := range []string{"execution time", "earlier reads", "stale", "current evidence", "corrected arguments"} {
+		if !strings.Contains(feedback, fact) {
+			t.Fatalf("NOT_FOUND feedback lacks %q freshness semantics: %q", fact, result.Content)
+		}
 	}
 }
 

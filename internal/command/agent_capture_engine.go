@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,7 @@ type agentCaptureEngine struct {
 	messages            []string
 	deliveryCount       int
 	actionCount         int
+	data                json.RawMessage
 	snapshotCompletions []<-chan snapshot.OperationResult
 }
 
@@ -232,8 +234,10 @@ func (e *agentCaptureEngine) submitSnapshot(request snapshot.RoomSnapshotRequest
 	completed := make(chan snapshot.OperationResult, 1)
 	previous := request.OnComplete
 	request.OnComplete = func(result snapshot.OperationResult) {
+		captured := result
+		captured.Data = append(json.RawMessage(nil), result.Data...)
 		select {
-		case completed <- result:
+		case completed <- captured:
 		default:
 		}
 		if previous != nil {
@@ -257,6 +261,9 @@ func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error
 					message = "remote room operation failed"
 				}
 				return fmt.Errorf("%s", message)
+			}
+			if len(result.Data) > 0 {
+				e.data = append(json.RawMessage(nil), result.Data...)
 			}
 			if message != "" {
 				e.recordDelivery(result.Reply)

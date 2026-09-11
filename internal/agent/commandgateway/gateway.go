@@ -2,6 +2,7 @@ package commandgateway
 
 import (
 	"context"
+	"encoding/json"
 
 	"zenbot/internal/agent/api"
 )
@@ -34,6 +35,7 @@ type Execution struct {
 	Action           *ActionReceipt
 	Messages         []string
 	Delivery         *DeliveryReceipt
+	Data             json.RawMessage
 }
 
 type Gateway interface {
