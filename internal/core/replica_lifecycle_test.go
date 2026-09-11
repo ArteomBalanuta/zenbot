@@ -13,13 +13,14 @@ import (
 )
 
 type replicaTestTransport struct {
-	messages  chan transport.InboundMessage
-	errors    chan error
-	closed    chan struct{}
-	closeOnce sync.Once
-	joinError error
-	start     func(context.Context) error
-	join      string
+	messages   chan transport.InboundMessage
+	errors     chan error
+	closed     chan struct{}
+	closeOnce  sync.Once
+	joinError  error
+	closeError error
+	start      func(context.Context) error
+	join       string
 }
 
 func newReplicaTestTransport() *replicaTestTransport {
@@ -59,7 +60,12 @@ func TestReplicaJoinEscapesProtocolFields(t *testing.T) {
 }
 func (tr *replicaTestTransport) SendRaw(context.Context, []byte) error { return nil }
 func (tr *replicaTestTransport) Close(context.Context) error {
-	tr.closeOnce.Do(func() { close(tr.closed) })
+	tr.closeOnce.Do(func() {
+		if tr.closeError != nil {
+			tr.errors <- tr.closeError
+		}
+		close(tr.closed)
+	})
 	return nil
 }
 
@@ -125,7 +131,7 @@ func TestReplicaSurvivesRequestCancellationUntilRemoval(t *testing.T) {
 }
 
 func TestReplicaRuntimeFailureRemovesAndCompletesDispatcher(t *testing.T) {
-	for _, failure := range []string{"transport", "transport closed", "messages closed", "errors closed"} {
+	for _, failure := range []string{"transport", "transport closed", "transport canceled", "wrapped transport canceled", "messages closed", "errors closed"} {
 		t.Run(failure, func(t *testing.T) {
 			tr := newReplicaTestTransport()
 			e := &EngineImpl{Channel: "room", Transport: tr}
@@ -139,6 +145,10 @@ func TestReplicaRuntimeFailureRemovesAndCompletesDispatcher(t *testing.T) {
 				tr.errors <- errors.New("connection lost")
 			case "transport closed":
 				tr.errors <- transport.ErrClosed
+			case "transport canceled":
+				tr.errors <- context.Canceled
+			case "wrapped transport canceled":
+				tr.errors <- errors.Join(errors.New("independent operation"), context.Canceled)
 			case "messages closed":
 				close(tr.messages)
 			case "errors closed":
@@ -151,6 +161,64 @@ func TestReplicaRuntimeFailureRemovesAndCompletesDispatcher(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReplicaExplicitStopDoesNotReportTransportCancellation(t *testing.T) {
+	for range 50 {
+		tr := newReplicaTestTransport()
+		tr.closeError = context.Canceled
+		e := &EngineImpl{Channel: "room", Transport: tr}
+		m := NewReplicaManager("host")
+		reports := make(chan error, 1)
+		c := NewManagedReplicaController(m, func(context.Context, string) (ManagedEngine, error) { return e, nil }, reports)
+		if err := c.AddReplica(context.Background(), "room"); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.RemoveReplica(context.Background(), "room"); err != nil {
+			t.Fatal(err)
+		}
+		awaitReplicaSignal(t, e.runtimeDone, "explicit stop left dispatcher alive")
+		awaitReplicaSignal(t, tr.closed, "explicit stop left transport open")
+		if len(m.Channels()) != 0 {
+			t.Fatal("explicit stop left replica registered")
+		}
+		select {
+		case err := <-reports:
+			t.Fatalf("explicit stop reported as failure: %v", err)
+		default:
+		}
+	}
+}
+
+func TestReplicaStartupStopDoesNotReportTransportCancellation(t *testing.T) {
+	tr := newReplicaTestTransport()
+	entered := make(chan struct{})
+	tr.start = func(ctx context.Context) error { close(entered); <-ctx.Done(); return ctx.Err() }
+	reports := make(chan error, 1)
+	e := &EngineImpl{Channel: "room", Transport: tr, LifecycleErrors: reports}
+	started := make(chan error, 1)
+	go func() { started <- e.StartContext(context.Background()) }()
+	awaitReplicaSignal(t, entered, "startup did not reach transport")
+	stopCtx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := e.StopContext(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-started:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("startup result=%v", err)
+		}
+	case <-stopCtx.Done():
+		t.Fatal("startup cancellation did not return")
+	}
+	// StartContext has returned, so its synchronous reporting path is finished.
+	select {
+	case err := <-reports:
+		t.Fatalf("startup stop reported as failure: %v", err)
+	default:
+	}
+	awaitReplicaSignal(t, tr.closed, "startup stop left transport open")
 }
 
 func TestReplicaSurvivesMasterReplacementAndStopsWithManager(t *testing.T) {

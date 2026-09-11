@@ -156,7 +156,7 @@ func (e *EngineImpl) Stop() {
 }
 
 func (e *EngineImpl) reportTransportError(err error) error {
-	if err == nil || errors.Is(err, context.Canceled) {
+	if err == nil {
 		return err
 	}
 	wrapped := fmt.Errorf("engine %s transport: %w", e.Channel, err)
@@ -192,11 +192,15 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 	// Startup owns completion until it launches the dispatcher. A failed join
 	// must never call StopContext and wait on a worker that does not exist.
 	failStart := func(err error) error {
+		lifetimeStopped := ctx.Err() != nil
 		cancel()
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
 		_ = e.Transport.Close(cleanup)
 		close(done)
+		if lifetimeStopped {
+			return err
+		}
 		return e.reportTransportError(err)
 	}
 	if err := e.Transport.Start(ctx); err != nil {
@@ -221,11 +225,14 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 	go func() {
 		var failure error
 		defer func() {
+			// Classify cancellation before cleanup cancels our own lifetime.
+			// A transport operation can return context.Canceled independently.
+			lifetimeStopped := ctx.Err() != nil
 			cancel()
 			// A failure handler may synchronously remove this engine and wait
 			// for its dispatcher. Publish completion before notifying the owner.
 			close(done)
-			if failure != nil {
+			if failure != nil && !lifetimeStopped {
 				e.reportTransportError(failure)
 			}
 		}()
