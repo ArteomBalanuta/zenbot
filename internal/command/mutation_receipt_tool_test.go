@@ -61,23 +61,23 @@ func TestMutationReceiptShadowRemovalOnlyCountsChangedRows(t *testing.T) {
 	db := h2fixture.Open(t, "mutation-receipt-shadow-rows")
 	s := &service.ShadowBanService{Repo: db}
 	ctx, receipt := common.WithMutationRecorder(context.Background())
-	if err := s.Remove(ctx, "absent"); err != nil || receipt.Count() != 0 {
-		t.Fatalf("empty targeted delete: err=%v count=%d", err, receipt.Count())
+	if changed, err := s.Remove(ctx, "absent"); err != nil || changed != 0 || receipt.Count() != 0 {
+		t.Fatalf("empty targeted delete: changed=%d err=%v count=%d", changed, err, receipt.Count())
 	}
-	if err := s.RemoveAll(ctx); err != nil || receipt.Count() != 0 {
-		t.Fatalf("empty bulk delete: err=%v count=%d", err, receipt.Count())
+	if changed, err := s.RemoveAll(ctx); err != nil || changed != 0 || receipt.Count() != 0 {
+		t.Fatalf("empty bulk delete: changed=%d err=%v count=%d", changed, err, receipt.Count())
 	}
 	if err := s.Persist(ctx, repository.ShadowBanRecord{Name: "One"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Remove(ctx, "One"); err != nil || receipt.Count() != 2 {
-		t.Fatalf("targeted delete: err=%v count=%d", err, receipt.Count())
+	if changed, err := s.Remove(ctx, "One"); err != nil || changed != 1 || receipt.Count() != 2 {
+		t.Fatalf("targeted delete: changed=%d err=%v count=%d", changed, err, receipt.Count())
 	}
 	if err := s.Persist(ctx, repository.ShadowBanRecord{Name: "Two"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RemoveAll(ctx); err != nil || receipt.Count() != 4 {
-		t.Fatalf("bulk delete: err=%v count=%d", err, receipt.Count())
+	if changed, err := s.RemoveAll(ctx); err != nil || changed != 1 || receipt.Count() != 4 {
+		t.Fatalf("bulk delete: changed=%d err=%v count=%d", changed, err, receipt.Count())
 	}
 }
 

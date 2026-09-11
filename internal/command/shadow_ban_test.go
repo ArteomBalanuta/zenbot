@@ -12,12 +12,16 @@ import (
 )
 
 type shadowBanRepositoryStub struct {
-	records       []repository.ShadowBanRecord
-	persisted     []repository.ShadowBanRecord
-	removedTarget string
-	removeAlls    int
-	err           error
-	afterPersist  func()
+	records        []repository.ShadowBanRecord
+	persisted      []repository.ShadowBanRecord
+	removedTarget  string
+	removeAlls     int
+	removeCount    int64
+	removeAllCount int64
+	listCalls      int
+	err            error
+	afterPersist   func()
+	afterRemove    func()
 }
 
 func (s *shadowBanRepositoryStub) PersistShadowBanRecord(_ context.Context, record repository.ShadowBanRecord) error {
@@ -31,6 +35,7 @@ func (s *shadowBanRepositoryStub) PersistShadowBanRecord(_ context.Context, reco
 	return nil
 }
 func (s *shadowBanRepositoryStub) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
+	s.listCalls++
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -41,29 +46,55 @@ func (s *shadowBanRepositoryStub) RemoveShadowBanBySourceTarget(_ context.Contex
 		return 0, s.err
 	}
 	s.removedTarget = target
-	return 0, nil
+	if s.afterRemove != nil {
+		s.afterRemove()
+	}
+	return s.removeCount, nil
 }
 func (s *shadowBanRepositoryStub) RemoveAllShadowBans(context.Context) (int64, error) {
 	if s.err != nil {
 		return 0, s.err
 	}
 	s.removeAlls++
-	return 0, nil
+	if s.afterRemove != nil {
+		s.afterRemove()
+	}
+	return s.removeAllCount, nil
 }
 
 type shadowBanCommandEngine struct {
 	*commandEngineStub
-	kicked   []string
-	kickErr  error
-	activeBy map[string]*model.User
+	kicked      []string
+	kickErr     error
+	kickErrors  []error
+	afterKick   func()
+	afterLookup func()
+	replyErr    error
+	activeBy    map[string]*model.User
 }
 
 func (e *shadowBanCommandEngine) KickNick(_ context.Context, target common.NickTarget) error {
 	e.kicked = append(e.kicked, string(target))
+	if e.afterKick != nil {
+		e.afterKick()
+		e.afterKick = nil
+	}
+	if index := len(e.kicked) - 1; index < len(e.kickErrors) {
+		return e.kickErrors[index]
+	}
 	return e.kickErr
 }
 
+func (e *shadowBanCommandEngine) SendChatMessage(author, text string, whisper bool) (string, error) {
+	e.chats = append(e.chats, author+"|"+text+"|"+boolString(whisper))
+	return text, e.replyErr
+}
+
 func (e *shadowBanCommandEngine) GetActiveUserByName(name string) *model.User {
+	if e.afterLookup != nil {
+		e.afterLookup()
+		e.afterLookup = nil
+	}
 	return e.activeBy[name]
 }
 
@@ -199,18 +230,69 @@ func TestShadowBanContainsUsesCurrentIdentityForSelectedActiveUser(t *testing.T)
 	}
 }
 
+func TestShadowBanSelectorsResolveUnicodeCanonicalNamesAndStopAfterPartialExit(t *testing.T) {
+	definition, _ := commandDefinitionFor("shadowban")
+	t.Run("exact Unicode mention", func(t *testing.T) {
+		repo := &shadowBanRepositoryStub{}
+		user := &model.User{Name: "Κόσμος", Trip: "exact-trip", Hash: "exact-hash"}
+		engine := newShadowBanEngine(repo, map[string]*model.User{"canonical-key": user})
+		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban @ΚΌΣΜΟΣ"}).Execute(context.Background())
+		if status != model.SUCCESSFUL || err != nil || len(repo.persisted) != 1 || repo.persisted[0].Name != "Κόσμος" || !equalStrings(engine.kicked, []string{"Κόσμος"}) {
+			t.Fatalf("status=%v err=%v persisted=%+v kicked=%v", status, err, repo.persisted, engine.kicked)
+		}
+	})
+	t.Run("contains cancellation after first kick", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		ctx, receipt := common.WithMutationRecorder(ctx)
+		repo := &shadowBanRepositoryStub{}
+		engine := newShadowBanEngine(repo, map[string]*model.User{
+			"first":  {Name: "raid-a"},
+			"second": {Name: "raid-b"},
+		})
+		engine.afterKick = cancel
+		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban -c raid"}).Execute(ctx)
+		if status != model.FAILED || !errors.Is(err, context.Canceled) || receipt.Count() != 1 || len(repo.persisted) != 1 || !equalStrings(engine.kicked, []string{"raid-a"}) {
+			t.Fatalf("status=%v err=%v receipt=%d persisted=%+v kicked=%v", status, err, receipt.Count(), repo.persisted, engine.kicked)
+		}
+	})
+	t.Run("cancellation after exact lookup", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		repo := &shadowBanRepositoryStub{}
+		engine := newShadowBanEngine(repo, map[string]*model.User{"target": {Name: "target"}})
+		engine.afterLookup = cancel
+		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban target"}).Execute(ctx)
+		if status != model.FAILED || !errors.Is(err, context.Canceled) || len(repo.persisted) != 0 || len(engine.kicked) != 0 {
+			t.Fatalf("status=%v err=%v persisted=%+v kicked=%v", status, err, repo.persisted, engine.kicked)
+		}
+	})
+	t.Run("contains later kick failure", func(t *testing.T) {
+		sendErr := errors.New("second shadow kick failed")
+		ctx, receipt := common.WithMutationRecorder(context.Background())
+		repo := &shadowBanRepositoryStub{}
+		engine := newShadowBanEngine(repo, map[string]*model.User{
+			"first":  {Name: "raid-a"},
+			"second": {Name: "raid-b"},
+		})
+		engine.kickErrors = []error{nil, sendErr}
+		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban -c raid"}).Execute(ctx)
+		if status != model.FAILED || !errors.Is(err, sendErr) || receipt.Count() != 2 || len(repo.persisted) != 2 || !equalStrings(engine.kicked, []string{"raid-a", "raid-b"}) {
+			t.Fatalf("status=%v err=%v receipt=%d persisted=%+v kicked=%v", status, err, receipt.Count(), repo.persisted, engine.kicked)
+		}
+	})
+}
+
 func TestUnshadowBanSingleAndAllDeleteUseRepositoryAndNoAgentPath(t *testing.T) {
-	repo := &shadowBanRepositoryStub{records: []repository.ShadowBanRecord{{Hash: "hash", Trip: "trip", Name: "nick"}}}
+	repo := &shadowBanRepositoryStub{records: []repository.ShadowBanRecord{{Hash: "hash", Trip: "trip", Name: "nick"}}, removeCount: 1, removeAllCount: 3}
 	engine := newShadowBanEngine(repo, nil)
 	definition, _ := commandDefinitionFor("unblock")
 	status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!unblock nick", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || repo.removedTarget != "nick" || !equalStrings(engine.chats, []string{"mod| unbanned nick|true"}) {
+	if status != model.SUCCESSFUL || err != nil || repo.removedTarget != "nick" || !equalStrings(engine.chats, []string{"mod|Unbanned shadow-ban records: 1|true"}) {
 		t.Fatalf("single status=%v err=%v target=%q chats=%v", status, err, repo.removedTarget, engine.chats)
 	}
 
 	engine.chats = nil
 	status, err = definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!unblock -all"}).Execute(context.Background())
-	if status != model.FAILED || err != nil || repo.removeAlls != 1 || !equalStrings(engine.chats, []string{"mod|Unbanned hashes, trips, nicks: \\nhash - trip - nick\\n|false"}) {
+	if status != model.SUCCESSFUL || err != nil || repo.removeAlls != 1 || repo.listCalls != 0 || !equalStrings(engine.chats, []string{"mod|Unbanned shadow-ban records: 3|false"}) {
 		t.Fatalf("all status=%v err=%v deleted=%d chats=%v", status, err, repo.removeAlls, engine.chats)
 	}
 }

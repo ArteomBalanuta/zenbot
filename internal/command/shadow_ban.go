@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"zenbot/internal/common"
@@ -30,33 +31,70 @@ func (c *shadowBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	arguments := args(c.message)
-	if len(arguments) == 0 {
+	mode, target, ok := parseShadowBanSelection(args(c.message))
+	if !ok {
 		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"shadowban merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	if len(arguments) > 1 && hasArgument(arguments, "-c") {
-		return c.shadowBanContaining(ctx, arguments[1])
+	if mode == "contains" {
+		return c.shadowBanContaining(ctx, target)
 	}
-	target, err := util.NormalizeNickTarget(&arguments[0])
+	normalized, err := util.NormalizeNickTarget(&target)
 	if err != nil {
 		return model.FAILED, err
 	}
-	return c.shadowBanSingle(ctx, target)
+	return c.shadowBanSingle(ctx, normalized)
 }
 
 func (c *shadowBanCommand) shadowBanContaining(ctx context.Context, pattern string) (model.Status, error) {
-	for user := range *c.engine.GetActiveUsers() {
+	users := c.engine.GetActiveUsers()
+	if users == nil {
+		return model.FAILED, nil
+	}
+	candidateNames := make([]string, 0, len(*users))
+	for user := range *users {
 		if user == nil || !strings.Contains(user.Name, pattern) {
 			continue
 		}
-		current := c.engine.GetActiveUserByName(user.Name)
+		candidateNames = append(candidateNames, user.Name)
+	}
+	sort.SliceStable(candidateNames, func(i, j int) bool {
+		left, right := strings.ToLower(candidateNames[i]), strings.ToLower(candidateNames[j])
+		if left == right {
+			return candidateNames[i] < candidateNames[j]
+		}
+		return left < right
+	})
+	selected := make([]*model.User, 0, len(candidateNames))
+	seen := make(map[string]struct{}, len(candidateNames))
+	for _, name := range candidateNames {
+		current, err := activeModerationTarget(c.engine, name)
+		if err != nil {
+			return model.FAILED, err
+		}
 		if current == nil {
 			continue
 		}
+		canonical := strings.ToLower(current.Name)
+		if _, duplicate := seen[canonical]; duplicate {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		selected = append(selected, current)
+	}
+	if len(selected) == 0 {
+		return model.FAILED, nil
+	}
+	for _, current := range selected {
+		if err := ctx.Err(); err != nil {
+			return model.FAILED, err
+		}
 		if err := c.shadowBanPresent(ctx, current); err != nil {
+			return model.FAILED, err
+		}
+		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
 	}
@@ -64,7 +102,14 @@ func (c *shadowBanCommand) shadowBanContaining(ctx context.Context, pattern stri
 }
 
 func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (model.Status, error) {
-	if user := c.engine.GetActiveUserByName(target); user != nil {
+	user, err := activeModerationTarget(c.engine, target)
+	if err != nil {
+		return model.FAILED, err
+	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	if user != nil {
 		if err := c.shadowBanPresent(ctx, user); err != nil {
 			return model.FAILED, err
 		}
@@ -90,6 +135,17 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
+}
+
+func parseShadowBanSelection(arguments []string) (string, string, bool) {
+	switch {
+	case len(arguments) == 1 && arguments[0] != "-c":
+		return "exact", arguments[0], true
+	case len(arguments) == 2 && arguments[0] == "-c" && arguments[1] != "-c":
+		return "contains", arguments[1], true
+	default:
+		return "", "", false
+	}
 }
 
 func (c *shadowBanCommand) shadowBanPresent(ctx context.Context, user *model.User) error {

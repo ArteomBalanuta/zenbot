@@ -44,8 +44,8 @@ func TestRemoveShadowBanBySourceTargetMatchesNameTripAndBase64Name(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
-		t.Fatal(err)
+	if changed, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil || changed != 3 {
+		t.Fatalf("changed=%d err=%v", changed, err)
 	}
 	var remaining int
 	if err := db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM banned_users`).Scan(&remaining); err != nil {
@@ -54,8 +54,32 @@ func TestRemoveShadowBanBySourceTargetMatchesNameTripAndBase64Name(t *testing.T)
 	if remaining != 1 {
 		t.Fatalf("remaining rows = %d, want 1", remaining)
 	}
-	if _, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
-		t.Fatalf("idempotent zero-row deletion failed: %v", err)
+	if changed, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil || changed != 0 {
+		t.Fatalf("idempotent zero-row deletion: changed=%d err=%v", changed, err)
+	}
+}
+
+func TestRemoveShadowBanBySourceTargetNormalizesMentionForNameOnly(t *testing.T) {
+	db := h2fixture.Open(t, "shadow-ban-name-mention")
+	ctx := context.Background()
+	for _, row := range []struct{ trip, name, hash string }{
+		{trip: "other", name: "alice", hash: "other"},
+		{trip: "@alice", name: "other-trip", hash: "other"},
+		{trip: "other", name: "other-hash", hash: base64.StdEncoding.EncodeToString([]byte("@alice"))},
+		{trip: "alice", name: "plain-trip-must-remain", hash: "other"},
+		{trip: "other", name: "plain-hash-must-remain", hash: base64.StdEncoding.EncodeToString([]byte("alice"))},
+	} {
+		if _, err := db.DB.ExecContext(ctx, `INSERT INTO banned_users(trip,name,hash,reason,created_on) VALUES($1,$2,$3,'seed',1)`, row.trip, row.name, row.hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed, err := db.RemoveShadowBanBySourceTarget(ctx, "@alice")
+	if err != nil || changed != 3 {
+		t.Fatalf("changed=%d err=%v", changed, err)
+	}
+	var remaining int
+	if err := db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM banned_users`).Scan(&remaining); err != nil || remaining != 2 {
+		t.Fatalf("remaining=%d err=%v", remaining, err)
 	}
 }
 
@@ -94,8 +118,8 @@ func TestShadowBanCommandRecordsRoundTripAndDeleteAllInRealH2(t *testing.T) {
 	if len(records) != 2 || records[0] != (repository.ShadowBanRecord{Trip: "trip", Name: "nick", Hash: "raw-hash", Reason: "reason"}) || records[1] != (repository.ShadowBanRecord{Name: "offline"}) {
 		t.Fatalf("records=%+v", records)
 	}
-	if _, err := db.RemoveAllShadowBans(ctx); err != nil {
-		t.Fatal(err)
+	if changed, err := db.RemoveAllShadowBans(ctx); err != nil || changed != 2 {
+		t.Fatalf("changed=%d err=%v", changed, err)
 	}
 	if records, err = db.ListShadowBans(ctx); err != nil || len(records) != 0 {
 		t.Fatalf("after delete-all records=%+v err=%v", records, err)

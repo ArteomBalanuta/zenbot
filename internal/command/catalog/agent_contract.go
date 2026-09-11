@@ -304,6 +304,9 @@ func (contract shadowBanArgumentContract) Encode(raw json.RawMessage) (string, e
 	}
 	switch arguments.Mode {
 	case "exact":
+		if arguments.Target == "-c" {
+			return "", fmt.Errorf("exact target collides with contains selector")
+		}
 		return boundedTail(arguments.Target)
 	case "contains":
 		return boundedTail("-c " + arguments.Target)

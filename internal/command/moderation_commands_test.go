@@ -265,7 +265,7 @@ func (f *shadowManagementFake) ListShadowBans(context.Context) ([]repository.Sha
 	return f.rows, nil
 }
 func (f *shadowManagementFake) RemoveShadowBanBySourceTarget(context.Context, string) (int64, error) {
-	return 0, nil
+	return 1, nil
 }
 func (f *shadowManagementFake) RemoveAllShadowBans(context.Context) (int64, error) { return 0, nil }
 
@@ -296,7 +296,7 @@ func TestUnshadowBanRemovesTypedSelector(t *testing.T) {
 	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("unblock")
 	status, err := d.New(e, moderationMessage("!unblock target", false)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod| unbanned target|false"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Unbanned shadow-ban records: 1|false"}) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
 }

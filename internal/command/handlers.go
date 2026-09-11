@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -286,56 +286,111 @@ func (c *kickCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	arguments := args(c.message)
-	if len(arguments) == 0 {
+	mode, rawTargets, ok := parseKickSelection(args(c.message))
+	if !ok {
 		return model.FAILED, nil
+	}
+	targets, err := resolveKickSelection(c.engine, mode, rawTargets)
+	if err != nil {
+		return model.FAILED, err
 	}
 	operations, err := moderationOperations(c.engine)
 	if err != nil {
 		return model.FAILED, err
 	}
-	switch arguments[0] {
-	case "-m":
-		for _, rawTarget := range arguments[1:] {
-			if err := kickActiveUser(ctx, c.engine, operations, rawTarget); err != nil {
-				if errors.Is(err, repository.ErrNotFound) {
-					continue
-				}
-				return model.FAILED, err
-			}
+	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return model.FAILED, err
 		}
-	case "-c":
-		if len(arguments) < 2 {
-			return model.SUCCESSFUL, nil
+		if err := operations.KickNick(ctx, common.NickTarget(target.Name)); err != nil {
+			return model.FAILED, err
 		}
-		users := c.engine.GetActiveUsers()
-		if users == nil {
-			return model.SUCCESSFUL, nil
-		}
-		for user := range *users {
-			if user != nil && strings.Contains(user.Name, arguments[1]) {
-				if err := operations.KickNick(ctx, common.NickTarget(user.Name)); err != nil {
-					return model.FAILED, err
-				}
-			}
-		}
-	default:
-		if err := kickActiveUser(ctx, c.engine, operations, arguments[0]); err != nil {
+		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
 	}
 	return model.SUCCESSFUL, nil
 }
 
-func kickActiveUser(ctx context.Context, engine common.Engine, operations common.ModerationOperations, rawTarget string) error {
-	target, err := activeModerationTarget(engine, rawTarget)
-	if err != nil {
-		return err
+func parseKickSelection(arguments []string) (string, []string, bool) {
+	if len(arguments) == 0 {
+		return "", nil, false
 	}
-	if target == nil {
-		return repository.ErrNotFound
+	switch arguments[0] {
+	case "-m":
+		if len(arguments) < 2 || containsKickMode(arguments[1:]) {
+			return "", nil, false
+		}
+		return "multiple", arguments[1:], true
+	case "-c":
+		if len(arguments) != 2 || containsKickMode(arguments[1:]) {
+			return "", nil, false
+		}
+		return "contains", arguments[1:], true
+	default:
+		if len(arguments) != 1 {
+			return "", nil, false
+		}
+		return "exact", arguments, true
 	}
-	return operations.KickNick(ctx, common.NickTarget(target.Name))
+}
+
+func containsKickMode(arguments []string) bool {
+	for _, argument := range arguments {
+		if argument == "-m" || argument == "-c" {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveKickSelection(engine common.Engine, mode string, rawTargets []string) ([]*model.User, error) {
+	if mode == "contains" {
+		fragment := rawTargets[0]
+		users := engine.GetActiveUsers()
+		if users == nil {
+			return nil, repository.ErrNotFound
+		}
+		candidates := make([]string, 0, len(*users))
+		for user := range *users {
+			if user != nil && strings.Contains(user.Name, fragment) {
+				candidates = append(candidates, user.Name)
+			}
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			left, right := strings.ToLower(candidates[i]), strings.ToLower(candidates[j])
+			if left == right {
+				return candidates[i] < candidates[j]
+			}
+			return left < right
+		})
+		rawTargets = candidates
+	}
+
+	targets := make([]*model.User, 0, len(rawTargets))
+	seen := make(map[string]struct{}, len(rawTargets))
+	for _, rawTarget := range rawTargets {
+		target, err := activeModerationTarget(engine, rawTarget)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil {
+			if mode == "exact" {
+				return nil, repository.ErrNotFound
+			}
+			continue
+		}
+		canonical := strings.ToLower(target.Name)
+		if _, duplicate := seen[canonical]; duplicate {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		targets = append(targets, target)
+	}
+	if len(targets) == 0 {
+		return nil, repository.ErrNotFound
+	}
+	return targets, nil
 }
 
 type unbanCommand struct{ commandBase }

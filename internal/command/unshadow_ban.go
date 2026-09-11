@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 
 	"zenbot/internal/model"
 )
@@ -13,7 +14,7 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 		return model.FAILED, err
 	}
 	arguments := args(c.message)
-	if len(arguments) == 0 {
+	if len(arguments) != 1 {
 		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"unban merc"); err != nil {
 			return model.FAILED, err
 		}
@@ -23,46 +24,41 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err != nil {
 		return model.FAILED, err
 	}
-	if hasArgument(arguments, "-all") {
-		records, err := service.List(ctx)
+	if arguments[0] == "-all" {
+		changed, err := service.RemoveAll(ctx)
 		if err != nil {
 			return model.FAILED, err
 		}
-		if len(records) == 0 {
-			if err := replyContext(ctx, &c.commandBase, "No users has been banned."); err != nil {
+		if changed == 0 {
+			if err := replyContext(ctx, &c.commandBase, "No shadow-ban records matched."); err != nil {
 				return model.FAILED, err
 			}
 			return model.FAILED, nil
 		}
-		if err := service.RemoveAll(ctx); err != nil {
-			return model.FAILED, err
-		}
 		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
-		if err := replyContext(ctx, &c.commandBase, "Unbanned hashes, trips, nicks: \\n"+formatShadowBanRecords(records)); err != nil {
+		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Unbanned shadow-ban records: %d", changed)); err != nil {
+			return model.FAILED, err
+		}
+		return model.SUCCESSFUL, nil
+	}
+	target := arguments[0]
+	changed, err := service.Remove(ctx, target)
+	if err != nil {
+		return model.FAILED, err
+	}
+	if changed == 0 {
+		if err := replyContext(ctx, &c.commandBase, "No shadow-ban records matched "+target+"."); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	target := arguments[0]
-	if err := service.Remove(ctx, target); err != nil {
-		return model.FAILED, err
-	}
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, " unbanned "+target); err != nil {
+	if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Unbanned shadow-ban records: %d", changed)); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
-}
-
-func hasArgument(arguments []string, value string) bool {
-	for _, argument := range arguments {
-		if argument == value {
-			return true
-		}
-	}
-	return false
 }

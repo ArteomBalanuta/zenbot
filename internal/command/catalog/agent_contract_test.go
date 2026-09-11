@@ -33,6 +33,7 @@ func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
 		{name: "kick nick", contract: kick.Agent.Arguments, input: `{"nick":"@jill"}`, want: "@jill"},
 		{name: "kick rejects legacy mode", contract: kick.Agent.Arguments, input: `{"mode":"exact","targets":["@jill"]}`, wantErr: true},
 		{name: "shadow ban exact", contract: shadowBanArguments(), input: `{"mode":"exact","target":"jill"}`, want: "jill"},
+		{name: "shadow ban exact rejects contains selector collision", contract: shadowBanArguments(), input: `{"mode":"exact","target":"-c"}`, wantErr: true},
 		{name: "shadow ban contains", contract: shadowBanArguments(), input: `{"mode":"contains","target":"raid"}`, want: "-c raid"},
 		{name: "automove enable", contract: automoveArguments(), input: `{"operation":"enable"}`, want: "on"},
 		{name: "automove disable", contract: automoveArguments(), input: `{"operation":"disable"}`, want: "off"},

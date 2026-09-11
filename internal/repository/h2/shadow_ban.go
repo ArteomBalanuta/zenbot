@@ -129,8 +129,8 @@ func (d *Database) ListShadowBans(ctx context.Context) ([]repository.ShadowBanRe
 }
 
 // RemoveShadowBanBySourceTarget mirrors Saturn's local unshadowban persistence
-// semantics. The supplied target is bound exactly as name and trip, while the
-// hash predicate receives its standard UTF-8 base64 encoding.
+// semantics. One optional mention marker is removed for the name predicate;
+// trip and hash predicates retain the exact supplied credential.
 func (d *Database) RemoveShadowBanBySourceTarget(ctx context.Context, target string) (int64, error) {
 	if d == nil || d.DB == nil {
 		return 0, fmt.Errorf("shadow-ban database is unavailable")
@@ -138,7 +138,11 @@ func (d *Database) RemoveShadowBanBySourceTarget(ctx context.Context, target str
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users WHERE name=$1 OR trip=$2 OR hash=$3`, target, target, base64.StdEncoding.EncodeToString([]byte(target)))
+	nameTarget := target
+	if strings.HasPrefix(nameTarget, "@") {
+		nameTarget = strings.TrimSpace(nameTarget[1:])
+	}
+	result, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users WHERE name=$1 OR trip=$2 OR hash=$3`, nameTarget, target, base64.StdEncoding.EncodeToString([]byte(target)))
 	if err != nil {
 		return 0, err
 	}
