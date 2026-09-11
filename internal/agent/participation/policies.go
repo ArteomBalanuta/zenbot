@@ -1,6 +1,5 @@
 // Package participation contains deterministic room participation policies and
-// the narrow invocation/submission boundary. It is intentionally unwired from
-// listeners until the remaining agent dependencies are available.
+// the invocation/submission boundary used by room listeners.
 package participation
 
 import (

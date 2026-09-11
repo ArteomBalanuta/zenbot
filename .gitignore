@@ -1,9 +1,50 @@
-./target
-/target
-.vscode
-config.toml
-/database
-.env
-.env.*
-!.env.example
-.worktrees/
+# Local credentials and runtime data (keep sanitized examples tracked).
+/config.toml
+/.env
+/.env.*
+!/.env.example
+/database/
+/data/
+
+# Build, test, profiling, and dependency-download output.
+/target/
+/bin/
+/dist/
+/.cache/
+/coverage/
+/coverage.out
+*.test
+*.prof
+*.pprof
+*.log
+*.db
+*.db.*
+*.sqlite
+*.sqlite3
+*.mv.db
+*.trace.db
+*.lock.db
+*.db-wal
+*.db-shm
+
+# Editor / operating-system metadata.
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+__pycache__/
+*.pyc
+
+# Keep shared agent skills tracked; ignore other private agent workspace files.
+/.agents/*
+!/.agents/skills/
+
+# Private agent workspaces and temporary planning artifacts.
+/.hermes/
+/.superpowers/
+/.worktrees/
+/docs/superpowers/

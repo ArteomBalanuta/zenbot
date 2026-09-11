@@ -1,4 +1,4 @@
-// Package prompt provides the unwired agent prompt catalog.
+// Package prompt loads the runtime agent prompt catalog and tool copy.
 package prompt
 
 import (

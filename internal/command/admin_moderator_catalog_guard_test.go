@@ -15,7 +15,7 @@ type saturnCatalogRow struct {
 }
 
 // saturnAdminModeratorCatalog is transcribed from the source annotations in
-// /Users/ab/workspace/projects/saturn/src/main/java/org/saturn/app/command/impl.
+// Saturn's src/main/java/org/saturn/app/command/impl package.
 // Keep this table source-shaped: class identity, annotation order, role, and
 // aliases are all part of the guard rather than inferred from target code.
 var saturnAdminModeratorCatalog = []saturnCatalogRow{
@@ -110,10 +110,8 @@ func TestAdminModeratorCatalogMatchesSaturnSource(t *testing.T) {
 	}
 }
 
-// These are the explicitly known, not-yet-concrete S1-S9 migration rows. The
-// set is intentionally exact: adding any new scoped generic route fails this
-// test, and removing a row requires replacing it with a concrete handler plus
-// its own behavior test. Do not treat this list as parity approval.
+// These explicitly unsupported commands retain unavailable catalog entries.
+// Any other generic route would silently replace a supported concrete handler.
 var allowedScopedGenericFallbacks = map[string]struct{}{
 	"mine": {}, "whiskey": {},
 }

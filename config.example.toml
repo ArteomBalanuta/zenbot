@@ -1,96 +1,243 @@
-# Saturn-compatible Zenbot runtime configuration.
-# Copy this file to the ignored config.toml and replace credential placeholders.
+# Zenbot runtime configuration: copy to the ignored config.toml and replace placeholders.
+# Values below are example choices, not always the defaults for omitted settings.
+# See docs/configuration.md for aliases, validation, environment precedence, and wiring limitations.
+# Keep real credentials private. The binary does not load .env; Docker's Make target can.
+
+# H2 database file stem; this creates database/database.mv.db (omit the file suffix).
 dbPath = "database/database"
+
+# Hack.Chat WebSocket endpoint used by the bot and its room connections.
 wsUrl = "wss://hack.chat/chat-ws"
+
+# Prefix users type before chat commands, for example *help.
 cmdPrefix = "*"
+
+# Initial room to join; choose a room you control for the first run.
 channel = "programming"
+
+# Nickname displayed by the bot in chat.
 nick = "alphaBot"
+
+# PRIVATE secret used to generate the bot's tripcode; not its public tripcode.
+# Nonblank password/trip values take precedence over the TOKEN environment fallback.
 trip = "YOUR_BOT_TRIP_HERE"
+
+# Comma-separated public tripcodes trusted by selected command-specific allowlists.
+# Some exceptions grant powerful commands; this is not a low-privilege global role.
 userTrips = ""
+
+# Comma-separated public tripcodes allowed to administer the bot; not passwords.
 adminTrips = "YOUR_ADMIN_TRIP_HERE"
-proxies = ""
+
+# Enable host connection recovery and periodic health checks.
 autoReconnect = true
+
+# Health-check interval in MINUTES when autoReconnect is enabled; nonpositive uses 15 seconds.
 healthCheckInterval = 5
+
+# Comma-separated commands sent once after initial readiness; omit the command prefix.
+# Slash-prefixed entries are sent directly; use a TOML array if an entry contains commas.
 autorunCommands = ""
 
-# Opt-in diagnostics for regular commands. The direct *l agent path is excluded.
 [profiling]
+
+# Enable diagnostic tracing for regular commands and the pprof server; excludes direct *l traces.
 enabled = false
+
+# Address for the unauthenticated profiler; Docker uses host-loopback port publishing.
+# For native runs, prefer 127.0.0.1:6060; never expose this endpoint publicly.
 listenAddress = "0.0.0.0:6060"
+
+# Log a regular command as slow when its total duration reaches this many milliseconds.
 slowCommandThresholdMillis = 250
+
+# Log slow individual command/listener stages at this duration in milliseconds.
 slowStageThresholdMillis = 25
+
+# Log slow transport operations at this duration in milliseconds.
 slowTransportThresholdMillis = 25
-# Runtime block sampling period in nanoseconds and mutex sampling fraction.
+
+# Nanoseconds of blocking per runtime profiling sample, on average.
+# Use ZENBOT_PROFILING_BLOCK_PROFILE_RATE=0 to disable sampling; TOML zero selects the default.
 blockProfileRate = 1000000
+
+# Sample roughly 1 in this many mutex-contention events (5 means approximately one fifth).
+# Use ZENBOT_PROFILING_MUTEX_PROFILE_FRACTION=0 to disable; TOML zero selects the default.
 mutexProfileFraction = 5
 
 [agent]
+
+# Enable the optional LLM runtime; ordinary bot commands work without it.
 enabled = false
-# Environment variables take precedence. The client appends /v1/chat/completions.
+
+# Model provider base URL; Zenbot appends /v1/chat/completions (do not include /v1).
+# Inside Docker, localhost is the container, not your host model server.
 endpoint = "http://localhost:16261"
+
+# Provider model identifier; leave blank only when the provider selects its own default.
 model = ""
+
+# Name of the environment variable holding the provider API key; never put the key here.
 apiKeyEnv = "SATURN_AGENT_API_KEY"
+
+# Provider operation timeout in seconds, including eligible HTTP retry attempts.
 timeoutSeconds = 30
+
+# Whole agent-request deadline in milliseconds, covering model/tool work.
 requestTimeoutMillis = 180000
-# Reasoning shares this response budget on reasoning-capable local models.
-# The provider evaluation found conditional-action errors with thinking off.
-# Re-evaluate these settings when changing model; see docs/evals/.
+
+# Token budget per provider response; reasoning can share this budget.
+# The example uses 4096; the omitted-setting default is 1024.
 maxCompletionTokens = 4096
+
+# Send the provider's enable_thinking option; requires model/provider support.
+# The example enables reasoning; the omitted-setting default is false.
 thinkingEnabled = true
+
+# Maximum agent requests executing concurrently across the runtime.
 maxConcurrentRequests = 2
+
+# Maximum pending agent requests; zero means no pending queue.
 queueCapacity = 0
 
-# Request-local model/tool-loop bounds. One tool-free terminal synthesis is
-# reserved after exhaustion; no separate semantic completion judge runs.
+# Maximum ordinary model/tool rounds; a tool-free terminal answer is reserved after exhaustion.
 maxSteps = 5
+
+# Total tool-call budget for one agent request, including retained-result retrieval.
 maxToolCallsPerTurn = 4
+
+# Default per-tool timeout in milliseconds when the descriptor has no override.
+# Cancellation is cooperative; synchronous actions can outlast a deadline if they ignore context.
 toolTimeoutMillis = 10000
-# Legacy aggregate limit retained for Saturn configuration compatibility.
+
+# Legacy compatibility value: validated but NOT used as the live loop's call budget.
+# Use maxToolCallsPerTurn to change the actual limit.
 maxToolCalls = 4
+
+# Maximum calls to the same tool within one request.
 maxCallsPerTool = 2
+
+# Failures of one tool before it becomes unavailable for the rest of that request.
 maxToolFailures = 2
+
+# Maximum Unicode characters accepted in the user's agent prompt.
 maxPromptChars = 8000
+
+# Estimated token ceiling for assembled model context, including the tool manifest.
 maxContextTokens = 16000
+
+# Context capacity reserved for required policy/request/output needs; must be below maxContextTokens.
 contextReserveTokens = 2048
+
+# Maximum Unicode characters allowed in the final agent reply.
 maxOutputChars = 8000
 
-# Shared public room memory and bounded recent room context.
+# Maximum conversation turns loaded per memory key (shared public room or private identity).
 memoryTurns = 30
-# Keep this many newest raw turns after compacting older durable history.
+
+# Newest complete turns kept verbatim when older loaded history is summarized; at most memoryTurns.
 memoryRawTurns = 20
-# Unicode-character ceiling for the persisted untrusted summary.
+
+# Maximum Unicode characters in the persisted, untrusted conversation summary.
 memorySummaryMaxChars = 12000
+
+# Conversation-memory retention window in hours; NOT a global TTL for chat, mail, notes, or backups.
 memoryTtlHours = 168
+
+# Public tripcode identifying the agent creator; required when agent.enabled is true.
+# This grants special agent capabilities; use a real public tripcode, never a password.
 creatorTrip = "YOUR_CREATOR_TRIP_HERE"
+
+# Allow unsolicited public-room participation; direct commands/mentions do not require this.
 ambientEnabled = false
+
+# Message cadence for ambient sampling; eligibility checks can still suppress a reply.
 ambientEveryMessages = 8
+
+# Minutes to suppress ambient participation after an accepted request to stay quiet.
 quietMinutes = 15
+
+# Maximum recent public room messages supplied as contextual history.
 contextMessageLimit = 60
+
+# Exact model-output marker requesting silence when the invocation's reply policy permits it.
 noReplyMarker = "[[SATURN_NO_REPLY]]"
+
+# Additional retry attempts for eligible provider HTTP failures; never a permission to replay actions.
+# TOML zero selects the default of 2; use SATURN_AGENT_MAX_RETRIES=0 to disable retries.
 maxRetries = 2
+
+# Delay between eligible provider retries in milliseconds; positive values avoid fallback behavior.
 retryBackoffMillis = 250
 
-# Deterministic and semantic moderation are independent of ambient conversation.
+# Moderation wiring caveat: deterministic monitors currently read raw TOML values,
+# not the resolved environment/default values. Join monitoring requires canonical
+# join thresholds; the compatibility aliases below alone do not activate it.
+# Semantic moderation uses resolved settings. See docs/configuration.md#moderation.
+
+# Enable configured moderation behavior independently of ambient conversation.
+# The example enables it; the omitted-setting default is false. See wiring caveat above.
 moderationEnabled = true
+
+# Messages by one identity within the burst window that trigger flood handling.
 moderationMessageBurstCount = 6
+
+# Rolling window in seconds for the per-identity message-burst count.
 moderationMessageBurstWindowSeconds = 5
+
+# Repeats of the same normalized message that trigger repeated-message handling.
 moderationRepeatedMessageCount = 4
+
+# Rolling window in seconds for counting repeated messages.
 moderationRepeatedMessageWindowSeconds = 10
+
+# Seconds in which another breach escalates a previous warning/mute toward mute/kick.
 moderationSecondBreachWindowSeconds = 30
+
+# Seconds for recognizing post-kick repeat offenses or recurring same-hash raid signals.
 moderationPostKickWindowSeconds = 600
+
+# Room join count that triggers a CAPTCHA request when join monitoring is active.
 moderationJoinBurstCount = 8
+
+# Join-burst counting window in seconds; compatibility alias for moderationJoinWindowSeconds.
 moderationJoinBurstWindowSeconds = 10
+
+# Distinct joining nicknames sharing a hash that trigger a raid signal/CAPTCHA.
+# Compatibility alias for moderationSameHashCount; see wiring caveat above.
 moderationSameHashJoinCount = 5
+
+# Same-hash join counting window in seconds; alias for moderationSameHashWindowSeconds.
 moderationSameHashJoinWindowSeconds = 20
+
+# Distinct similar joining nicknames that trigger a name-cluster CAPTCHA request.
+# Compatibility alias for moderationNameClusterCount; see wiring caveat above.
 moderationSuspiciousNameJoinCount = 5
+
+# Name-cluster counting window in seconds; alias for moderationNameClusterWindowSeconds.
 moderationSuspiciousNameJoinWindowSeconds = 20
+
+# Minimum seconds between repeated monitor actions with the same action/target key.
 moderationActionCooldownSeconds = 30
 
-# Creator/admin-only schema inspection and bounded read-only SQL.
+# Expose configured agent database tools subject to caller capabilities, including bounded read-only SQL.
+# Does not restrict the separate raw admin sql command; admitted tables may hold private data.
 dynamicSqlEnabled = true
+
+# Maximum characters allowed in an agent-generated SQL statement.
 dynamicSqlMaxSqlChars = 4000
+
+# Maximum result rows returned by agent SQL.
 dynamicSqlMaxRows = 50
+
+# Maximum result columns returned by agent SQL.
 dynamicSqlMaxColumns = 32
+
+# Maximum characters retained in an individual agent SQL result cell.
 dynamicSqlMaxCellChars = 2000
+
+# Maximum characters in the agent SQL result representation.
 dynamicSqlMaxResultChars = 32000
+
+# Agent SQL execution timeout in milliseconds.
 dynamicSqlTimeoutMillis = 1000

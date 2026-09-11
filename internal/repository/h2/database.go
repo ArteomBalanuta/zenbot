@@ -28,7 +28,7 @@ type h2OpenTestHooks struct {
 	h2Version func(context.Context, *sql.DB) (string, error)
 }
 
-// Config describes the externally managed H2 PostgreSQL server.
+// Config describes the local H2 PostgreSQL-wire server and database.
 type Config struct {
 	BaseDir, DatabaseStem, Host string
 	Port                        int

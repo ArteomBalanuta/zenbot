@@ -1,174 +1,185 @@
 # Zenbot
 
-Zenbot is the Go rewrite of Saturn, a Hack.Chat moderation and room-automation bot. The current migration branch carries Saturn-compatible commands, aliases, role checks, listeners, host and replica lifecycle, H2 persistence, SQLite import, and the Vaelen agent tool loop.
+A Go bot for Hack.Chat rooms, with role-aware commands, moderation, persistent
+history and mail, replica management, and an optional LLM agent.
 
-The intentionally excluded parity scope is `mine`, `whiskey`, `ws`, and `wsa`. See [COMMAND_TOOL_INVENTORY.md](COMMAND_TOOL_INVENTORY.md) for the reviewed command matrix and [MIGRATION_PLAN.md](MIGRATION_PLAN.md) for closure evidence.
+Zenbot retains many Saturn command aliases while using a Go runtime and a
+file-backed H2 database. Java is required for H2; SQLite is used only to import
+legacy databases. The agent is optional and disabled in the example configuration.
 
-## Features
+## Start here
 
-- Saturn command aliases and role-aware dispatch, including admin, moderation, DBZ, persistence, room snapshot, replica, and user utilities
-- Host health recovery, autorun commands, replica lifecycle, room snapshots, automove, and support relays
-- Embedded file-based H2 storage through H2's PostgreSQL compatibility server
-- One-time transactional import of a legacy `<dbPath>.db` SQLite database into `<dbPath>.mv.db`
-- OpenAI-compatible agent with shared public-room memory, private whisper memory, contextual tools, bounded generated SQL, and command execution
-- Deterministic flood and raid detection plus optional semantic moderation
-- Self-contained Docker image and idempotent Make targets for deployment and database operations
-- Opt-in regular-command latency tracing and Go runtime profiles for diagnosing websocket, listener, database, and command stalls
+- [Installation and first run](docs/getting-started.md)
+- [Configuration reference](docs/configuration.md)
+- [Commands and permissions](docs/commands.md)
+- [Architecture](docs/architecture.md) and [agent execution](docs/agent.md)
+- [Operations, backups, and troubleshooting](docs/operations.md)
+- [Development and testing](docs/development.md)
+- [Security and privacy](SECURITY.md)
+- [Complete documentation index](docs/index.md)
 
-## Quick Start
+## Docker setup: download, configure, start
 
-### Docker
+You do **not** need to install Go, Java, H2, or Make on your computer for this
+path. Docker builds the bot and packages its runtime dependencies automatically.
+You only need Docker, the project files, and a text editor. The first build takes
+longer because it downloads dependencies; later builds reuse the cache.
 
-Docker is the simplest production path. The image contains the Go binary, Java runtime, pinned H2 `2.3.232` jar, prompts, and schema.
+### 1. Install Docker and get Zenbot
+
+Install and start [Docker Desktop or Docker Engine](https://docs.docker.com/get-started/get-docker/).
+The commands below use a macOS/Linux terminal or a Windows WSL terminal with
+Docker integration enabled; they are not PowerShell commands.
+
+On GitHub, choose **Code → Download ZIP**, extract it, and open a terminal in the
+extracted folder. Alternatively, if you have Git:
+
+```sh
+git clone https://github.com/ArteomBalanuta/zenbot.git
+cd zenbot
+```
+
+Check that Docker is running:
+
+```sh
+docker info
+```
+
+If this cannot connect to Docker, start Docker Desktop/the Docker service before
+continuing. On Linux, your user also needs permission to use Docker.
+
+### 2. Set your room and bot identity
+
+For a fresh installation:
 
 ```sh
 cp config.example.toml config.toml
-# Edit the ignored config.toml with the real bot and optional agent values.
-make build
-make run
-make logs
+mkdir -p database
+touch .env
 ```
 
-`make run` mounts `config.toml` read-only at `/app/config.toml` and mounts `database/` at `/app/database`. If `config.toml` is absent it uses the sanitized `config.example.toml`. If an ignored `.env` exists, Docker loads it after the TOML values; otherwise the host `SATURN_AGENT_API_KEY` is forwarded when set.
-
-### Regular Command Profiling
-
-Structured command tracing is disabled by default and deliberately excludes the `*l` agent command. Enable it in the ignored production `config.toml` while reproducing slow regular commands:
+Do not copy over an existing `config.toml` when updating. Open `config.toml` in
+your text editor and change these existing values near the top:
 
 ```toml
-[profiling]
-enabled = true
-listenAddress = "0.0.0.0:6060"
-slowCommandThresholdMillis = 250
-slowStageThresholdMillis = 25
-slowTransportThresholdMillis = 25
-blockProfileRate = 1000000
-mutexProfileFraction = 5
+channel = "YOUR_TEST_ROOM"
+nick = "YourBot"
+trip = "YOUR_PRIVATE_BOT_TRIP_SECRET"
+adminTrips = "YOUR_PUBLIC_ADMIN_TRIPCODE"
 ```
 
-`make run` publishes the profiler only on host loopback at `127.0.0.1:6060`. After rebuilding, reproduce a slow command and inspect the structured timing records:
+Use a room you control. `trip` is the bot's **private trip-generation secret**;
+`adminTrips` contains your **public tripcode**, not your password. Keep the rest
+of the example settings initially, including `dbPath = "database/database"`
+and `[agent].enabled = false`. Save the file.
+
+The empty `.env` is ready for optional API credentials later. Both files are
+ignored by Git; never share their real contents. Server-side moderator rights
+must be granted to the bot separately from configuring its administrator list.
+
+### 3. Build and start
+
+Run these commands from the same project folder:
 
 ```sh
-make rebuild
-docker logs zenbot 2>&1 | grep -E 'command\.profile|transport\.profile'
-make profile-goroutines
-make profile-block
-make profile-mutex
-make profile-cpu PROFILE_SECONDS=30
+docker build --pull -t zenbot .
+docker run -d --init --name zenbot \
+  --env-file .env \
+  --mount "type=bind,source=$PWD/config.toml,target=/app/config.toml,readonly" \
+  --mount "type=bind,source=$PWD/database,target=/app/database" \
+  zenbot
+docker logs -f zenbot
 ```
 
-`command.profile.started` reports `ws_queue_ms`, JSON `parse_ms`, and the inbound queue depth. Stage events identify slow listener handlers such as message audit, pending mail, YouTube preview, agent participation, command lookup, authorization, concrete handler execution, and command audit. `transport.profile.inbound_enqueue` proves websocket-reader backpressure; `transport.profile.write` separates writer-lock delay from the network write. A high `ws_queue_ms` with a slow earlier handler indicates head-of-line blocking in the synchronous message consumer.
+Press **Ctrl+C** to stop following logs; the bot keeps running in the background.
+Open your configured Hack.Chat room and send `*help` or `*ping` to check it.
+Help arrives privately. No web dashboard or inbound port is needed for ordinary
+bot operation.
 
-Go runtime profiles are process-wide, but regular command execution carries `zenbot.command` and `zenbot.room` pprof labels. Reproduce without concurrent `*l` requests and use those labels when filtering samples so agent work does not distort the diagnosis.
+The image contains the binary, Java 21, checksum-pinned H2 2.3.232, and prompt
+resources. Configuration is mounted read-only; persistent data stays in your
+host's `database/` folder even when the container is removed. Keep that folder
+private and [back it up](docs/operations.md#backups-and-restores).
 
-The complete environment override surface is listed in `.env.example`. Override `PROFILING_PORT` when the host port is occupied; keep `profiling.listenAddress` and `CONTAINER_PROFILING_PORT` aligned if changing the in-container port.
+If you already have Make installed, `make build && make run` is the shorter
+equivalent using the same files. The Make route additionally publishes the
+optional profiler port on host loopback; profiling itself remains disabled.
 
-Useful lifecycle commands:
+### 4. Optional: enable AI
+
+The bot works without AI. The Docker image does **not** include a model server
+or API subscription. To use one you already have, edit the existing `[agent]`
+section in `config.toml`:
+
+- Set `enabled = true`.
+- Set `endpoint` to the provider's reachable base URL, without `/v1` or
+  `/v1/chat/completions`; Zenbot appends the latter route.
+- Set `model` to the provider's model name if required.
+- Replace `creatorTrip` with your public tripcode.
+
+If the provider requires a key, add `SATURN_AGENT_API_KEY=your-real-key` to the
+private `.env` file in your editor. Do not put real credentials in shell commands
+or committed examples. Container `localhost` is not your host computer; consult
+[Docker networking](https://docs.docker.com/desktop/features/networking/) and
+the [configuration guide](docs/configuration.md) when using a host-side model.
+
+Apply these changes by stopping/removing the existing container and repeating
+the `docker run` command from step 3:
 
 ```sh
-make restart
-make rebuild
-make stop
-make status
-make backup-db
-make fresh-db
+docker stop --timeout 30 zenbot
+docker rm zenbot
+# Repeat the docker run command above, then try: *l hello
 ```
 
-`make fresh-db` stops the container, archives any legacy SQLite source under `database/backups/`, and removes the H2 files. The next startup creates a fresh schema. `make backup-db` stops Zenbot before copying the H2 file. `make db-check` opens the stopped database read-only with the pinned H2 jar and queries its version and application-table count; it does not mistake mere file existence for a database check.
+Changing `.env` requires container recreation, not just `docker restart`. AI
+requests can incur provider costs and send conversation context to that provider.
+Read [agent behavior and limitations](docs/agent.md) before enabling moderation.
 
-### Local
+### Everyday commands and updates
 
-Local development requires Go 1.24 or newer, Java 21 or newer, and H2 `2.3.232`:
+| Task | Command |
+| --- | --- |
+| Show container state | `docker ps -a --filter name=zenbot` |
+| Follow logs | `docker logs -f zenbot` |
+| Stop safely | `docker stop --timeout 30 zenbot` |
+| Start the existing container | `docker start zenbot` |
+| Apply config/environment changes | Stop/remove the container, then repeat step 3's `docker run` |
 
-```sh
-cp config.example.toml config.toml
-export H2_JAR="$HOME/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
-make check
-make compile
-./target/zenbot
-```
+To update a Git checkout, back up first, run `git pull --ff-only`, rebuild the
+image, then stop/remove the old container and repeat `docker run`. For a ZIP
+installation, use the new source files while preserving your private
+`config.toml`, `.env`, and `database/`. Do not run two instances against the same
+database. Container removal alone does not delete the bind-mounted data.
 
-Zenbot starts and owns the local H2 compatibility server; do not start a second server on port `5435`. `deploy/h2-server.sh` remains available only for explicit external-server diagnostics.
+If Docker reports that the name `zenbot` is already in use, inspect the existing
+container before removing it; it may be your running bot. Startup failures can
+also come from unchanged placeholders or an unreachable provider. See
+[troubleshooting](docs/operations.md#troubleshooting). Logs can contain private
+chat content, so redact them before sharing.
 
-## Configuration
+For development without Docker, follow [local setup](docs/getting-started.md#local-development).
 
-The tracked [config.example.toml](config.example.toml) documents every required and optional setting. Local `config.toml`, `.env`, and `database/` are ignored. Docker also excludes them from its build context.
+## What it does
 
-Important root values:
+- User lookup, public history, private notes, queued mail, and subscriptions.
+- Weather, time, room lists, and other chat utilities.
+- Moderation commands, auditing, and configurable automation.
+- Process-owned host recovery and replicas, plus bounded temporary room sessions.
+- Optional model-driven tool execution with authorization, deadlines, bounded
+  context, durable memory, and explicit action/delivery outcomes.
 
-- `dbPath` is the database stem. `database/database` creates `database/database.mv.db`.
-- `wsUrl`, `nick`, and `trip` are Saturn-compatible connection keys. Legacy Zenbot `url`, `name`, and `password` remain accepted.
-- `userTrips`, `adminTrips`, and `autorunCommands` accept either TOML arrays or Saturn comma-separated strings.
-- `autoReconnect` and `healthCheckInterval` control host recovery.
+The agent is not a guarantee of correct reasoning or successful remote actions.
+Treat unconfirmed actions as unconfirmed, and read the
+[agent limitations](docs/agent.md) before enabling it in a populated room.
 
-Agent provider values:
+## Contributing
 
-- `agent.endpoint` is the OpenAI-compatible base URL; Zenbot appends `/v1/chat/completions`.
-- `agent.model` may remain blank when the endpoint selects its model.
-- `agent.creatorTrip` is required when the agent is enabled; no creator identity is compiled into the binary or tracked example.
-- `agent.apiKeyEnv` names the optional bearer-token environment variable.
-- `agent.thinkingEnabled` is sent as `chat_template_kwargs.enable_thinking`.
-- `agent.maxCompletionTokens`, timeout, retry, queue, prompt, and output values are enforced at their runtime boundaries. `agent.maxPromptChars` is checked by Unicode code point before any provider call.
-- Keep `agent.maxCompletionTokens` close to the useful reply size. Very large values extend truncated provider generations without bypassing `agent.maxOutputChars`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
+[development](docs/development.md) for prerequisites and test commands.
+Changes should include focused regression tests and update the relevant reference
+documentation.
 
-Agent execution values:
-
-- `agent.maxSteps` and `agent.maxToolCallsPerTurn` bound one request-local tool loop.
-- `agent.maxCallsPerTool` prevents repeated variants of one tool from exhausting a turn.
-- `agent.maxToolFailures` disables a failing tool for the remainder of that request.
-- `agent.toolTimeoutMillis` supplies the default timeout when a tool descriptor has no override.
-- `agent.memoryTurns` and `agent.memoryTtlHours` bound durable conversation memory.
-- `agent.memoryRawTurns` keeps the newest complete turns verbatim; older loaded turns are summarized into untrusted H2-backed memory without deleting their authoritative raw rows.
-- `agent.memorySummaryMaxChars` bounds the persisted summary projection.
-- `agent.contextMessageLimit` controls recent public room context; explicit named-user history can retrieve up to 500 public messages with timestamps and identity metadata.
-- `agent.maxContextTokens` supports ceilings up to 1,000,000 estimated tokens, while `agent.contextReserveTokens` reserves policy/request/output capacity. The loop reprojects before every worker-model call, accounts for the live tool manifest, keeps the exact newest request mandatory, drops assistant-call/tool-result pairs atomically, and never slices JSON.
-
-The complete `SATURN_AGENT_*` environment surface is listed in [.env.example](.env.example). Environment values take precedence over TOML. The ignored production `config.toml` remains the source of truth when no override is supplied.
-
-## Agent Behavior
-
-The direct syntax is:
-
-```text
-*l <prompt>
-```
-
-Exact public mentions of the bot also enter the same room-scoped agent runtime. Public users in one room share conversation memory; whispers use a private user-and-room key. Ambient participation is disabled unless explicitly configured. A polite request to remain quiet suppresses ambient participation without posting repeated acknowledgements.
-
-Ordinary prompts receive direct, natural-language answers. The agent does not force responses into quotations or another fixed template; quotations are used only when relevant to the request. Requests for live data or Saturn actions remain tool-first, and successful room-delivery tools are not repeated as prose. Every proposed final answer passes through a separate model-backed semantic completion gate; unfinished planning or promises return to the bounded tool loop with evaluator feedback instead of being delivered.
-
-The model receives one checked, caller-filtered semantic manifest and can request multiple tools in one response. Every caller-visible operation has one unique primary intent. Each of the 59 exposed `saturn_<command>` tools has command-specific strict typed parameters, routing guidance, negative constraints, and valid examples; conditional commands use validated `oneOf`/`const` branches, and raw command strings or generic argument tails are not accepted. The five explicit non-actionable commands are `l`, `mine`, `whiskey`, `ws`, and `wsa`. There is no keyword router or preliminary discovery/model call.
-
-Action and command tools execute synchronously and sequentially in provider order. Only independent, idempotent, read-only tools with non-conflicting resource metadata can fan out concurrently. A cancelled action without a verified terminal result becomes non-retryable `ACTION_OUTCOME_UNKNOWN`. Command success requires typed committed/delivery outcomes rather than transport or legacy status alone. Full results remain request-local; the model receives descriptor-bounded, valid JSON observations. Correctable failures and semantically incomplete candidate answers retain the currently executable manifest for self-correction; terminal failures and exhausted bounds receive a tool-free synthesis call, and an unsatisfied bounded result fails closed. Stateful calls support an injectable pause/deny hook, and resumed actions are reauthorized before synchronous execution.
-
-Moderators can request moderation actions through natural language. The configured creator receives direct admin and permanent-ban capabilities. The gateway still performs Saturn role checks and binds autonomous moderation actions to the reviewed author.
-
-See [AGENTIC_ARCHITECTURE.md](AGENTIC_ARCHITECTURE.md) for the full flow and contracts.
-
-## Remote Room Listing And Replicas
-
-`room_users` is the agent's current-room-only presence source and accepts no room parameter. Requests about another room route to `saturn_list`; its underlying `*list <other-room>` workflow opens a bounded credentialed snapshot session using a protocol-valid temporary identity such as `msg_xxxxxxxx`, waits for `onlineSet`, formats the remote users, and closes the temporary connection. The agent adapter rejects same-room `saturn_list` calls before gateway execution. Workflow failures preserve the command-specific error message instead of replacing it with a generic room-operation response.
-
-Replica lifecycle is implemented independently through `ManagedReplicaController` and `ReplicaFactory`. Replicas use the configured bot identity and retain their own websocket engine while remaining owned by the master process.
-
-## Persistence And Migration
-
-The runtime uses H2 only. SQLite remains a read-only migration dependency:
-
-1. Zenbot starts H2 and applies the idempotent embedded schema.
-2. If `<dbPath>.db` exists and the corresponding H2 application tables are empty, Zenbot reads the SQLite schema and rows in batches inside one H2 transaction.
-3. It recreates indexes, restores identity counters, verifies every table count, and commits.
-4. Only after a successful commit does it rename the SQLite database and sidecars with `.bak` suffixes.
-5. If both stores contain data, startup fails rather than merging ambiguous records.
-
-Messages default to `PUBLIC`; whispers are explicitly stored as `WHISPER`. The named-user history tool reads public rows across rooms unless a room is requested.
-
-## Verification
-
-```sh
-make check
-make compile
-make build
-```
-
-The H2 integration suite uses `H2_JAR` when set and otherwise checks the pinned local Maven path used by the tests. The Docker build independently downloads and checksum-verifies the same H2 release.
+No project license has been declared in this repository. Public visibility alone
+is not a license grant; maintainers should select an appropriate license before
+advertising the project as open source. Dependencies retain their own licenses.

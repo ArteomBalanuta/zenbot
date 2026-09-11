@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      H2_JAR: ${{ runner.temp }}/h2-2.3.232.jar
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.5'
+          cache: true
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install checksum-pinned H2
+        run: |
+          curl --fail --location --show-error --silent \
+            https://repo.maven.apache.org/maven2/com/h2database/h2/2.3.232/h2-2.3.232.jar \
+            --output "$H2_JAR"
+          printf '%s  %s\n' '8dae62d22db8982c3dcb3826edb9c727c5d302063a67eef7d63d82de401f07d3' "$H2_JAR" | sha256sum --check --strict
+      - run: make check
+      - run: make compile
+      - run: go test -race ./...
+      - name: Build runtime image without starting a bot
+        run: docker build -t zenbot:ci .

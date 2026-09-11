@@ -1,4 +1,4 @@
-// Package runtime contains the private, unwired agent execution foundation.
+// Package runtime manages bounded agent request submission and execution.
 package runtime
 
 import (

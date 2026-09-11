@@ -32,7 +32,7 @@ help:
 		"make build     - Build the self-contained Docker image" \
 		"make run       - Recreate and run the container in detached mode" \
 		"                 Uses ignored config.toml when present, otherwise config.example.toml" \
-		"                 Loads ignored .env when present; environment values override TOML" \
+		"                 Loads ignored .env when present; agent/profiling overrides win over TOML" \
 		"make start     - Start the existing container" \
 		"make stop      - Stop the container if it exists" \
 		"make restart   - Recreate and run the container" \
