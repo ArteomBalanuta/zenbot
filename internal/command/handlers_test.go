@@ -196,7 +196,7 @@ func TestConcreteCommandsExecuteWithSaturnSemantics(t *testing.T) {
 		alias, text       string
 		wantChat, wantRaw string
 	}{
-		{"say", "!say hello world", "|hello world |false", ""},
+		{"say", "!say hello world", "|hello world|false", ""},
 		{"afk", "!afk lunch", "alice| is afk|true", ""},
 	}
 	for _, tc := range cases {

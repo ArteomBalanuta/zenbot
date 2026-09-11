@@ -8,8 +8,7 @@ import (
 	"zenbot/internal/model"
 )
 
-// sqlCommand retains the source parser's case-sensitive literal "sql " split.
-// Rendering and replies remain deferred to later tracers.
+// sqlCommand consumes the query body independently of the resolved command alias.
 type sqlCommand struct{ commandBase }
 
 func (c *sqlCommand) Execute(ctx context.Context) (model.Status, error) {
@@ -17,13 +16,10 @@ func (c *sqlCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 
-	parts := strings.Split(c.message.Text, "sql ")
-	if len(parts) < 2 || parts[1] == "" {
-		// Java String.split discards a trailing empty payload. Return an internal
-		// failure instead of letting the equivalent index access panic.
-		return model.FAILED, fmt.Errorf("sql source payload is malformed")
+	_, query := splitCommandToken(c.message.Text)
+	if strings.TrimSpace(query) == "" {
+		return model.FAILED, fmt.Errorf("sql requires a query")
 	}
-	query := strings.ReplaceAll(parts[1], `\n`, "\n")
 
 	b := bundle(c.engine)
 	if b == nil || b.SQLCommand == nil {
@@ -34,9 +30,10 @@ func (c *sqlCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, ctxErr
 	}
 	if err != nil {
-		reply(&c.commandBase, "Result: \\n"+err.Error())
-		return model.SUCCESSFUL, nil
+		return model.FAILED, err
 	}
-	reply(&c.commandBase, "Result: \\n"+renderSaturnSQLTable(table))
+	if _, err := c.engine.SendChatMessage(c.message.Name, "Result: \\n"+renderSaturnSQLTable(table), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

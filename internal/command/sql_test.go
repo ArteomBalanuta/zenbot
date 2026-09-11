@@ -43,9 +43,7 @@ func (e *sendFailureSQLCommandEngine) SendChatMessage(string, string, bool) (str
 	return "", e.sendErr
 }
 
-func TestSQLCommandSendFailureIsBestEffortRegression(t *testing.T) {
-	// Regression-only: reply already discards delivery errors by contract, so this
-	// assertion is intentionally not represented as a new RED→GREEN tracer.
+func TestSQLCommandReturnsSendFailureWithoutRequery(t *testing.T) {
 	query := &recordingRawSQLQuery{}
 	engine := &sendFailureSQLCommandEngine{
 		commandEngineStub: &commandEngineStub{
@@ -57,8 +55,8 @@ func TestSQLCommandSendFailureIsBestEffortRegression(t *testing.T) {
 
 	status, err := newCommand("sql", []string{"sql"}, model.ADMIN, engine, &model.ChatMessage{Name: "alice", Text: "!sql SELECT 1"}).Execute(context.Background())
 
-	if status != model.SUCCESSFUL || err != nil {
-		t.Fatalf("status=%v err=%v, want successful best-effort delivery", status, err)
+	if status != model.FAILED || !errors.Is(err, engine.sendErr) {
+		t.Fatalf("status=%v err=%v, want failed delivery", status, err)
 	}
 	if len(query.queries) != 1 || query.queries[0] != "SELECT 1" {
 		t.Fatalf("queries=%v, want one raw query", query.queries)
@@ -82,8 +80,8 @@ func TestSQLCommandParsesRawSourcePayloadOnly(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "exact raw payload", text: "!sql SELECT 1", wantSQL: "SELECT 1"},
-		{name: "literal newline becomes line feed", text: `!sql SELECT\n1`, wantSQL: "SELECT\n1"},
-		{name: "uppercase source parser token", text: "!SQL SELECT 1", wantErr: true},
+		{name: "literal backslash is preserved", text: `!sql SELECT\n1`, wantSQL: `SELECT\n1`},
+		{name: "uppercase command token", text: "!SQL SELECT 1", wantSQL: "SELECT 1"},
 		{name: "missing separator", text: "!sql", wantErr: true},
 		{name: "empty payload", text: "!sql ", wantErr: true},
 	} {
@@ -156,7 +154,7 @@ func TestUserChatListenerSQLRepliesWithSaturnASCIIH2Goldens(t *testing.T) {
 	}
 }
 
-func TestUserChatListenerSQLRepliesWithRawH2DriverErrorAndWhisper(t *testing.T) {
+func TestUserChatListenerSQLDoesNotPublishRawH2DriverError(t *testing.T) {
 	database := h2fixture.Open(t, "sql-driver-error")
 	query := "SELEC 1"
 	if _, err := (&service.RawSQLService{DB: database.SQLDB()}).Query(context.Background(), query); err == nil {
@@ -176,9 +174,8 @@ func TestUserChatListenerSQLRepliesWithRawH2DriverErrorAndWhisper(t *testing.T) 
 		}
 		listener.NewUserChatListener(engine).Notify(string(message))
 
-		want := "alice|Result: \\n" + err.Error() + "|true"
-		if len(engine.chats) != 1 || engine.chats[0] != want {
-			t.Fatalf("replies=%q, want one exact raw-driver reply %q", engine.chats, want)
+		if len(engine.chats) != 0 {
+			t.Fatalf("query error was published as room data: %q", engine.chats)
 		}
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
@@ -42,7 +44,7 @@ func (c *directLCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	prompt := strings.TrimSpace(strings.Join(args(c.message), " "))
+	prompt := commandBody(c.message)
 	if prompt == "" {
 		return model.FAILED, fmt.Errorf("l requires a prompt")
 	}
@@ -50,6 +52,12 @@ func (c *directLCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
+}
+
+func (c *directLCommand) NewInstance(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
+	base := c.commandBase
+	base.engine, base.message, base.aliases = e, m, c.Aliases()
+	return &directLCommand{commandBase: base, submitter: c.submitter}
 }
 
 func directLDefinition(submitter DirectAgentSubmitter) (common.CommandDefinition, bool) {
@@ -69,7 +77,27 @@ func directLDefinition(submitter DirectAgentSubmitter) (common.CommandDefinition
 func (c *commandBase) Role() model.Role  { return c.role }
 func (c *commandBase) Aliases() []string { return append([]string(nil), c.aliases...) }
 func (c *commandBase) NewInstance(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
-	return newCommand(c.aliases[0], c.aliases, c.role, e, m)
+	return newCommand(c.canonical, c.Aliases(), c.role, e, m)
+}
+
+// splitCommandToken consumes one structural token and its separator while
+// preserving the remaining text byte-for-byte, including interior whitespace.
+func splitCommandToken(text string) (token, tail string) {
+	text = strings.TrimLeftFunc(text, unicode.IsSpace)
+	end := strings.IndexFunc(text, unicode.IsSpace)
+	if end < 0 {
+		return text, ""
+	}
+	_, separatorWidth := utf8.DecodeRuneInString(text[end:])
+	return text[:end], text[end+separatorWidth:]
+}
+
+func commandBody(message *model.ChatMessage) string {
+	if message == nil {
+		return ""
+	}
+	_, body := splitCommandToken(message.Text)
+	return strings.TrimSpace(body)
 }
 func args(m *model.ChatMessage) []string {
 	a := m.GetArguments()
@@ -89,15 +117,7 @@ func (c *sayCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	message := strings.Join(args(c.message), " ") + " "
-	if user := c.engine.GetActiveUserByName(c.message.Name); user == nil || !c.engine.IsUserAuthorized(user, rolePtr(model.ADMIN)) {
-		message = strings.Map(func(r rune) rune {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' {
-				return r
-			}
-			return -1
-		}, message)
-	}
+	message := commandBody(c.message)
 	c.engine.SendChatMessage("", message, false)
 	return model.SUCCESSFUL, nil
 }
@@ -114,7 +134,7 @@ func (c *afkCommand) Execute(ctx context.Context) (model.Status, error) {
 		reply(&c.commandBase, "Set your trip in order to use this command")
 		return model.FAILED, nil
 	}
-	reason := strings.Join(args(c.message), " ")
+	reason := commandBody(c.message)
 	for u := range *c.engine.GetActiveUsers() {
 		if u.Trip == c.message.Trip {
 			c.engine.AddAfkUser(u, reason)
@@ -350,6 +370,8 @@ func (c *unlockCommand) Execute(ctx context.Context) (model.Status, error) {
 func newCommand(canonical string, aliases []string, role model.Role, e common.Engine, m *model.ChatMessage) common.SaturnCommand {
 	b := commandBase{engine: e, message: m, role: role, aliases: aliases, canonical: canonical}
 	switch canonical {
+	case "sub", "unsub":
+		return newSubscriptionCommand(canonical, aliases, role, e, m)
 	case "mail":
 		return &mailCommand{b}
 	case "note":

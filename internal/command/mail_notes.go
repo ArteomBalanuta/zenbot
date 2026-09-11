@@ -16,8 +16,9 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e := ctx.Err(); e != nil {
 		return model.FAILED, e
 	}
-	a := args(c.message)
-	if len(a) == 0 {
+	receiver, body := splitCommandToken(commandBody(c.message))
+	body = strings.TrimSpace(body)
+	if receiver == "" {
 		reply(&c.commandBase, "Example: -mail merc message")
 		return model.FAILED, nil
 	}
@@ -25,7 +26,7 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 	if b == nil || b.Mail == nil {
 		return model.FAILED, fmt.Errorf("mail service unavailable")
 	}
-	receivers, e := b.Mail.QueueResolved(ctx, strings.Join(a[1:], " "), c.message.Name+"#"+c.message.Trip, a[0], true)
+	receivers, e := b.Mail.QueueResolved(ctx, body, c.message.Name+"#"+c.message.Trip, receiver, true)
 	if e != nil {
 		if errors.Is(e, service.ErrMailReceiverBlank) {
 			reply(&c.commandBase, "Receiver cannot be blank.")
@@ -58,8 +59,8 @@ func (c *noteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e := ctx.Err(); e != nil {
 		return model.FAILED, e
 	}
-	a := args(c.message)
-	if len(a) == 0 {
+	text := commandBody(c.message)
+	if text == "" {
 		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"note Jedi am I?!")
 		return model.FAILED, nil
 	}
@@ -71,7 +72,7 @@ func (c *noteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if b == nil || b.Notes == nil {
 		return model.FAILED, fmt.Errorf("note service unavailable")
 	}
-	if e := b.Notes.Save(ctx, c.message.Trip, strings.Join(a, " ")); e != nil {
+	if e := b.Notes.Save(ctx, c.message.Trip, text); e != nil {
 		return model.FAILED, e
 	}
 	reply(&c.commandBase, "note successfully saved!")

@@ -37,7 +37,7 @@ func (c *unsubscribeCommand) Execute(ctx context.Context) (model.Status, error) 
 }
 
 func newSubscriptionCommand(canonical string, aliases []string, role model.Role, e common.Engine, m *model.ChatMessage) common.SaturnCommand {
-	base := commandBase{engine: e, message: m, role: role, aliases: aliases}
+	base := commandBase{engine: e, message: m, role: role, aliases: aliases, canonical: canonical}
 	if canonical == "sub" {
 		return &subscribeCommand{base}
 	}

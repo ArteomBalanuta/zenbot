@@ -18,17 +18,17 @@ func (c *msgChannelCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	arguments := args(c.message)
-	if len(arguments) < 2 {
+	target, message := splitCommandToken(commandBody(c.message))
+	message = strings.TrimSpace(message)
+	if target == "" || message == "" {
 		reply(&c.commandBase, " Example: "+c.engine.GetPrefix()+"msgroom your-room your message")
 		return model.FAILED, nil
 	}
-	room := strings.TrimSpace(strings.ReplaceAll(arguments[0], "?", ""))
+	room := strings.TrimSpace(strings.ReplaceAll(target, "?", ""))
 	if room == "" {
 		reply(&c.commandBase, "Room name cannot be blank.")
 		return model.FAILED, nil
 	}
-	message := strings.TrimSpace(strings.Join(arguments[1:], " "))
 	body := msgChannelBody(c.engine.GetChannel(), message)
 	if room != c.engine.GetChannel() {
 		submitter, ok := c.engine.(common.CredentialedRoomSnapshotSubmitter)

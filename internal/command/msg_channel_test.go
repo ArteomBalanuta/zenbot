@@ -235,7 +235,7 @@ func TestMsgChannelLocalDelivery(t *testing.T) {
 			name:    "msgroom removes every question mark and preserves whisper",
 			alias:   "msgroom",
 			text:    "!msgroom ?pro?gramming?   hello   world   ",
-			want:    "alice |anonymous mail from: ?programming message: hello world|true",
+			want:    "alice |anonymous mail from: ?programming message: hello   world|true",
 			whisper: true,
 		},
 		{
