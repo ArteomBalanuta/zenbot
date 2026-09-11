@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG GO_VERSION=1.25.5
+ARG GO_VERSION=1.27.1
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src

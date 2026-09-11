@@ -48,7 +48,9 @@ must be granted separately from the bot's configured role lists.
 
 Prerequisites:
 
-- Go 1.24 or newer; the Docker build uses Go 1.25.5.
+- Go 1.26 or newer; the module toolchain, Docker, and CI select Go 1.27.1.
+  With Go's automatic toolchain selection enabled, Go downloads that toolchain
+  when necessary.
 - Make for the commands below.
 
 SQLite is embedded through `modernc.org/sqlite`; Go downloads it with the other

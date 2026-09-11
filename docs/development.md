@@ -5,6 +5,14 @@
 Follow [local setup](getting-started.md#local-development): Go and Make.
 SQLite is embedded through the Go module `modernc.org/sqlite`.
 
+The pinned driver v1.58.0 bundles SQLite 3.53.4, including the upstream
+[WAL-reset race fix](https://sqlite.org/wal.html#walresetbug). When upgrading,
+verify the bundled SQLite engine version, not just the Go driver version.
+Keep `modernc.org/libc` at the version required by the driver's `go.mod`:
+the driver documents this dependency as fragile. Do not independently upgrade
+it with a blanket dependency refresh. Re-run the SQLite concurrency tests,
+SQL policy tests, full race suite, and Docker build after dependency changes.
+
 The SQLite driver and `github.com/rqlite/sql` policy parser are pure Go;
 `CGO_ENABLED=0` builds are supported. Race tests use Go's race instrumentation
 and require a supported platform with its usual compiler tooling.

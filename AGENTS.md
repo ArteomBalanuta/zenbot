@@ -62,7 +62,7 @@ snapshot operations, not persistent replicas.
 
 ## Build and test
 
-Prerequisites: Go 1.24 or newer. Docker and CI pin their build toolchains.
+Prerequisites: Go 1.26 or newer; the module, Docker, and CI select Go 1.27.1.
 The SQLite driver and SQL policy parser are pure Go. SQLite itself is embedded
 through a Go module. See [getting started](docs/getting-started.md).
 
