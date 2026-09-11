@@ -40,6 +40,7 @@ type Connection struct {
 	writeMu   sync.Mutex
 	startOnce sync.Once
 	closeOnce sync.Once
+	closeErr  error // Published to every Close caller by closeOnce.
 	done      chan struct{}
 	messages  chan InboundMessage
 	errs      chan error
@@ -230,7 +231,6 @@ func (c *Connection) SendRaw(ctx context.Context, payload []byte) error {
 	return c.write(websocket.TextMessage, payload)
 }
 func (c *Connection) Close(ctx context.Context) error {
-	var err error
 	c.closeOnce.Do(func() {
 		close(c.done)
 		c.connected.Store(false)
@@ -238,10 +238,10 @@ func (c *Connection) Close(ctx context.Context) error {
 		ws := c.conn
 		c.connMu.RUnlock()
 		if ws != nil {
-			err = ws.Close()
+			c.closeErr = ws.Close()
 		}
 		// Channels remain open: reader and ping goroutines may concurrently publish
 		// terminal errors while observing done. Consumers use done/Connected to stop.
 	})
-	return err
+	return c.closeErr
 }

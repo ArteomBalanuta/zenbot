@@ -196,7 +196,9 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 		cancel()
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
-		_ = e.Transport.Close(cleanup)
+		if cleanupErr := e.Transport.Close(cleanup); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("startup cleanup: %w", cleanupErr))
+		}
 		close(done)
 		if lifetimeStopped {
 			return err
