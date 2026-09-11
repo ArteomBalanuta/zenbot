@@ -478,9 +478,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		e.SetReplicaController(core.NewManagedReplicaController(manager, func(ctx context.Context, channel string) (core.ManagedEngine, error) {
-			return rf.NewReplica(ctx, channel)
-		}))
+		e.SetReplicaController(core.NewManagedReplicaController(manager, newProductionReplicaConstructor(rf)))
 		e.SetSupportReplicaRelay(core.NewSupportReplicaRelay(manager, c.AdminTrips))
 		e.SetHostLifecycleController(hostLifecycle)
 		e.OnlineSetListener = listener.NewOnlineSetListener(e, newAutorunCallback(c))

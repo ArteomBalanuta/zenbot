@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 )
 
 type ReplicaConstructor func(context.Context, string) (ManagedEngine, error)
@@ -37,23 +39,59 @@ func (c *ManagedReplicaController) AddReplica(ctx context.Context, channel strin
 	if channel == "" {
 		return fmt.Errorf("replica channel is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	e, err := c.construct(ctx, channel)
 	if err != nil {
 		c.report(fmt.Errorf("replica %s construction: %w", channel, err))
 		return err
 	}
+	// Keep request cancellation during startup, then transfer the successful
+	// lifetime to the manager. A master replacement cannot cancel this scope.
+	runtimeCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	detach := context.AfterFunc(ctx, cancel)
+	defer detach()
+	r := &ownedReplica{managedReplica: managedReplica{e}, cancel: cancel}
+	cleanup := func() {
+		stopCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_ = r.Stop(stopCtx)
+	}
+	var registrationMu sync.Mutex
+	var failed error
 	if impl, ok := e.(*EngineImpl); ok {
 		impl.SetRuntimeFailureHandler(func(runtimeErr error) {
+			registrationMu.Lock()
+			failed = runtimeErr
+			registrationMu.Unlock()
 			c.report(fmt.Errorf("replica %s runtime: %w", channel, runtimeErr))
-			_, _ = c.manager.Remove(context.Background(), channel)
+			stopCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			_, _ = c.manager.remove(stopCtx, channel, r)
 		})
 	}
-	if err = e.StartContext(ctx); err != nil {
+	if err = e.StartContext(runtimeCtx); err != nil {
+		cleanup()
 		c.report(fmt.Errorf("replica %s start: %w", channel, err))
 		return err
 	}
-	if err = c.manager.Add(channel, managedReplica{e}); err != nil {
-		_ = e.StopContext(ctx)
+	if !detach() || ctx.Err() != nil {
+		cleanup()
+		return ctx.Err()
+	}
+	registrationMu.Lock()
+	if failed != nil {
+		err = failed
+	} else {
+		err = c.manager.Add(channel, r)
+	}
+	registrationMu.Unlock()
+	if err != nil {
+		cleanup()
 		c.report(fmt.Errorf("replica %s registration: %w", channel, err))
 		return err
 	}
@@ -61,6 +99,16 @@ func (c *ManagedReplicaController) AddReplica(ctx context.Context, channel strin
 }
 
 type managedReplica struct{ ManagedEngine }
+
+type ownedReplica struct {
+	managedReplica
+	cancel context.CancelFunc
+}
+
+func (r *ownedReplica) Stop(ctx context.Context) error {
+	r.cancel()
+	return r.StopContext(ctx)
+}
 
 func (r managedReplica) Stop(ctx context.Context) error { return r.StopContext(ctx) }
 func (c *ManagedReplicaController) RemoveReplica(ctx context.Context, channel string) error {

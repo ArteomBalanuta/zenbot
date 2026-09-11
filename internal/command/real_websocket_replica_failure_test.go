@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -39,7 +40,13 @@ func TestRealWebSocketReplicaRuntimeFailureReportsOnceAndRemovesManagerEntry(t *
 			return
 		}
 		joins <- string(join)
-		if strings.Contains(string(join), `"channel": "replica-room"`) {
+		var joined struct {
+			Channel string `json:"channel"`
+		}
+		if err := json.Unmarshal(join, &joined); err != nil {
+			return
+		}
+		if joined.Channel == "replica-room" {
 			connections.Add(1)
 			close(replicaReady)
 			<-closeReplica

@@ -2,6 +2,7 @@ package factory
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -65,12 +66,19 @@ func TestManagedMasterAndReplicaUseIndependentWebSockets(t *testing.T) {
 	for len(got) < 2 {
 		select {
 		case j := <-joins:
-			got[j] = true
+			var join map[string]string
+			if err := json.Unmarshal([]byte(j), &join); err != nil {
+				t.Fatal(err)
+			}
+			if join["cmd"] != "join" || join["nick"] != "bot#pw" {
+				t.Fatalf("join=%v", join)
+			}
+			got[join["channel"]] = true
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
 	}
-	if !got[`{ "cmd": "join", "channel": "master", "nick": "bot#pw" }`] || !got[`{ "cmd": "join", "channel": "replica", "nick": "bot#pw" }`] {
+	if !got["master"] || !got["replica"] {
 		t.Fatalf("joins=%v", got)
 	}
 	stop, done := context.WithTimeout(context.Background(), time.Second)

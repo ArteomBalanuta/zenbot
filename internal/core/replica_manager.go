@@ -39,8 +39,17 @@ func (m *ReplicaManager) Add(channel string, r Replica) error {
 	return nil
 }
 func (m *ReplicaManager) Remove(ctx context.Context, channel string) (Replica, error) {
+	return m.remove(ctx, channel, nil)
+}
+
+// remove only removes expected when supplied; a stale failure must not stop a
+// newer owner of the same room. Controller-owned replicas have pointer identity.
+func (m *ReplicaManager) remove(ctx context.Context, channel string, expected *ownedReplica) (Replica, error) {
 	m.mu.Lock()
 	r, ok := m.replicas[channel]
+	if expected != nil && r != expected {
+		ok = false
+	}
 	if ok {
 		delete(m.replicas, channel)
 	}
@@ -89,6 +98,8 @@ func (m *ReplicaManager) ManagedEngines() map[string]ManagedEngine {
 	for channel, replica := range m.replicas {
 		if managed, ok := replica.(managedReplica); ok {
 			out[channel] = managed.ManagedEngine
+		} else if owned, ok := replica.(*ownedReplica); ok {
+			out[channel] = owned.ManagedEngine
 		}
 	}
 	return out

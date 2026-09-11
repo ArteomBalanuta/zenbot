@@ -5,6 +5,7 @@ import (
 
 	"zenbot/internal/command"
 	"zenbot/internal/config"
+	"zenbot/internal/core"
 	"zenbot/internal/factory"
 	"zenbot/internal/model"
 	"zenbot/internal/profiling"
@@ -26,6 +27,8 @@ func TestNewAutoMoveProductionOptionsSharesOneStateAndRegistersController(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	rf := factory.ReplicaFactory{Config: cfg, Repository: &repository.DummyImpl{}, Options: replicaOptions}
+	master.SetReplicaController(core.NewManagedReplicaController(core.NewReplicaManager(cfg.Channel), newProductionReplicaConstructor(rf)))
 	if err := command.RegisterUserUtilitiesWithDirectAgent(master, nil); err != nil {
 		t.Fatal(err)
 	}

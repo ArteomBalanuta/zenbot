@@ -185,6 +185,9 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgent
 	}
 	registered := make(map[string]struct{}, len(canonicals))
 	for _, canonical := range canonicals {
+		if owner, ok := e.(common.CommandAvailability); ok && !owner.CommandAvailable(canonical) {
+			continue
+		}
 		if _, duplicate := registered[canonical]; duplicate {
 			continue
 		}

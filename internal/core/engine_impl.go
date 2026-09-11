@@ -156,7 +156,7 @@ func (e *EngineImpl) Stop() {
 }
 
 func (e *EngineImpl) reportTransportError(err error) error {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrClosed) {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return err
 	}
 	wrapped := fmt.Errorf("engine %s transport: %w", e.Channel, err)
@@ -189,30 +189,57 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 	done := make(chan struct{})
 	e.runtimeCancel, e.runtimeDone = cancel, done
 	e.runtimeMu.Unlock()
-	if err := e.Transport.Start(ctx); err != nil {
-		e.reportTransportError(err)
+	// Startup owns completion until it launches the dispatcher. A failed join
+	// must never call StopContext and wait on a worker that does not exist.
+	failStart := func(err error) error {
 		cancel()
-		e.runtimeMu.Lock()
-		e.runtimeCancel = nil
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_ = e.Transport.Close(cleanup)
 		close(done)
-		e.runtimeMu.Unlock()
-		return err
+		return e.reportTransportError(err)
+	}
+	if err := e.Transport.Start(ctx); err != nil {
+		return failStart(err)
 	}
 	if !e.joined.Swap(true) {
-		p := fmt.Sprintf(`{ "cmd": "join", "channel": "%s", "nick": "%s#%s" }`, e.Channel, e.Name, e.Password)
-		if err := e.Transport.SendText(ctx, p); err != nil {
-			_ = e.StopContext(context.Background())
-			return err
+		p, err := json.Marshal(struct {
+			Command string `json:"cmd"`
+			Channel string `json:"channel"`
+			Nick    string `json:"nick"`
+		}{Command: "join", Channel: e.Channel, Nick: e.Name + "#" + e.Password})
+		if err != nil {
+			return failStart(err)
+		}
+		if err := e.Transport.SendText(ctx, string(p)); err != nil {
+			return failStart(err)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return failStart(err)
+	}
 	go func() {
-		defer close(done)
+		var failure error
+		defer func() {
+			cancel()
+			// A failure handler may synchronously remove this engine and wait
+			// for its dispatcher. Publish completion before notifying the owner.
+			close(done)
+			if failure != nil {
+				e.reportTransportError(failure)
+			}
+		}()
 		messages := e.Transport.Messages()
+		errors := e.Transport.Errors()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg := <-messages:
+			case msg, open := <-messages:
+				if !open {
+					failure = fmt.Errorf("transport message channel closed")
+					return
+				}
 				if msg.Payload != nil {
 					messageCtx := ctx
 					if e.CommandProfiler.Enabled() {
@@ -224,10 +251,13 @@ func (e *EngineImpl) StartContext(parent context.Context) error {
 					}
 					e.DispatchMessageContext(messageCtx, string(msg.Payload))
 				}
-			case err := <-e.Transport.Errors():
-				if err != nil {
-					e.reportTransportError(err)
-					cancel()
+			case err, open := <-errors:
+				if !open {
+					failure = fmt.Errorf("transport error channel closed")
+				} else if err == nil {
+					continue
+				} else {
+					failure = err
 				}
 				return
 			}
@@ -241,7 +271,6 @@ func (e *EngineImpl) StopContext(ctx context.Context) error {
 	}
 	e.runtimeMu.Lock()
 	cancel, done := e.runtimeCancel, e.runtimeDone
-	e.runtimeCancel = nil
 	e.runtimeMu.Unlock()
 	if cancel == nil {
 		return nil
