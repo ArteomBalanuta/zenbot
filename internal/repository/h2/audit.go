@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
 )
 
 const (
@@ -80,7 +81,8 @@ func (d *Database) LogCommand(ctx context.Context, r model.CommandAuditRecord) (
 	return d.CommandAudit(ctx, r)
 }
 
-// WithTx executes fn atomically. Any error, panic, or context cancellation rolls back.
+// WithTx executes fn atomically. Callback errors and panics roll back; any
+// error returned by Commit has an unknown outcome, including cancellation.
 func (d *Database) WithTx(ctx context.Context, fn func(*sql.Tx) error) (err error) {
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -98,5 +100,8 @@ func (d *Database) WithTx(ctx context.Context, fn func(*sql.Tx) error) (err erro
 	if err = fn(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("%w: %w", repository.ErrCommitOutcomeUnknown, err)
+	}
+	return nil
 }

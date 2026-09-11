@@ -3,12 +3,37 @@ package h2
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
+)
+
+type commitErrorDriver struct{ err error }
+
+func (d commitErrorDriver) Open(string) (driver.Conn, error) {
+	return &commitErrorConn{err: d.err}, nil
+}
+
+type commitErrorConn struct{ err error }
+
+func (*commitErrorConn) Prepare(string) (driver.Stmt, error) { return nil, errors.New("unsupported") }
+func (*commitErrorConn) Close() error                        { return nil }
+func (c *commitErrorConn) Begin() (driver.Tx, error)         { return &commitErrorTx{err: c.err}, nil }
+
+type commitErrorTx struct{ err error }
+
+func (t *commitErrorTx) Commit() error { return t.err }
+func (*commitErrorTx) Rollback() error { return nil }
+
+var (
+	registerCommitErrorDriver sync.Once
+	commitDriverErr           = errors.New("commit transport failed")
 )
 
 func openTestDB(t *testing.T) *Database {
@@ -101,6 +126,29 @@ func TestWithTxRollsBackAllWrites(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("rollback left %d rows", count)
+	}
+}
+
+func TestWithTxMarksOnlyCommitFailureAsUnknownOutcome(t *testing.T) {
+	const driverName = "zenbot-h2-commit-error-test"
+	registerCommitErrorDriver.Do(func() {
+		sql.Register(driverName, commitErrorDriver{err: commitDriverErr})
+	})
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	err = (&Database{DB: db}).WithTx(context.Background(), func(*sql.Tx) error { return nil })
+	if !errors.Is(err, repository.ErrCommitOutcomeUnknown) || !errors.Is(err, commitDriverErr) {
+		t.Fatalf("commit error=%v, want unknown outcome wrapping driver error", err)
+	}
+
+	wantDefinite := errors.New("write rejected")
+	err = (&Database{DB: db}).WithTx(context.Background(), func(*sql.Tx) error { return wantDefinite })
+	if !errors.Is(err, wantDefinite) || errors.Is(err, repository.ErrCommitOutcomeUnknown) {
+		t.Fatalf("callback error=%v, want definite original error", err)
 	}
 }
 

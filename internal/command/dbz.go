@@ -11,25 +11,22 @@ import (
 
 type dbzCommand struct{ commandBase }
 
-const dbzHelpPayload = `This is a DBZ universe text based game.
-Main mechanics:
-/train, - training your char in order to level up and gain point (stats)
-/fight <nick>, - fight against a player
-/claim - claim an item that just spawned
-\u2009
-/stats - displays character stats
-/strength <int> - add a point into str
-/agility <int> - add a point into agility
-/vitality <int> - add a point into vitality
-/energy <int> - add a point into energy
+func dbzHelpPayload(prefix string) string {
+	return `DBZ game commands:
+` + prefix + `dbzregister - register your character
+` + prefix + `dbzstats - show your character stats
+` + prefix + `dspawn <enemy> - spawn an enemy
+` + prefix + `dfight <enemy> - defeat a spawned enemy and gain one level plus 5 free stats
+` + prefix + `dbzstr <amount> - spend free stats on strength
 `
+}
 
 func (c *dbzCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
 	if c.canonical == "dbzhelp" {
-		if _, err := c.engine.SendChatMessage("", dbzHelpPayload, false); err != nil {
+		if _, err := c.engine.SendChatMessage("", dbzHelpPayload(c.engine.GetPrefix()), false); err != nil {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
@@ -42,7 +39,9 @@ func (c *dbzCommand) Execute(ctx context.Context) (model.Status, error) {
 	author := c.message.Name
 	switch c.canonical {
 	case "dbzregister":
-		_ = b.DBZ.Register(ctx, author)
+		if err := b.DBZ.Register(ctx, author); err != nil {
+			return model.FAILED, err
+		}
 		if _, err := c.engine.SendChatMessage("", "Successfully registered character: "+author, false); err != nil {
 			return model.FAILED, err
 		}
@@ -63,17 +62,9 @@ func (c *dbzCommand) Execute(ctx context.Context) (model.Status, error) {
 			return model.FAILED, nil
 		}
 		n := int(parsed)
-		free, err := b.DBZ.FreeStats(ctx, author)
-		if err != nil {
+		if err := b.DBZ.AddStrength(ctx, author, n); err != nil {
 			return model.FAILED, err
 		}
-		if free <= 0 {
-			if _, err := c.engine.SendChatMessage("", "You don't have free stats. Level up!", false); err != nil {
-				return model.FAILED, err
-			}
-			return model.SUCCESSFUL, nil
-		}
-		_ = b.DBZ.AddStrength(ctx, author, n)
 		if _, err := c.engine.SendChatMessage("", strconv.Itoa(n), false); err != nil {
 			return model.FAILED, err
 		}
@@ -82,8 +73,14 @@ func (c *dbzCommand) Execute(ctx context.Context) (model.Status, error) {
 			reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"dfight enemy")
 			return model.FAILED, nil
 		}
-		b.DBZ.Fight(strings.TrimSpace(a[0]))
-		_ = b.DBZ.LevelUp(ctx, author)
+		enemy := strings.TrimSpace(a[0])
+		defeated, err := b.DBZ.Fight(ctx, author, enemy)
+		if err != nil {
+			return model.FAILED, err
+		}
+		if !defeated {
+			return model.FAILED, fmt.Errorf("DBZ enemy %q not found", enemy)
+		}
 		if _, err := c.engine.SendChatMessage("", "Gz. Enemy has been slain. Your leveled up! Granted 5 free stats!", false); err != nil {
 			return model.FAILED, err
 		}
@@ -97,9 +94,11 @@ func (c *dbzCommand) Execute(ctx context.Context) (model.Status, error) {
 		if _, err := c.engine.SendChatMessage("", "spawned enemy: "+enemy, false); err != nil {
 			return model.FAILED, err
 		}
+	default:
+		return model.FAILED, fmt.Errorf("no DBZ implementation for %q", c.canonical)
 	}
 	return model.SUCCESSFUL, nil
 }
 func (c *dbzCommand) NewInstance(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
-	return &dbzCommand{commandBase{engine: e, message: m, role: model.REGULAR, aliases: c.aliases}}
+	return &dbzCommand{commandBase{canonical: c.canonical, engine: e, message: m, role: c.role, aliases: c.aliases}}
 }

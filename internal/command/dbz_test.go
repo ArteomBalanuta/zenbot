@@ -19,6 +19,13 @@ type dbzHelpSendErrorEngine struct {
 	err error
 }
 
+type dbzPrefixEngine struct {
+	commandEngineStub
+	prefix string
+}
+
+func (e *dbzPrefixEngine) GetPrefix() string { return e.prefix }
+
 func (e *dbzHelpSendErrorEngine) SendChatMessage(string, string, bool) (string, error) {
 	return "", e.err
 }
@@ -79,24 +86,19 @@ func TestRegisterUserUtilitiesRegistersDBZHelpWithoutDBZState(t *testing.T) {
 	}
 }
 
-func TestDBZHelpIgnoresArgumentsAndPublishesExactSaturnPayload(t *testing.T) {
-	e := &commandEngineStub{}
+func TestDBZHelpUsesCurrentPrefixAndOnlyImplementedGameCommands(t *testing.T) {
+	e := &dbzPrefixEngine{prefix: "?"}
 	d, ok := commandDefinitionFor("dhelp")
 	if !ok {
 		t.Fatal("dhelp definition is missing")
 	}
 	status, err := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dhelp ignored", IsWhisper: true}).Execute(context.Background())
-	const want = `This is a DBZ universe text based game.
-Main mechanics:
-/train, - training your char in order to level up and gain point (stats)
-/fight <nick>, - fight against a player
-/claim - claim an item that just spawned
-\u2009
-/stats - displays character stats
-/strength <int> - add a point into str
-/agility <int> - add a point into agility
-/vitality <int> - add a point into vitality
-/energy <int> - add a point into energy
+	const want = `DBZ game commands:
+?dbzregister - register your character
+?dbzstats - show your character stats
+?dspawn <enemy> - spawn an enemy
+?dfight <enemy> - defeat a spawned enemy and gain one level plus 5 free stats
+?dbzstr <amount> - spend free stats on strength
 `
 	if status != model.SUCCESSFUL || err != nil {
 		t.Fatalf("status=%v err=%v", status, err)
@@ -211,9 +213,7 @@ func TestDSpawnReturnsFailedAfterSpawnWhenPublicQueueFails(t *testing.T) {
 	}
 }
 
-func TestDBZRegisterAcknowledgesSuccessWhenPersistenceFails(t *testing.T) {
-	// Regression/provenance limitation: this first run is already green because
-	// the command has always discarded the DBZ service error at its boundary.
+func TestDBZRegisterFailsWithoutAcknowledgementWhenPersistenceFails(t *testing.T) {
 	persistenceErr := errors.New("stats insert failed")
 	repo := &failingRegisterDBZRepo{err: persistenceErr}
 	e := &commandEngineStub{bundle: &service.Bundle{DBZ: &service.DBZService{Repo: repo}}}
@@ -223,17 +223,17 @@ func TestDBZRegisterAcknowledgesSuccessWhenPersistenceFails(t *testing.T) {
 	}
 
 	status, err := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dbzregister ignored", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || repo.name != "goku" {
+	if status != model.FAILED || !errors.Is(err, persistenceErr) || repo.name != "goku" {
 		t.Fatalf("status=%v err=%v registered=%q", status, err, repo.name)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "|Successfully registered character: goku|false" {
+	if len(e.chats) != 0 {
 		t.Fatalf("chats=%q", e.chats)
 	}
 }
 
 func TestDBZRegisterReturnsFailedAfterPersistenceWhenPublicSendFails(t *testing.T) {
 	queueErr := errors.New("output queue unavailable")
-	repo := &failingRegisterDBZRepo{err: errors.New("stats insert failed")}
+	repo := &failingRegisterDBZRepo{}
 	e := &dbzHelpSendErrorEngine{
 		commandEngineStub: commandEngineStub{bundle: &service.Bundle{DBZ: &service.DBZService{Repo: repo}}},
 		err:               queueErr,
@@ -258,21 +258,6 @@ func TestDBZMalformedStrengthUsesSourceUsage(t *testing.T) {
 	}
 }
 
-type freeStatsReadErrorCommandRepo struct{ commandDBZRepo }
-
-func (freeStatsReadErrorCommandRepo) FreeStats(context.Context, string) (int, bool, error) {
-	return 0, false, errors.New("read failed")
-}
-
-func TestDBZStrengthReadErrorPublishesSourceEquivalentPublicNoFreeSuccess(t *testing.T) {
-	e := &commandEngineStub{bundle: &service.Bundle{DBZ: &service.DBZService{Repo: freeStatsReadErrorCommandRepo{}}}}
-	d, _ := commandDefinitionFor("dstr")
-	status, err := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dstr 1", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 || e.chats[0] != "|You don't have free stats. Level up!|false" {
-		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
-	}
-}
-
 type writeErrorStrengthCommandRepo struct {
 	commandDBZRepo
 	strengthAdds int
@@ -283,14 +268,12 @@ func (r *writeErrorStrengthCommandRepo) AddStrength(context.Context, string, int
 	return errors.New("strength write failed")
 }
 
-// Post-implementation QA regression: the source command deliberately ignores
-// the storage write result and retains the public acknowledgement.
-func TestDBZStrengthAcknowledgesPublicAmountWhenWriteFails(t *testing.T) {
+func TestDBZStrengthFailsWithoutAcknowledgementWhenWriteFails(t *testing.T) {
 	repo := &writeErrorStrengthCommandRepo{}
 	e := &commandEngineStub{bundle: &service.Bundle{DBZ: &service.DBZService{Repo: repo}}}
 	d, _ := commandDefinitionFor("dstr")
 	status, err := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dstr 1", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || repo.strengthAdds != 1 || len(e.chats) != 1 || e.chats[0] != "|1|false" {
+	if status != model.FAILED || err == nil || repo.strengthAdds != 1 || len(e.chats) != 0 {
 		t.Fatalf("status=%v err=%v adds=%d chats=%v", status, err, repo.strengthAdds, e.chats)
 	}
 }
@@ -306,10 +289,9 @@ func (r *failingLevelUpDBZRepo) LevelUp(context.Context, string) error {
 	return r.err
 }
 
-func TestDBZFightAcknowledgesAfterLevelUpErrorAndConsumesMatchingEnemy(t *testing.T) {
-	// Regression/provenance: source-shaped command behavior already discards the
-	// level-up error; this protects that boundary.
-	repo := &failingLevelUpDBZRepo{err: errors.New("level update failed")}
+func TestDBZFightFailsWithoutAcknowledgementAndRetainsEnemyAfterLevelUpError(t *testing.T) {
+	wantErr := errors.New("level update failed")
+	repo := &failingLevelUpDBZRepo{err: wantErr}
 	dbz := &service.DBZService{Repo: repo}
 	dbz.SpawnEnemy("frieza")
 	e := &commandEngineStub{bundle: &service.Bundle{DBZ: dbz}}
@@ -319,13 +301,13 @@ func TestDBZFightAcknowledgesAfterLevelUpErrorAndConsumesMatchingEnemy(t *testin
 	}
 
 	status, err := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dfight frieza", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || repo.calls != 1 {
+	if status != model.FAILED || !errors.Is(err, wantErr) || repo.calls != 1 {
 		t.Fatalf("status=%v err=%v level-up calls=%d", status, err, repo.calls)
 	}
-	if enemies := dbz.Enemies(); len(enemies) != 0 {
-		t.Fatalf("enemies=%q, want matching enemy consumed", enemies)
+	if enemies := dbz.Enemies(); !reflect.DeepEqual(enemies, []string{"frieza"}) {
+		t.Fatalf("enemies=%q, want matching enemy retained", enemies)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "|Gz. Enemy has been slain. Your leveled up! Granted 5 free stats!|false" {
+	if len(e.chats) != 0 {
 		t.Fatalf("chats=%q", e.chats)
 	}
 }
@@ -350,5 +332,58 @@ func TestDBZFightReturnsFailedAfterEffectsWhenPublicSendFails(t *testing.T) {
 	}
 	if enemies := dbz.Enemies(); len(enemies) != 0 {
 		t.Fatalf("enemies=%q, want matching enemy consumed before send", enemies)
+	}
+}
+
+func TestDBZFightMissingEnemyFailsWithoutRewardOrAcknowledgement(t *testing.T) {
+	repo := &failingLevelUpDBZRepo{}
+	dbz := &service.DBZService{Repo: repo}
+	e := &commandEngineStub{bundle: &service.Bundle{DBZ: dbz}}
+	d, ok := commandDefinitionFor("dfight")
+	if !ok {
+		t.Fatal("dfight definition is missing")
+	}
+
+	status, err := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dfight absent"}).Execute(context.Background())
+	if status != model.FAILED || err == nil || repo.calls != 0 || len(e.chats) != 0 {
+		t.Fatalf("status=%v err=%v level-up calls=%d chats=%q", status, err, repo.calls, e.chats)
+	}
+}
+
+type missingStatsCommandRepo struct{ commandDBZRepo }
+
+func (missingStatsCommandRepo) Stats(context.Context, string) (repository.DBZStats, bool, error) {
+	return repository.DBZStats{}, false, nil
+}
+
+func TestDBZStatsMissingCharacterFailsWithoutSuccessReply(t *testing.T) {
+	e := &commandEngineStub{bundle: &service.Bundle{DBZ: &service.DBZService{Repo: missingStatsCommandRepo{}}}}
+	d, _ := commandDefinitionFor("dbzstats")
+	status, err := d.New(e, &model.ChatMessage{Name: "missing", Text: "!dbzstats"}).Execute(context.Background())
+	if status != model.FAILED || !errors.Is(err, repository.ErrDBZCharacterNotFound) || len(e.chats) != 0 {
+		t.Fatalf("status=%v err=%v chats=%q", status, err, e.chats)
+	}
+}
+
+func TestDBZConcreteClonePreservesCanonicalExecution(t *testing.T) {
+	d, ok := commandDefinitionFor("dspawn")
+	if !ok {
+		t.Fatal("dspawn definition is missing")
+	}
+	dbz := &service.DBZService{}
+	e := &commandEngineStub{bundle: &service.Bundle{DBZ: dbz}}
+	original := d.New(e, &model.ChatMessage{Name: "goku", Text: "!dspawn old"}).(*dbzCommand)
+	clone := original.NewInstance(e, &model.ChatMessage{Name: "goku", Text: "!dspawn cell"})
+	status, err := clone.Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || !reflect.DeepEqual(dbz.Enemies(), []string{"cell"}) {
+		t.Fatalf("status=%v err=%v enemies=%q", status, err, dbz.Enemies())
+	}
+}
+
+func TestDBZUnknownCanonicalFailsInsteadOfSuccessfulNoOp(t *testing.T) {
+	e := &commandEngineStub{bundle: &service.Bundle{DBZ: &service.DBZService{Repo: commandDBZRepo{}}}}
+	status, err := (&dbzCommand{commandBase: commandBase{canonical: "unknown", engine: e, message: &model.ChatMessage{Name: "goku"}}}).Execute(context.Background())
+	if status != model.FAILED || err == nil || len(e.chats) != 0 {
+		t.Fatalf("status=%v err=%v chats=%q", status, err, e.chats)
 	}
 }
