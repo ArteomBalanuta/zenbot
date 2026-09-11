@@ -25,7 +25,7 @@ func (b *masterBinding) Current() *core.EngineImpl {
 }
 
 func (b *masterBinding) Rebind(next *core.EngineImpl) {
-	if b == nil || next == nil {
+	if b == nil {
 		return
 	}
 	b.mu.Lock()

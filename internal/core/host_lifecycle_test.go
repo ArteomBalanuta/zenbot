@@ -58,14 +58,17 @@ func TestHostLifecycleDefersRestartUntilSubmittingDispatchReleases(t *testing.T)
 	}, nil)
 	defer controller.Close()
 
-	releaseDispatch := controller.BeginDispatch()
+	releaseDispatch, err := controller.BeginDispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := controller.RequestRestart(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-started:
 		t.Fatal("restart began before the submitting dispatch returned")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 
 	releaseDispatch()
@@ -98,8 +101,8 @@ func TestHostLifecycleShutdownSupersedesRestartAndIsTerminal(t *testing.T) {
 	if err := controller.RequestShutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.RequestRestart(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := controller.RequestRestart(context.Background()); err != ErrHostLifecycleTerminal {
+		t.Fatalf("terminal restart error=%v", err)
 	}
 	close(allowRestart)
 	controller.Wait()

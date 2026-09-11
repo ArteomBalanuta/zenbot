@@ -27,8 +27,11 @@ func InvokeCommand(ctx context.Context, engine Engine, command Command) (model.S
 		return model.FAILED, err
 	}
 	lifecycleDone := profiling.Measure(ctx, "command.lifecycle_gate")
-	release := beginCommandDispatch(engine)
+	release, err := BeginCommandDispatch(ctx, engine)
 	lifecycleDone()
+	if err != nil {
+		return model.FAILED, err
+	}
 	defer release()
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
@@ -52,13 +55,23 @@ func InvokeCommand(ctx context.Context, engine Engine, command Command) (model.S
 	return "", nil
 }
 
-func beginCommandDispatch(engine Engine) func() {
+// BeginCommandDispatch is the shared, nonblocking host admission boundary.
+// The returned lease must cover execution and command auditing.
+func BeginCommandDispatch(ctx context.Context, engine Engine) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if provider, ok := engine.(interface {
 		HostLifecycleController() HostLifecycleController
 	}); ok {
-		if controller, ok := provider.HostLifecycleController().(interface{ BeginDispatch() func() }); ok {
-			return controller.BeginDispatch()
+		if controller, ok := provider.HostLifecycleController().(interface {
+			BeginDispatch(context.Context) (func(), error)
+		}); ok {
+			return controller.BeginDispatch(ctx)
 		}
 	}
-	return func() {}
+	return func() {}, nil
 }

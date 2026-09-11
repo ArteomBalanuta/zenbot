@@ -71,10 +71,10 @@ func TestSharedInfoDispatchAuditStoreErrorStopsChain(t *testing.T) {
 	}
 }
 
-func (c *auditWhisperDispatchController) BeginDispatch() func() {
+func (c *auditWhisperDispatchController) BeginDispatch(context.Context) (func(), error) {
 	c.active++
 	c.acquired++
-	return func() { c.active--; c.released++ }
+	return func() { c.active--; c.released++ }, nil
 }
 func (*auditWhisperDispatchController) RequestRestart(context.Context) error  { return nil }
 func (*auditWhisperDispatchController) RequestShutdown(context.Context) error { return nil }

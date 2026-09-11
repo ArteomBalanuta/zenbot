@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -486,7 +487,7 @@ func main() {
 		e.OnlineSetListener = listener.NewOnlineSetListener(e, newAutorunCallback(c))
 		e.UserChatListener = listener.NewUserChatListenerWithChain(e, message.DefaultChainWithParticipation(roomAgent.Participation))
 		if err := command.RegisterUserUtilitiesWithDirectAgent(core.BindCredentialedRoomSnapshotMaster(e), roomAgent.DirectSubmitter); err != nil {
-			return nil, err
+			return e, err
 		}
 		return e, nil
 	}
@@ -504,37 +505,40 @@ func main() {
 		return host.StartContext(startCtx)
 	}, func(candidate any) {
 		host, ok := candidate.(*core.EngineImpl)
-		if !ok {
+		if candidate != nil && !ok {
 			return
 		}
 		binding.Rebind(host)
 		directory.RebindHost(host)
 	})
-	hostLifecycle = newProductionHostLifecycle(supervisor)
+	hostLifecycle = newProductionHostLifecycle(ctx, supervisor, func(result core.LifecycleResult) {
+		if result.Err != nil {
+			log.Printf("host lifecycle %s: %v", result.Kind, result.Err)
+		}
+	})
 	defer hostLifecycle.Close()
 	if err := supervisor.StartInitial(ctx); err != nil {
 		log.Fatal(err)
 	}
 	go runHostRecovery(ctx, transportErrors, lifecyclePolicy(c), func() bool {
 		master, ok := supervisor.Master().(*core.EngineImpl)
-		return !ok || master == nil || master.Healthy()
-	}, hostLifecycle.RequestRestart, func(err error) {
+		return ok && master != nil && master.Healthy()
+	}, func(requestCtx context.Context) error {
+		if hostLifecycle.Terminal() {
+			return nil
+		}
+		return hostLifecycle.RequestRestart(requestCtx)
+	}, func(err error) {
 		log.Printf("transport: %v", err)
 	})
 	<-ctx.Done()
+	hostLifecycle.Close()
 	stopCtx, stop := context.WithTimeout(context.Background(), 15*time.Second)
 	defer stop()
-	supervisor.SignalTeardown(func(teardownCtx context.Context) error {
+	if err := supervisor.SignalTeardown(func(teardownCtx context.Context) error {
 		roomAgent.Close()
-		var first error
-		if current := supervisor.Master(); current != nil {
-			if err := supervisor.Shutdown(teardownCtx); err != nil {
-				first = err
-			}
-		}
-		if err := manager.StopAll(teardownCtx); err != nil && first == nil {
-			first = err
-		}
-		return first
-	}, stopCtx)
+		return errors.Join(supervisor.Shutdown(teardownCtx), manager.StopAll(teardownCtx))
+	}, stopCtx); err != nil {
+		log.Printf("process teardown: %v", err)
+	}
 }

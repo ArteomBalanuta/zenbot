@@ -42,6 +42,18 @@ func TestMasterBindingSnapshotReplyUsesReboundMaster(t *testing.T) {
 	}
 }
 
+func TestMasterBindingUnbindRejectsReply(t *testing.T) {
+	old := &core.EngineImpl{OutMessageQueue: make(chan string, 1)}
+	binding := newMasterBinding(old)
+	binding.Rebind(nil)
+	if _, err := masterReplySender(binding)("alice", "reply", false); err == nil {
+		t.Fatal("reply used unavailable host")
+	}
+	if len(old.OutMessageQueue) != 0 {
+		t.Fatal("retired host received reply")
+	}
+}
+
 func TestRoomSnapshotReplySinkPreservesRequestWhisperMode(t *testing.T) {
 	type delivery struct {
 		author  string

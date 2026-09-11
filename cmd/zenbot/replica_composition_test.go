@@ -68,7 +68,7 @@ func TestProductionReplicaRespondsToLocalCommandAfterRequestEnds(t *testing.T) {
 		if err := json.Unmarshal([]byte(payload), &response); err != nil {
 			t.Fatal(err)
 		}
-		if response.Command != "chat" || response.Text != "hello room " {
+		if response.Command != "chat" || response.Text != "hello room" {
 			t.Fatalf("response=%s", payload)
 		}
 	case <-time.After(time.Second):

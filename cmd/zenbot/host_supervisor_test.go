@@ -36,7 +36,11 @@ func TestHostSupervisorRestartBuildsFreshMasterAndRebinds(t *testing.T) {
 			return &supervisorMasterFake{id: 2}, nil
 		},
 		func(context.Context, any) error { events = append(events, "start-new"); return nil },
-		func(master any) { events = append(events, "rebind") },
+		func(master any) {
+			if master != nil {
+				events = append(events, "rebind")
+			}
+		},
 	)
 	if err := s.Restart(context.Background()); err != nil {
 		t.Fatal(err)
@@ -78,12 +82,19 @@ func TestMainProductionHostLifecycleWiresSupervisorCallbacks(t *testing.T) {
 			return &supervisorMasterFake{id: 2}, nil
 		},
 		func(context.Context, any) error { events = append(events, "start-new"); return nil },
-		func(any) { events = append(events, "rebind") },
+		func(master any) {
+			if master != nil {
+				events = append(events, "rebind")
+			}
+		},
 	)
-	controller := newProductionHostLifecycle(supervisor)
+	controller := newProductionHostLifecycle(context.Background(), supervisor, nil)
 	defer controller.Close()
 
-	releaseDispatch := controller.BeginDispatch()
+	releaseDispatch, err := controller.BeginDispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := controller.RequestRestart(context.Background()); err != nil {
 		t.Fatal(err)
 	}

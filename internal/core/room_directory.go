@@ -36,7 +36,7 @@ func NewEngineRoomUserDirectory(host *EngineImpl, replicas *ReplicaManager) *Eng
 }
 
 func (d *EngineRoomUserDirectory) RebindHost(next *EngineImpl) {
-	if d == nil || next == nil {
+	if d == nil {
 		return
 	}
 	if d.binding == nil {
@@ -59,10 +59,10 @@ func (d EngineRoomUserDirectory) currentHost() *EngineImpl {
 func (d EngineRoomUserDirectory) FindRoomUsers(room string) (RoomUserSnapshot, bool) {
 	lookup := strings.TrimSpace(room)
 	host := d.currentHost()
-	if lookup == "" || host == nil {
+	if lookup == "" {
 		return RoomUserSnapshot{}, false
 	}
-	if strings.EqualFold(lookup, host.GetChannel()) {
+	if host != nil && strings.EqualFold(lookup, host.GetChannel()) {
 		return roomUserSnapshot(host), true
 	}
 	if d.Replicas == nil {

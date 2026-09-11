@@ -13,13 +13,13 @@ type invocationLease struct {
 	onBegin                    func()
 }
 
-func (l *invocationLease) BeginDispatch() func() {
+func (l *invocationLease) BeginDispatch(context.Context) (func(), error) {
 	l.active++
 	l.acquired++
 	if l.onBegin != nil {
 		l.onBegin()
 	}
-	return func() { l.active--; l.released++ }
+	return func() { l.active--; l.released++ }, nil
 }
 func (*invocationLease) RequestRestart(context.Context) error  { return nil }
 func (*invocationLease) RequestShutdown(context.Context) error { return nil }

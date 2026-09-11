@@ -54,8 +54,8 @@ type dispatchAwareFailingLifecycleController struct {
 	failure error
 }
 
-func (c *dispatchAwareFailingLifecycleController) BeginDispatch() func() {
-	return c.worker.BeginDispatch()
+func (c *dispatchAwareFailingLifecycleController) BeginDispatch(ctx context.Context) (func(), error) {
+	return c.worker.BeginDispatch(ctx)
 }
 
 func (c *dispatchAwareFailingLifecycleController) RequestRestart(ctx context.Context) error {

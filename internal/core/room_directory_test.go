@@ -31,6 +31,23 @@ func TestEngineRoomUserDirectoryRebindsHostWithoutReplacingPersistentDirectory(t
 	}
 }
 
+func TestEngineRoomUserDirectoryUnbindPreservesReplicaDiscovery(t *testing.T) {
+	host := roomDirectoryEngine("host", "old")
+	replica := roomDirectoryEngine("replica", "alice")
+	manager := NewReplicaManager(host.Channel)
+	if err := manager.Add(replica.Channel, managedReplica{replica}); err != nil {
+		t.Fatal(err)
+	}
+	directory := NewEngineRoomUserDirectory(host, manager)
+	directory.RebindHost(nil)
+	if _, ok := directory.FindRoomUsers("host"); ok {
+		t.Fatal("unbound host remains visible")
+	}
+	if snapshot, ok := directory.FindRoomUsers("replica"); !ok || len(snapshot.Users) != 1 || snapshot.Users[0] != "alice" {
+		t.Fatalf("replica hidden: %+v %v", snapshot, ok)
+	}
+}
+
 func TestEngineRoomUserDirectoryFindsManagedHostAndReplicaSnapshots(t *testing.T) {
 	host := roomDirectoryEngine("Lounge", "host")
 	replica := roomDirectoryEngine("Games", "replica")
