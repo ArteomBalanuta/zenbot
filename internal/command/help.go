@@ -85,7 +85,7 @@ const moderatorCommands = " activity <trip>   - shows recent activity pa
 	" auth,authorize <trip> - authorizes a trip on the room\n" +
 	" deauth <trip>   - removes trip authorization\n" +
 	" kick,k,out <nick>  - kicks a user from the room\n" +
-	" nuke <room>   - requests permanent bans for every active user in a room, then locks it\n" +
+	" nuke <room>   - requests permanent bans for every active user in a room, then requests a room lock\n" +
 	" messages,lastmessages <trip> <count> - shows recent messages for a trip\n" +
 	" lock,lockroom <on|off> - locks or unlocks the current room\n" +
 	" overflow,shoot <nick> - sends the selected overflow action\n" +

@@ -73,7 +73,7 @@ func TestRegisteredHelpDescribesOnlySupportedTruthfulRoutes(t *testing.T) {
 		"restart,reload,re- submits a request to restart this host only; completion is unconfirmed",
 		"shutdown,exit,quit- submits a request to shut down this host only; completion is unconfirmed",
 		"move,recover,heal,resurrect <nick> <source> <destination>- requests moving a user between rooms",
-		"nuke <room>- requests permanent bans for every active user in a room, then locks it",
+		"nuke <room>- requests permanent bans for every active user in a room, then requests a room lock",
 	} {
 		if !strings.Contains(logical, truthful) {
 			t.Errorf("help is missing truthful route %q", truthful)
