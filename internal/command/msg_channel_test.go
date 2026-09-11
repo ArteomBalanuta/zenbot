@@ -117,7 +117,7 @@ func TestMsgChannelRemoteRequest(t *testing.T) {
 		t.Fatalf("requests=%d, want 1", len(engine.requests))
 	}
 	request := engine.requests[0]
-	if request.WorkflowID != "0123456789abcdef" || request.SourceChannel != "programming" || request.TargetChannel != "other" || !request.Whisper || request.Author != "alice" || request.ReplyMessage == "" {
+	if request.WorkflowID != "0123456789abcdef" || request.SourceChannel != "programming" || request.TargetChannel != "other?" || !request.Whisper || request.Author != "alice" || request.ReplyMessage == "" {
 		t.Fatalf("request=%+v", request)
 	}
 	if request.RemoteMessage != "image ![](https://example.test/image.png)\\n anonymous mail from: ?programming" {
@@ -232,9 +232,9 @@ func TestMsgChannelLocalDelivery(t *testing.T) {
 			want:  "alice |anonymous mail from: ?programming message: test message|false",
 		},
 		{
-			name:    "msgroom removes every question mark and preserves whisper",
+			name:    "msgroom removes one leading room marker and preserves whisper",
 			alias:   "msgroom",
-			text:    "!msgroom ?pro?gramming?   hello   world   ",
+			text:    "!msgroom ?programming   hello   world   ",
 			want:    "alice |anonymous mail from: ?programming message: hello   world|true",
 			whisper: true,
 		},

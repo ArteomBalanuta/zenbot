@@ -116,7 +116,7 @@ func TestNotesParityListPurgeClearAndInvalidArguments(t *testing.T) {
 		if got := executeNotesParityCommand(t, e, "notes", "trip", " "+arg); got != model.FAILED {
 			t.Fatalf("%s status=%s", arg, got)
 		}
-		if len(e.chats) != 0 {
+		if len(e.chats) != 1 || e.chats[0] != "alice|Usage: !notes [purge|clear]|false" {
 			t.Fatalf("%s chats=%q", arg, e.chats)
 		}
 		listed, err := e.bundle.Notes.List(context.Background(), "trip")

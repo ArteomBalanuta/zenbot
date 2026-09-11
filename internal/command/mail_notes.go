@@ -99,8 +99,15 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e := ctx.Err(); e != nil {
 		return model.FAILED, e
 	}
-	if c.message.Trip == "" {
-		if err := replyContext(ctx, &c.commandBase, "\\n Set your trip first. Example: !notes"); err != nil {
+	a := args(c.message)
+	if len(a) > 1 || (len(a) == 1 && a[0] != "purge" && a[0] != "clear") {
+		if err := replyContext(ctx, &c.commandBase, "Usage: "+c.engine.GetPrefix()+"notes [purge|clear]"); err != nil {
+			return model.FAILED, err
+		}
+		return model.FAILED, nil
+	}
+	if strings.TrimSpace(c.message.Trip) == "" {
+		if err := replyContext(ctx, &c.commandBase, "\\n Set your trip first. Example: "+c.engine.GetPrefix()+"notes"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
@@ -109,8 +116,7 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if b == nil || b.Notes == nil {
 		return model.FAILED, fmt.Errorf("note service unavailable")
 	}
-	a := args(c.message)
-	if len(a) > 0 && (a[0] == "purge" || a[0] == "clear") {
+	if len(a) == 1 {
 		if e := b.Notes.Clear(ctx, c.message.Trip); e != nil {
 			return model.FAILED, e
 		}
@@ -118,9 +124,6 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
-	}
-	if len(a) > 0 {
-		return model.FAILED, nil
 	}
 	ns, e := b.Notes.List(ctx, c.message.Trip)
 	if e != nil {

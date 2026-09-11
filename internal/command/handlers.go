@@ -106,6 +106,15 @@ func args(m *model.ChatMessage) []string {
 	}
 	return nil
 }
+
+// rawRoomSelector removes only the optional leading room-link marker. Room
+// names are otherwise source-owned and remain byte-for-byte unchanged.
+func rawRoomSelector(raw string) (string, bool) {
+	room := strings.TrimSpace(raw)
+	room = strings.TrimPrefix(room, "?")
+	return room, room != ""
+}
+
 func reply(c *commandBase, text string) error {
 	_, err := c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper")
 	return err
@@ -140,18 +149,24 @@ func (c *afkCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if c.message.Trip == "" {
+	if strings.TrimSpace(c.message.Trip) == "" {
 		if err := replyContext(ctx, &c.commandBase, "Set your trip in order to use this command"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	reason := commandBody(c.message)
-	for u := range *c.engine.GetActiveUsers() {
-		if u.Trip == c.message.Trip {
-			c.engine.AddAfkUser(u, reason)
-		}
+	caller := c.engine.GetActiveUserByName(c.message.Name)
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
 	}
+	if caller == nil || caller.Trip != c.message.Trip || !strings.EqualFold(caller.Name, strings.TrimSpace(c.message.Name)) {
+		if err := replyContext(ctx, &c.commandBase, "Unable to verify the active caller."); err != nil {
+			return model.FAILED, err
+		}
+		return model.FAILED, nil
+	}
+	reason := commandBody(c.message)
+	c.engine.AddAfkUser(caller, reason)
 	if err := replyContext(ctx, &c.commandBase, " is afk"); err != nil {
 		return model.FAILED, err
 	}
@@ -218,7 +233,19 @@ func (c *listCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.FAILED, nil
 	}
-	channel := strings.TrimSpace(a[0])
+	if len(a) != 1 {
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"list programming"); err != nil {
+			return model.FAILED, err
+		}
+		return model.FAILED, nil
+	}
+	channel, ok := rawRoomSelector(a[0])
+	if !ok {
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"list programming"); err != nil {
+			return model.FAILED, err
+		}
+		return model.FAILED, nil
+	}
 	if channel != "" && channel != c.engine.GetChannel() {
 		submitter, ok := c.engine.(common.CredentialedRoomSnapshotSubmitter)
 		if !ok {

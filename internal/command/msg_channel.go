@@ -26,8 +26,8 @@ func (c *msgChannelCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.FAILED, nil
 	}
-	room := strings.TrimSpace(strings.ReplaceAll(target, "?", ""))
-	if room == "" {
+	room, ok := rawRoomSelector(target)
+	if !ok {
 		if err := replyContext(ctx, &c.commandBase, "Room name cannot be blank."); err != nil {
 			return model.FAILED, err
 		}
