@@ -216,7 +216,7 @@ func TestAgentCommandGatewayPrivateObservationFollowsTrustedCallerVisibility(t *
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			engine := openNotesParityEngine(t)
-			if err := engine.bundle.Notes.Save("trip", secret); err != nil {
+			if err := engine.bundle.Notes.Save(context.Background(), "trip", secret); err != nil {
 				t.Fatal(err)
 			}
 			caller, err := api.NewContext("programming", "alice", "trip", "", test.callerWhisper, []string{"alice"})

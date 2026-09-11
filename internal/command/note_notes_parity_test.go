@@ -43,7 +43,7 @@ func TestNoteAndSaveParityAliasesAndTripBoundary(t *testing.T) {
 			t.Fatalf("%s chats=%q", alias, e.chats)
 		}
 	}
-	listed, err := e.bundle.Notes.List("trip")
+	listed, err := e.bundle.Notes.List(context.Background(), "trip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestNoteAndSaveParityAliasesAndTripBoundary(t *testing.T) {
 	if len(e.chats) != 1 || e.chats[0] != "alice|Set your trip before saving a note.|false" {
 		t.Fatalf("no-trip chats=%q", e.chats)
 	}
-	listed, err = e.bundle.Notes.List("")
+	listed, err = e.bundle.Notes.List(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestNoteAndSaveParityAliasesAndTripBoundary(t *testing.T) {
 
 func TestNotesParityListPurgeClearAndInvalidArguments(t *testing.T) {
 	e := openNotesParityEngine(t)
-	if err := e.bundle.Notes.Save("trip", "quote \"line\nbackslash\\"); err != nil {
+	if err := e.bundle.Notes.Save(context.Background(), "trip", "quote \"line\nbackslash\\"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,7 +106,7 @@ func TestNotesParityListPurgeClearAndInvalidArguments(t *testing.T) {
 		if len(e.chats) != 1 || e.chats[0] != "alice|'s notes has been deleted|false" {
 			t.Fatalf("%s chats=%q", alias, e.chats)
 		}
-		if err := e.bundle.Notes.Save("trip", "again"); err != nil {
+		if err := e.bundle.Notes.Save(context.Background(), "trip", "again"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -119,7 +119,7 @@ func TestNotesParityListPurgeClearAndInvalidArguments(t *testing.T) {
 		if len(e.chats) != 0 {
 			t.Fatalf("%s chats=%q", arg, e.chats)
 		}
-		listed, err := e.bundle.Notes.List("trip")
+		listed, err := e.bundle.Notes.List(context.Background(), "trip")
 		if err != nil || len(listed) != 1 || listed[0] != "again" {
 			t.Fatalf("%s changed notes=%q err=%v", arg, listed, err)
 		}

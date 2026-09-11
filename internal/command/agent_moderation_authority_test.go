@@ -44,7 +44,7 @@ func TestAgentCommandGatewayModerationReviewRejectsCommandsOutsideMatchingMute(t
 			ShadowBans: &service.ShadowBanService{Repo: shadowBans},
 		},
 	}}
-	if err := engine.bundle.Notes.Save("creator-trip", "creator private note"); err != nil {
+	if err := engine.bundle.Notes.Save(context.Background(), "creator-trip", "creator private note"); err != nil {
 		t.Fatal(err)
 	}
 	caller, err := api.NewContextWithModerationTarget(
@@ -77,7 +77,7 @@ func TestAgentCommandGatewayModerationReviewRejectsCommandsOutsideMatchingMute(t
 	if len(engine.raws) != 0 || len(engine.chats) != 0 || len(identity.registered) != 0 || len(shadowBans.persisted) != 0 {
 		t.Fatalf("review commands mutated state: raws=%#v chats=%#v registered=%#v shadowBans=%#v", engine.raws, engine.chats, identity.registered, shadowBans.persisted)
 	}
-	notes, err := engine.bundle.Notes.List("creator-trip")
+	notes, err := engine.bundle.Notes.List(context.Background(), "creator-trip")
 	if err != nil || len(notes) != 1 || notes[0] != "creator private note" {
 		t.Fatalf("creator notes changed: notes=%#v err=%v", notes, err)
 	}

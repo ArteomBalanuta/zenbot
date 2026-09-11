@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"zenbot/internal/model"
 	"zenbot/internal/service"
 	"zenbot/internal/testutil/h2fixture"
 )
@@ -18,7 +19,7 @@ func TestUtilityAuditPrivateMailCannotBeClaimedByNickname(t *testing.T) {
 	for _, claimant := range []struct{ name, trip string }{
 		{"AbC123", "attacker"}, {"someone", "abc123"}, {"AbC123", ""}, {"AbC123", "   "}, {"someone", "AbC12"}, {"someone", "AbC123,other"},
 	} {
-		pending, err := mail.Pending(claimant.name, claimant.trip)
+		pending, err := mail.Pending(context.Background(), claimant.name, claimant.trip)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,14 +27,14 @@ func TestUtilityAuditPrivateMailCannotBeClaimedByNickname(t *testing.T) {
 			t.Errorf("private mail leaked to name=%q trip=%q: %+v", claimant.name, claimant.trip, pending)
 		}
 	}
-	pending, err := mail.Pending("new-nickname", "AbC123")
+	pending, err := mail.Pending(context.Background(), "new-nickname", "AbC123")
 	if err != nil || len(pending) != 1 || pending[0].Message != "secret" || !pending[0].IsWhisper {
 		t.Fatalf("exact owner pending=%+v err=%v", pending, err)
 	}
-	if err := mail.MarkDelivered(pending[0].ID); err != nil {
+	if err := mail.DeliverPending(context.Background(), "new-nickname", "AbC123", func(context.Context, model.Mail) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = mail.Pending("new-nickname", "AbC123")
+	pending, err = mail.Pending(context.Background(), "new-nickname", "AbC123")
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("delivered mail pending=%+v err=%v", pending, err)
 	}
@@ -54,12 +55,12 @@ func TestPrivateMailQueueResolvesExactTripBeforeNickname(t *testing.T) {
 	for _, tc := range []struct{ receiver, want string }{
 		{"AbC123", "AbC123"}, {"abc123", "abc123"}, {" @oWnEr ", "AbC123"},
 	} {
-		got, err := mail.QueueResolved("secret", "sender#trip", tc.receiver, true)
+		got, err := mail.QueueResolved(context.Background(), "secret", "sender#trip", tc.receiver, true)
 		if err != nil || got != tc.want {
 			t.Errorf("receiver=%q resolved=%q want=%q err=%v", tc.receiver, got, tc.want, err)
 		}
 	}
-	if _, err := mail.QueueResolved("secret", "sender#trip", "LOWEROWNERTRIP", true); err == nil {
+	if _, err := mail.QueueResolved(context.Background(), "secret", "sender#trip", "LOWEROWNERTRIP", true); err == nil {
 		t.Fatal("unknown recipient queued mail")
 	}
 }
@@ -68,10 +69,10 @@ func TestMailPreservesExplicitPublicVisibility(t *testing.T) {
 	db := openMailGroupCDB(t)
 	seedMailRecipient(t, db)
 	mail := &service.MailService{DB: db}
-	if err := mail.Queue("public greeting", "sender#trip", "merc", false); err != nil {
+	if err := mail.Queue(context.Background(), "public greeting", "sender#trip", "merc", false); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := mail.Pending("nickname", "trip-a")
+	pending, err := mail.Pending(context.Background(), "nickname", "trip-a")
 	if err != nil || len(pending) != 1 || pending[0].IsWhisper || pending[0].Message != "public greeting " {
 		t.Fatalf("public pending=%+v err=%v", pending, err)
 	}

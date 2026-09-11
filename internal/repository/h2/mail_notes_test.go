@@ -19,7 +19,7 @@ func TestMailAndNotesPersistenceParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &service.MailService{DB: d.DB}
-	if err := m.Queue("hello", "alice#src", "@merc", true); err != nil {
+	if err := m.Queue(context.Background(), "hello", "alice#src", "@merc", true); err != nil {
 		t.Fatal(err)
 	}
 	var receiver, message, status, whisper string
@@ -30,17 +30,17 @@ func TestMailAndNotesPersistenceParity(t *testing.T) {
 		t.Fatalf("mail=%q %q %q %q", receiver, message, status, whisper)
 	}
 	n := &service.NoteService{DB: d.DB}
-	if err := n.Save("trip-a", `quote "x"`); err != nil {
+	if err := n.Save(context.Background(), "trip-a", `quote "x"`); err != nil {
 		t.Fatal(err)
 	}
-	got, err := n.List("trip-a")
+	got, err := n.List(context.Background(), "trip-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0] != `quote \"x\"` {
 		t.Fatalf("notes=%v", got)
 	}
-	if err := n.Clear("trip-a"); err != nil {
+	if err := n.Clear(context.Background(), "trip-a"); err != nil {
 		t.Fatal(err)
 	}
 	var count int

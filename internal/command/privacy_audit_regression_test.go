@@ -21,7 +21,7 @@ func (e *privateNotesSendErrorEngine) SendChatMessage(string, string, bool) (str
 
 func TestUtilityAuditNotesArePrivate(t *testing.T) {
 	e := openNotesParityEngine(t)
-	if err := e.bundle.Notes.Save("trip", "private secret"); err != nil {
+	if err := e.bundle.Notes.Save(context.Background(), "trip", "private secret"); err != nil {
 		t.Fatal(err)
 	}
 	d, _ := commandDefinitionFor("notes")
@@ -39,7 +39,7 @@ func TestUtilityAuditNotesArePrivate(t *testing.T) {
 
 func TestPrivateNotesDeliveryFailureReturnsError(t *testing.T) {
 	base := openNotesParityEngine(t)
-	if err := base.bundle.Notes.Save("trip", "private secret"); err != nil {
+	if err := base.bundle.Notes.Save(context.Background(), "trip", "private secret"); err != nil {
 		t.Fatal(err)
 	}
 	wantErr := errors.New("whisper failed")
@@ -87,8 +87,13 @@ func TestPrivateMailCommandQueuesWhispersFromPublicRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(e.chats) != 1 || !strings.HasPrefix(e.chats[0], "recipient|") || !strings.Contains(e.chats[0], "private secret") || !strings.HasSuffix(e.chats[0], "|true") {
+	if len(e.chats) != 3 {
 		t.Fatalf("private delivery: %q", e.chats)
+	}
+	for _, chat := range e.chats {
+		if !strings.HasPrefix(chat, "recipient|") || !strings.Contains(chat, "private secret") || !strings.HasSuffix(chat, "|true") {
+			t.Fatalf("private delivery exposed recipient or payload: %q", chat)
+		}
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM mail WHERE status='DELIVERED'`).Scan(&count); err != nil {
 		t.Fatal(err)

@@ -1,9 +1,11 @@
 package service_test
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
+	"zenbot/internal/model"
 	"zenbot/internal/service"
 	"zenbot/internal/testutil/h2fixture"
 )
@@ -32,7 +34,7 @@ func TestMailGroupCQueueSerializesResolvedTripsAndEscapedPayload(t *testing.T) {
 	db := openMailGroupCDB(t)
 	seedMailRecipient(t, db)
 
-	if err := (&service.MailService{DB: db}).Queue("quote \"x\"\nline", "alice#origin", " @mErC ", true); err != nil {
+	if err := (&service.MailService{DB: db}).Queue(context.Background(), "quote \"x\"\nline", "alice#origin", " @mErC ", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,11 +51,11 @@ func TestMailGroupCQueueSerializesResolvedTripsAndEscapedPayload(t *testing.T) {
 func TestMailGroupCQueueReturnsFailedWrite(t *testing.T) {
 	db := openMailGroupCDB(t)
 	seedMailRecipient(t, db)
-	if _, err := db.Exec("DROP TABLE mail"); err != nil {
+	if _, err := db.Exec("DROP TABLE mail CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := (&service.MailService{DB: db}).Queue("must be persisted", "alice#origin", "merc", true); err == nil {
+	if err := (&service.MailService{DB: db}).Queue(context.Background(), "must be persisted", "alice#origin", "merc", true); err == nil {
 		t.Fatal("Queue succeeded after the mail table was dropped")
 	}
 }
@@ -63,11 +65,11 @@ func TestMailGroupCQueuedMailIsPendingUntilDelivered(t *testing.T) {
 	seedMailRecipient(t, db)
 	mail := &service.MailService{DB: db}
 
-	if err := mail.Queue("status update", "alice#origin", "@merc", true); err != nil {
+	if err := mail.Queue(context.Background(), "status update", "alice#origin", "@merc", true); err != nil {
 		t.Fatal(err)
 	}
 
-	pending, err := mail.Pending("MERC", "trip-a")
+	pending, err := mail.Pending(context.Background(), "MERC", "trip-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +81,11 @@ func TestMailGroupCQueuedMailIsPendingUntilDelivered(t *testing.T) {
 		t.Fatalf("pending mail = %+v", got)
 	}
 
-	if err := mail.MarkDelivered(got.ID); err != nil {
+	if err := mail.DeliverPending(context.Background(), "merc", "trip-a", func(context.Context, model.Mail) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 
-	pending, err = mail.Pending("merc", "trip-a")
+	pending, err = mail.Pending(context.Background(), "merc", "trip-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +97,7 @@ func TestMailGroupCQueuedMailIsPendingUntilDelivered(t *testing.T) {
 	if err := db.QueryRow("SELECT status FROM mail WHERE id = ?", got.ID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != "DELIVERED" {
-		t.Fatalf("mail status = %q, want DELIVERED", status)
+	if status != "PENDING" {
+		t.Fatalf("mail status = %q, want PENDING until the other recipient accepts", status)
 	}
 }

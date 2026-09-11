@@ -2,10 +2,12 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
+	"zenbot/internal/service"
 )
 
 type mailCommand struct{ commandBase }
@@ -23,11 +25,11 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 	if b == nil || b.Mail == nil {
 		return model.FAILED, fmt.Errorf("mail service unavailable")
 	}
-	receivers, e := b.Mail.QueueResolved(strings.Join(a[1:], " "), c.message.Name+"#"+c.message.Trip, a[0], true)
+	receivers, e := b.Mail.QueueResolved(ctx, strings.Join(a[1:], " "), c.message.Name+"#"+c.message.Trip, a[0], true)
 	if e != nil {
-		if e.Error() == "receiver cannot be blank" {
+		if errors.Is(e, service.ErrMailReceiverBlank) {
 			reply(&c.commandBase, "Receiver cannot be blank.")
-		} else if e.Error() == "user not registered" {
+		} else if errors.Is(e, service.ErrMailRecipientUnregistered) {
 			users, listErr := b.Mail.SaturnRegisteredUsers(ctx)
 			if listErr != nil {
 				return model.FAILED, listErr
@@ -69,7 +71,7 @@ func (c *noteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if b == nil || b.Notes == nil {
 		return model.FAILED, fmt.Errorf("note service unavailable")
 	}
-	if e := b.Notes.Save(c.message.Trip, strings.Join(a, " ")); e != nil {
+	if e := b.Notes.Save(ctx, c.message.Trip, strings.Join(a, " ")); e != nil {
 		return model.FAILED, e
 	}
 	reply(&c.commandBase, "note successfully saved!")
@@ -92,7 +94,7 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) > 0 && (a[0] == "purge" || a[0] == "clear") {
-		if e := b.Notes.Clear(c.message.Trip); e != nil {
+		if e := b.Notes.Clear(ctx, c.message.Trip); e != nil {
 			return model.FAILED, e
 		}
 		reply(&c.commandBase, "'s notes has been deleted")
@@ -101,7 +103,7 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if len(a) > 0 {
 		return model.FAILED, nil
 	}
-	ns, e := b.Notes.List(c.message.Trip)
+	ns, e := b.Notes.List(ctx, c.message.Trip)
 	if e != nil {
 		return model.FAILED, e
 	}

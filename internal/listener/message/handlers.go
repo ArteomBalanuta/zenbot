@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -69,48 +70,20 @@ func (LogChatMessage) Handle(_ context.Context, c *Context) (bool, error) {
 
 type DeliverPendingMail struct{}
 
-func (DeliverPendingMail) Handle(_ context.Context, c *Context) (bool, error) {
+func (DeliverPendingMail) Handle(ctx context.Context, c *Context) (bool, error) {
 	b := serviceBundle(c.Engine)
 	if b == nil || b.Mail == nil {
 		return true, nil
 	}
-	mails, err := b.Mail.Pending(c.Message.Name, c.Message.Trip)
-	if err != nil {
-		return true, err
-	}
-	var whisper, public []model.Mail
-	for _, m := range mails {
-		if m.IsWhisper {
-			whisper = append(whisper, m)
-		} else {
-			public = append(public, m)
+	err := b.Mail.DeliverPending(ctx, c.Message.Name, c.Message.Trip, func(ctx context.Context, m model.Mail) error {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(service.ErrMailSendNotStarted, err)
 		}
-	}
-	format := func(ms []model.Mail) string {
-		var out string
-		for _, m := range ms {
-			out += time.UnixMilli(m.CreatedOn).UTC().Format(time.RFC1123) + ".\\n" + m.Owner + ": " + m.Message + "\\n &nbsp; \\n"
-		}
-		return out
-	}
-	if len(whisper) > 0 {
-		_, err = c.Engine.SendChatMessage(c.Message.Name, " new mail: \\n "+format(whisper), true)
-		if err != nil {
-			return true, err
-		}
-	}
-	if len(public) > 0 {
-		_, err = c.Engine.SendChatMessage(c.Message.Name, " new mail: \\n "+format(public), false)
-		if err != nil {
-			return true, err
-		}
-	}
-	for _, m := range mails {
-		if err = b.Mail.MarkDelivered(m.ID); err != nil {
-			return true, err
-		}
-	}
-	return true, nil
+		text := time.UnixMilli(m.CreatedOn).UTC().Format(time.RFC1123) + ".\\n" + m.Owner + ": " + m.Message + "\\n &nbsp; \\n"
+		_, err := c.Engine.SendChatMessage(c.Message.Name, " new mail: \\n "+text, m.IsWhisper)
+		return err
+	})
+	return true, err
 }
 
 func serviceBundle(e common.Engine) *service.Bundle {
