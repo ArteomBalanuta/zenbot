@@ -20,7 +20,7 @@ func TestMoveFromServingRoomPrefersExactManagedReplicaThenHost(t *testing.T) {
 	if !handled || err != nil {
 		t.Fatalf("handled=%t err=%v", handled, err)
 	}
-	if got := <-replica.OutMessageQueue; got != `{"cmd":"kick","nick":"Alice","to":"destination"}` {
+	if got := <-replica.OutMessageQueue; got != `{"cmd":"kick","nick":"@Alice","to":"destination"}` {
 		t.Fatalf("replica payload=%q", got)
 	}
 	if len(host.OutMessageQueue) != 0 {

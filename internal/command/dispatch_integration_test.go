@@ -54,6 +54,7 @@ func TestRegisterUserUtilitiesDispatchesEveryAliasThroughChatListener(t *testing
 func TestRegisterUserUtilitiesDispatchesModerationAliases(t *testing.T) {
 	engine := &commandEngineStub{users: map[string]*model.User{
 		"alice": {Name: "alice", Hash: "hash"},
+		"merc":  {Name: "merc"},
 	}}
 	if err := RegisterUserUtilities(engine); err != nil {
 		t.Fatal(err)

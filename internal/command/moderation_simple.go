@@ -6,7 +6,6 @@ import (
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
-	"zenbot/internal/util"
 )
 
 func firstModerationArgument(message *model.ChatMessage) (string, bool) {
@@ -65,28 +64,34 @@ func (c *simpleBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	target, ok := firstModerationArgument(c.message)
-	if !ok {
+	arguments := args(c.message)
+	if len(arguments) != 1 {
 		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"ban merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	normalized, err := util.NormalizeNickTarget(&target)
+	target, err := activeModerationTarget(c.engine, arguments[0])
 	if err != nil {
 		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"ban merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
+	}
+	if target == nil {
+		return model.FAILED, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
 	}
 	operations, err := moderationOperations(c.engine)
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err = operations.BanNick(ctx, common.NickTarget(normalized)); err != nil {
+	if err = operations.BanNick(ctx, common.NickTarget(target.Name)); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, normalized+" has been banned"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, target.Name+" has been banned"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

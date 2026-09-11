@@ -16,10 +16,10 @@ func TestRawModerationOperationsEmitExactSaturnPayloads(t *testing.T) {
 		run  func(context.Context) error
 		want string
 	}{
-		{"ban normalizes nick", func(ctx context.Context) error { return engine.BanNick(ctx, common.NickTarget(" @raider ")) }, `{"cmd":"ban","nick":"raider"}`},
-		{"ban JSON-escapes normalized nick", func(ctx context.Context) error {
-			return engine.BanNick(ctx, common.NickTarget(" @raid\"er\\path "))
-		}, `{"cmd":"ban","nick":"raid\"er\\path"}`},
+		{"ban preserves ordinary nick", func(ctx context.Context) error { return engine.BanNick(ctx, common.NickTarget("raider")) }, `{"cmd":"ban","nick":"raider"}`},
+		{"ban JSON-escapes canonical nick", func(ctx context.Context) error {
+			return engine.BanNick(ctx, common.NickTarget(`@raid"er\path`))
+		}, `{"cmd":"ban","nick":"@raid\"er\\path"}`},
 		{"unban preserves hash", func(ctx context.Context) error { return engine.UnbanHash(ctx, common.BanHash("hash value")) }, `{"cmd":"unban","hash":"hash value"}`},
 		{"unban JSON-escapes raw hash", func(ctx context.Context) error {
 			return engine.UnbanHash(ctx, common.BanHash("hash\"line\nbreak"))
@@ -31,19 +31,19 @@ func TestRawModerationOperationsEmitExactSaturnPayloads(t *testing.T) {
 		{"disable captcha", func(ctx context.Context) error { return engine.DisableCaptcha(ctx) }, `{"cmd":"disablecaptcha"}`},
 		{"authorize trip", func(ctx context.Context) error { return engine.AuthorizeTrip(ctx, common.Trip("trip\"quoted")) }, `{"cmd":"authtrip","trip":"trip\"quoted"}`},
 		{"deauthorize trip", func(ctx context.Context) error { return engine.DeauthorizeTrip(ctx, common.Trip("trip")) }, `{"cmd":"deauthtrip","trip":"trip"}`},
-		{"mute normalizes nick", func(ctx context.Context) error { return engine.MuteNick(ctx, common.NickTarget(" @raider ")) }, `{"cmd":"mute","nick":"raider"}`},
+		{"mute preserves marker nick", func(ctx context.Context) error { return engine.MuteNick(ctx, common.NickTarget("@raider")) }, `{"cmd":"mute","nick":"@raider"}`},
 		{"unmute preserves hash", func(ctx context.Context) error { return engine.UnmuteHash(ctx, common.BanHash("hash\nvalue")) }, `{"cmd":"unmute","hash":"hash\nvalue"}`},
-		{"force flair normalizes nick", func(ctx context.Context) error {
-			return engine.ForceFlair(ctx, common.NickTarget(" @raider "), common.Flair("badge\"x"))
-		}, `{"cmd":"forceflair","nick":"raider","flair":"badge\"x"}`},
-		{"force color normalizes nick", func(ctx context.Context) error {
-			return engine.ForceColor(ctx, common.NickTarget(" @raider "), common.Color("#00ff00"))
-		}, `{"cmd":"forcecolor","nick":"raider","color":"#00ff00"}`},
-		{"kick normalizes nick", func(ctx context.Context) error { return engine.KickNick(ctx, common.NickTarget(" @raider ")) }, `{"cmd":"kick","nick":"raider"}`},
-		{"kick to normalizes nick", func(ctx context.Context) error {
-			return engine.KickNickTo(ctx, common.NickTarget(" @raider "), common.Channel("lobby"))
-		}, `{"cmd":"kick","nick":"raider","to":"lobby"}`},
-		{"overflow normalizes nick", func(ctx context.Context) error { return engine.OverflowNick(ctx, common.NickTarget(" @raider ")) }, `{"cmd":"overflow","nick":"raider"}`},
+		{"force flair preserves Unicode nick", func(ctx context.Context) error {
+			return engine.ForceFlair(ctx, common.NickTarget("Ålice"), common.Flair("badge\"x"))
+		}, `{"cmd":"forceflair","nick":"Ålice","flair":"badge\"x"}`},
+		{"force color preserves nick case", func(ctx context.Context) error {
+			return engine.ForceColor(ctx, common.NickTarget("Merc"), common.Color("#00ff00"))
+		}, `{"cmd":"forcecolor","nick":"Merc","color":"#00ff00"}`},
+		{"kick preserves marker nick", func(ctx context.Context) error { return engine.KickNick(ctx, common.NickTarget("@raider")) }, `{"cmd":"kick","nick":"@raider"}`},
+		{"kick to preserves marker nick", func(ctx context.Context) error {
+			return engine.KickNickTo(ctx, common.NickTarget("@raider"), common.Channel("lobby"))
+		}, `{"cmd":"kick","nick":"@raider","to":"lobby"}`},
+		{"overflow preserves Unicode nick", func(ctx context.Context) error { return engine.OverflowNick(ctx, common.NickTarget("玩家")) }, `{"cmd":"overflow","nick":"玩家"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.run(context.Background()); err != nil {
@@ -65,7 +65,7 @@ func TestRawModerationOperationsRejectBlankNickWithoutOutput(t *testing.T) {
 		name string
 		run  func(context.Context) error
 	}{
-		{"ban", func(ctx context.Context) error { return engine.BanNick(ctx, common.NickTarget(" @ ")) }},
+		{"ban", func(ctx context.Context) error { return engine.BanNick(ctx, common.NickTarget("   ")) }},
 		{"mute", func(ctx context.Context) error { return engine.MuteNick(ctx, common.NickTarget("")) }},
 		{"flair", func(ctx context.Context) error {
 			return engine.ForceFlair(ctx, common.NickTarget("\t"), common.Flair("badge"))

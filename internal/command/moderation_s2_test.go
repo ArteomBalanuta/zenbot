@@ -89,8 +89,8 @@ func TestManualSimpleModerationCommandsUseTypedOperations(t *testing.T) {
 		{"deauthorize", "!deauth trip", `{"cmd":"deauthtrip","trip":"trip"}`, "mod| deauthorized trip: trip|true"},
 		{"lock", "!lock on", `{"cmd":"lockroom"}`, "mod| Room locked!|true"},
 		{"unlock", "!lock off", `{"cmd":"unlockroom"}`, "mod| Room unlocked!|true"},
-		{"overflow", "!shoot @merc", `{"cmd":"overflow","nick":"merc"}`, ""},
-		{"ban", "!ban @merc", `{"cmd":"ban","nick":"merc"}`, "mod|merc has been banned|true"},
+		{"overflow", "!shoot @merc", `{"cmd":"overflow","nick":"Merc"}`, ""},
+		{"ban", "!ban @merc", `{"cmd":"ban","nick":"Merc"}`, "mod|Merc has been banned|true"},
 		{"unban", "!unban hash", `{"cmd":"unban","hash":"hash"}`, "mod|hash has been unbanned|true"},
 		{"unban all", "!pardonall", `{"cmd":"unbanall"}`, "mod|mercy.|true"},
 	}
@@ -109,6 +109,9 @@ func TestManualSimpleModerationCommandsUseTypedOperations(t *testing.T) {
 			}
 			if canonical == "pardonall" {
 				canonical = "unbanall"
+			}
+			if canonical == "ban" || canonical == "overflow" {
+				e.users["Merc"] = &model.User{Name: "Merc"}
 			}
 			d, ok := commandDefinitionFor(canonical)
 			if !ok {
@@ -164,6 +167,7 @@ func TestManualSimpleModerationUsageErrorsAndCancellationHaveNoSideEffects(t *te
 
 func TestManualSimpleModerationOperationFailureHasNoSuccessReply(t *testing.T) {
 	e := newModerationOperationsEngine()
+	e.users["Merc"] = &model.User{Name: "Merc"}
 	e.err = errors.New("transport down")
 	d, _ := commandDefinitionFor("ban")
 	status, err := d.New(e, moderationMessage("!ban merc", true)).Execute(context.Background())

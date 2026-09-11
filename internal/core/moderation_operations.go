@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"zenbot/internal/common"
 	"zenbot/internal/util"
@@ -21,7 +22,7 @@ type moderationPayload struct {
 }
 
 func (e *EngineImpl) BanNick(ctx context.Context, target common.NickTarget) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
@@ -61,7 +62,7 @@ func (e *EngineImpl) DeauthorizeTrip(ctx context.Context, trip common.Trip) erro
 }
 
 func (e *EngineImpl) MuteNick(ctx context.Context, target common.NickTarget) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
@@ -73,7 +74,7 @@ func (e *EngineImpl) UnmuteHash(ctx context.Context, hash common.BanHash) error 
 }
 
 func (e *EngineImpl) ForceFlair(ctx context.Context, target common.NickTarget, flair common.Flair) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
@@ -81,7 +82,7 @@ func (e *EngineImpl) ForceFlair(ctx context.Context, target common.NickTarget, f
 }
 
 func (e *EngineImpl) ForceColor(ctx context.Context, target common.NickTarget, color common.Color) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
@@ -89,7 +90,7 @@ func (e *EngineImpl) ForceColor(ctx context.Context, target common.NickTarget, c
 }
 
 func (e *EngineImpl) KickNick(ctx context.Context, target common.NickTarget) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
@@ -97,7 +98,7 @@ func (e *EngineImpl) KickNick(ctx context.Context, target common.NickTarget) err
 }
 
 func (e *EngineImpl) KickNickTo(ctx context.Context, target common.NickTarget, channel common.Channel) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
@@ -105,16 +106,19 @@ func (e *EngineImpl) KickNickTo(ctx context.Context, target common.NickTarget, c
 }
 
 func (e *EngineImpl) OverflowNick(ctx context.Context, target common.NickTarget) error {
-	nick, err := normalizeModerationNick(target)
+	nick, err := validateModerationNick(target)
 	if err != nil {
 		return err
 	}
 	return e.sendRawModeration(ctx, moderationPayload{Command: "overflow", Nick: nick})
 }
 
-func normalizeModerationNick(target common.NickTarget) (string, error) {
-	raw := string(target)
-	return util.NormalizeNickTarget(&raw)
+func validateModerationNick(target common.NickTarget) (string, error) {
+	nick := string(target)
+	if strings.TrimSpace(nick) == "" {
+		return "", util.ErrBlankNickTarget
+	}
+	return nick, nil
 }
 
 func (e *EngineImpl) sendRawModeration(ctx context.Context, payload moderationPayload) error {

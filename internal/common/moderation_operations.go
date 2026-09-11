@@ -3,7 +3,9 @@ package common
 import "context"
 
 // Distinct input types prevent callers from accidentally placing a hash, trip,
-// or channel in a raw moderation payload's nick field.
+// or channel in a raw moderation payload's nick field. NickTarget is an
+// already-resolved canonical source nickname; raw user operands must be
+// normalized and resolved before constructing it.
 type NickTarget string
 type BanHash string
 type Trip string

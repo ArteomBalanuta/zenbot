@@ -167,7 +167,7 @@ func sameJSONObject(left, right string) bool {
 }
 
 func TestOverflowAliasesUseSourceRawAction(t *testing.T) {
-	e := &commandEngineStub{}
+	e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc"}}}
 	d, _ := commandDefinitionFor("hug")
 	status, err := d.New(e, moderationMessage("!hug @Merc", false)).Execute(context.Background())
 	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"overflow","nick":"Merc"}`}) || len(e.chats) != 0 {
