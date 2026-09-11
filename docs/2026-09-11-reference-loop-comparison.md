@@ -143,7 +143,7 @@ coverage, incremental benefit and cost. A rejection is deliberate, not an unexam
 
 | Pattern and source | Problem/mechanism/ownership | Zenbot coverage and relative merit | Decision, gain and cost |
 | --- | --- | --- | --- |
-| Return-shape hints, Kernel native (implemented) | Expose declared output fields before invocation; SDK describes facts, model decides use | Existing result schema validated locally but hidden in provider projection | Adopt bounded generated hints; clearer follow-up reasoning at modest manifest cost. No second schema owner. |
+| Return-shape hints, Kernel native (implemented) | Expose declared output fields before invocation; SDK describes facts, model decides use | Existing result schema validated locally but hidden in provider projection | Adopt bounded generated hints; output fields become visible at a measured +22.39% base manifest cost. No second schema owner. |
 | Typed domain observations, Saturn roster/DSL action contracts (implemented) | Return actual source data separately from presentation | Current-room tool already stronger; remote list loses structure | Extend existing list operation/gateway only; exact counts and subject, extra optional payload field. |
 | Shared UI/chat business operations, DSL (implemented) | One canonical validator/persistence path | Existing SaturnCommand already delegates to command runtime | Preserve; do not fork weather/list/moderation services for agent use. |
 | Evidence-preserving failure output, pastor (proposal), DSL partial failure (implemented weaker) | Completed effects remain facts if final prose fails | IncompleteTurnError persists receipts, but failure sink discards their user-facing value | Adopt receipt-only incomplete notice, not deterministic answer synthesis. Bounded output and no raw result disclosure. |
@@ -216,3 +216,72 @@ No replacement deterministic planner is introduced to hide that model limitation
 
 Final validation, actual changes and measured outcomes are recorded after implementation
 in the companion provider evaluation and the completion section below.
+
+## Implemented rebuild and independent review
+
+All four selected changes are implemented, not recommendations:
+
+- Source-owned list data flows through snapshot completion, gateway and SDK payload with
+  copied JSON ownership. Source identity deduplication, stable roster ordering, empty zero
+  counts and the existing room message are preserved. Only list advertises roster fields.
+- Provider definitions derive sorted, optionality-aware shallow return hints from the
+  authoritative result schema, bounded to 512 UTF-8-safe bytes. Callable schemas are unchanged.
+- Current repair feedback is explicitly required runtime context, with a 1,536-byte
+  aggregate rejected-batch diagnostic. The required factual index carries bounded data/error
+  previews; generic recursive object projection preserves small nested values beside large
+  fields. Preview budgets shrink before receipts; full retained results remain unchanged.
+- Failure delivery now unwraps `IncompleteTurnError` and renders a receipt-only incomplete
+  notice bounded to 2,000 runes. Tool outcome and effect state are independent, so
+  `rejected + partial` and `failed + committed` remain visible. No raw results/arguments,
+  inferred answer, semantic success claim or full-replay recommendation is emitted.
+
+Independent review covered each task and the final integration. It and root inspection
+found and corrected two integration defects before handoff: the initial shared result schema
+advertised list fields for unrelated commands, and the first failure renderer conflated
+command rejection with absence of effects. Both have explicit regression coverage. No
+unresolved implementation findings remained in the reviewed code.
+
+Two extra freshness-guidance experiments were deliberately removed after provider trials
+did not demonstrate a benefit. The final change does not accumulate prompts or error
+instructions merely because they sound plausible. The observed model failures remain
+explicit limitations, not justification for a hidden deterministic planner.
+
+## Validation and before/after assessment
+
+Baseline `go test ./...` passed. New RED tests reproduced missing source data, mutable
+callback data aliasing, misleading per-command result schemas, evicted current feedback,
+lost terminal count/error facts, loss of nested counts beside a large roster, and masked
+partial/unknown/committed failure effects. Corresponding GREEN tests exercise the actual
+operation/gateway, contract, projector, loop and production failure-sink seams.
+
+Final verification included the full uncached Go suite, `go vet ./...`, affected agent,
+command and snapshot race tests, and a fresh race run for final live/tool/composition
+changes. All passed. macOS emitted non-fatal LC_DYSYMTAB linker warnings during race builds.
+One pre-existing coordinator timing assertion failed during an intermediate worker run:
+it observes TIMED_OUT before session Close; 30 isolated repeats and subsequent full/race
+runs passed. That existing state-ordering implementation was not changed. An intermediate
+integration run also overlapped a worker's RED renderer fixture; the corrected final
+tree passed both fresh package verification and the complete suite.
+
+| Question | Evidence-backed assessment |
+| --- | --- |
+| Clearer contracts/arguments? | Return fields are now visible and scoped to the actual tool. Input schemas remain flat and unchanged; no added parameter nesting. |
+| More usable multi-tool facts? | Remote counts no longer require presentation parsing. Forced-pruning tests retain zero, positive counts and errors through 3+ calls, including nested wrappers and tools-disabled synthesis. |
+| Better correction context? | Current bounded repair instruction survives competing observations. Rejected calls remain non-execution data. |
+| Correct partial failures? | Outcome and effect facts survive separately in context and in user-facing incomplete notices, including wrapped errors. |
+| Less context waste? | Full payloads remain outside the disposable transcript; bounded hints/previews add useful redundancy but increase input cost. Base manifest grew 32,513 to 39,793 bytes; full live inventory is 40,852 bytes. |
+| Better measured model accuracy? | Not established. Retained-candidate run passed 7/8; unchanged recovery repeats passed 3/3. Experiments also exposed stale-read and speculative-ordering failures. All traces retained. |
+| Preserved LLM agency? | No chosen next tool, task obligation reducer, inferred progress, condition evaluator, retry workflow, new phase machine or semantic finalizer was introduced. |
+
+See [the complete provider evaluation](evals/2026-09-11-reference-loop-provider.md) for
+settings, every trial and the precise failure traces. Tests establish information and
+execution invariants, not universal semantic correctness.
+
+The original implementation's strongest parts remain: one native iterative loop,
+compatible read concurrency, synchronous source-ordered actions, non-retryable unknown
+effects, one canonical command implementation, flat arguments, exact current-request
+retention, atomic protocol pruning, full-result paging, and transactional interruption
+evidence. Bounded previews can still omit needed detail; model reasoning can still drift;
+historical receipts are not cross-turn idempotency. No deployments, bot restarts, remote
+writes, reference-repository modifications, streaming changes or unrelated security work
+were performed.

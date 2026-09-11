@@ -57,7 +57,9 @@ Carry optional JSON data through OperationResult, agentCaptureEngine, commandgat
 and the Saturn command success payload. The existing command remains the execution path,
 including remote-session completion, delivery and action receipts. Other commands remain
 compatible without domain data. Result schemas declare the optional field and the list
-shape. Do not claim a failed/unknown snapshot is successful because it produced data.
+shape for list only; other concrete commands must not advertise unrelated roster fields.
+The legacy generic command adapter accepts optional generic data. Do not claim a
+failed/unknown snapshot is successful because it produced data.
 
 ### 2. Generate compact return-shape guidance from the SDK schema
 
@@ -66,6 +68,9 @@ Use existing schema fields/types, optionality and shallow nesting; no duplicate 
 schema or guessed domain semantics. Keep strings valid UTF-8 and summaries explicitly
 partial when bounded. Do not advertise result fields as callable arguments. This borrows
 the useful native Kernel pattern without its fallback schemas or executor heuristics.
+The measured creator manifest grows from 32,513 to 39,793 bytes (+22.39%); retain a
+40 KiB regression ceiling and count the complete invocation manifest in context budgets.
+This is an intentional information/context tradeoff, not a token optimization.
 
 ### 3. Preserve useful feedback and facts under context pressure
 

@@ -35,6 +35,12 @@ normal command handler remains authoritative for role checks, persistence, side
 effects, and user-visible formatting. The manual chat command retains its
 existing `-m` and `-c` modes; they are deliberately absent from the agent tool.
 
+`saturn_list` additionally returns optional typed `data` containing `room`, `users`,
+`count`, `returnedCount`, and `truncated`, produced from the same deduplicated snapshot
+as its room message. Empty snapshots return `users:[]` and count zero. Typed data is
+preserved through the command gateway rather than reconstructed from display text.
+Only list declares this roster shape; other commands do not advertise unrelated fields.
+
 An error does not imply rollback. Results distinguish `NOT_STARTED`,
 `NOT_COMMITTED`, `COMMITTED`, `PARTIAL`, and `UNKNOWN`, with committed-effect,
 action-count, and delivery-count metadata. A failed ordered action causes later
@@ -154,11 +160,14 @@ compact projection is sent as OpenAI-compatible function definitions without
 requiring every tool to use the same `strict` setting. `SupportsStrictParameters`
 selects strict mode for compatible schemas; optional fields are not converted to
 mandatory placeholders. The 64-tool creator-visible base payload is
-regression-tested at 32 KiB or less; the live 65-tool manifest including
-`read_tool_result` was measured at 33,534 bytes and is included in context
+regression-tested at 40 KiB or less and measures 39,793 bytes; the live 65-tool manifest including
+`read_tool_result` measures 40,852 bytes and is included in context
 budgeting. The compact description includes purpose,
 use/avoid guidance, an example, prerequisites, and whether output is delivered
-to the room or returned as data.
+to the room or returned as data. A schema-derived result-shape hint shows output
+fields/types/optionality, capped at 512 UTF-8-safe bytes with explicit omissions.
+This adds 7,280 bytes to the base inventory (+22.39%) versus the previous version;
+result fields never become callable arguments.
 
 One iterative model/tool loop selects commands; no keyword router, preliminary
 planner, semantic completion judge, or phase machine selects work. The model
@@ -170,8 +179,10 @@ determines whether the semantic request is fully satisfied. Provider evaluation
 has found conditional reasoning failures, so typed contracts must not be read
 as a guarantee that all compound tasks succeed. Thinking is enabled in the
 tracked examples and local configuration based on the evaluation, but repeated
-reasoning-enabled runs still expose a compound-task failure. See the
-[provider evaluation record](docs/evals/2026-09-11-tool-loop-provider.md).
+reasoning-enabled runs still expose stale-read recovery and compound ordering failures.
+Additional freshness guidance was evaluated and removed because it did not demonstrate
+an accuracy benefit. See the [latest provider evaluation](docs/evals/2026-09-11-reference-loop-provider.md)
+and [original evaluation record](docs/evals/2026-09-11-tool-loop-provider.md).
 
 ### Result And Context Protocol
 
@@ -190,17 +201,23 @@ shrink to a complete 7,000-byte payload and return the actual `nextOffset` and
 to the total turn call budget.
 
 Context pruning keeps a required `CURRENT_TURN_RESULTS_UNTRUSTED_DATA` index of
-call identities, bounded argument previews, statuses, and receipts. It does not
-duplicate full results or invent a task checklist. Current `TOOL_LOOP_STATUS`
-is also required and remains last after projection. The model can retrieve
-pruned evidence while calls remain, or explicitly report unavailable details
-at terminal synthesis.
+call identities, bounded argument previews, statuses, receipts, and bounded
+structured data/error previews. Preview budgets shrink before any receipt is
+rejected; nested small facts can survive removal of large sibling fields.
+It does not duplicate unbounded results or invent a task checklist. Current
+`TOOL_LOOP_FEEDBACK` is explicitly required; rejected-call diagnostics are bounded
+and never treated as executions. `TOOL_LOOP_STATUS` is required and remains last.
+The model can retrieve pruned evidence while calls remain; terminal synthesis
+still has bounded facts and explicit omission metadata, not merely success labels.
 
 If a continuation or finalizer fails after execution, Runner retains the partial
 completion and persists bounded interrupted-turn receipts plus valid read
 evidence without claiming successful completion. Full action arguments/results
 are not persisted in that receipt record. Historical records are not live
 retrieval handles or cross-turn duplicate protection.
+The production failure notice renders only receipt status/effect facts, explicitly
+marks the answer incomplete, and is capped at 2,000 runes with an omission count.
+It does not fabricate a final summary, disclose raw payloads, or recommend full replay.
 
 The model may suppress a redundant reply using the configured no-reply marker
 only under the runtime's receipt-based delivery rules. A silent action such as
