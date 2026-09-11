@@ -17,14 +17,25 @@ import (
 // would otherwise erase capabilities such as moderation and prefix control.
 type agentCaptureEngine struct {
 	common.Engine
+	invocationWhisper   bool
 	messages            []string
 	deliveryCount       int
 	actionCount         int
 	data                json.RawMessage
-	snapshotCompletions []<-chan snapshot.OperationResult
+	snapshotCompletions []agentSnapshotCompletion
 }
 
-func (e *agentCaptureEngine) recordDelivery(message string) {
+type agentSnapshotCompletion struct {
+	result  <-chan snapshot.OperationResult
+	whisper bool
+}
+
+const privateDeliveryObservation = "A private response was delivered to the caller."
+
+func (e *agentCaptureEngine) recordDelivery(message string, whisper bool) {
+	if whisper && !e.invocationWhisper {
+		message = privateDeliveryObservation
+	}
 	e.messages = append(e.messages, message)
 	e.deliveryCount++
 	e.actionCount++
@@ -49,7 +60,7 @@ func requiredAgentCapability[T any](engine common.Engine, name string) (T, error
 func (e *agentCaptureEngine) SendChatMessage(author, message string, whisper bool) (string, error) {
 	result, err := e.Engine.SendChatMessage(author, message, whisper)
 	if err == nil {
-		e.recordDelivery(message)
+		e.recordDelivery(message, whisper)
 	}
 	return result, err
 }
@@ -57,7 +68,7 @@ func (e *agentCaptureEngine) SendChatMessage(author, message string, whisper boo
 func (e *agentCaptureEngine) SendWhisperMessage(author, payload string) (string, error) {
 	result, err := e.Engine.SendWhisperMessage(author, payload)
 	if err == nil {
-		e.recordDelivery(payload)
+		e.recordDelivery(payload, true)
 	}
 	return result, err
 }
@@ -65,7 +76,7 @@ func (e *agentCaptureEngine) SendWhisperMessage(author, payload string) (string,
 func (e *agentCaptureEngine) SendAddressedMessage(author, payload string, whisper bool) (string, error) {
 	result, err := e.Engine.SendAddressedMessage(author, payload, whisper)
 	if err == nil {
-		e.recordDelivery(payload)
+		e.recordDelivery(payload, whisper)
 	}
 	return result, err
 }
@@ -247,14 +258,14 @@ func (e *agentCaptureEngine) submitSnapshot(request snapshot.RoomSnapshotRequest
 	if err := submit(request); err != nil {
 		return err
 	}
-	e.snapshotCompletions = append(e.snapshotCompletions, completed)
+	e.snapshotCompletions = append(e.snapshotCompletions, agentSnapshotCompletion{result: completed, whisper: request.Whisper})
 	return nil
 }
 
 func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error {
-	for _, completed := range e.snapshotCompletions {
+	for _, completion := range e.snapshotCompletions {
 		select {
-		case result := <-completed:
+		case result := <-completion.result:
 			message := strings.TrimSpace(result.Reply)
 			if result.Outcome == snapshot.OutcomeFailed {
 				if message == "" {
@@ -262,11 +273,11 @@ func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error
 				}
 				return fmt.Errorf("%s", message)
 			}
-			if len(result.Data) > 0 {
+			if len(result.Data) > 0 && (!completion.whisper || e.invocationWhisper) {
 				e.data = append(json.RawMessage(nil), result.Data...)
 			}
 			if message != "" {
-				e.recordDelivery(result.Reply)
+				e.recordDelivery(result.Reply, completion.whisper)
 			}
 		case <-ctx.Done():
 			return ctx.Err()

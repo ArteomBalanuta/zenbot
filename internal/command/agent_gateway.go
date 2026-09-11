@@ -77,7 +77,7 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		text += " " + arguments
 	}
 	message := &model.ChatMessage{Name: caller.Nick(), Trip: trip, Hash: hash, Channel: caller.Room(), Text: text, Whisper: caller.Whisper(), IsWhisper: caller.Whisper()}
-	capturing := &agentCaptureEngine{Engine: g.engine}
+	capturing := &agentCaptureEngine{Engine: g.engine, invocationWhisper: caller.Whisper()}
 	// Effects may already exist when a later command operation or audit fails.
 	// Preserve receipts on every return, including panics after delivery.
 	defer func() {
