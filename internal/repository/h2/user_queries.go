@@ -15,7 +15,7 @@ const (
 	selectNicksByTrip         = `SELECT DISTINCT name FROM messages WHERE LOWER(trip)=$1`
 	selectBasicUserDataByHash = `select distinct hash,name from messages where hash=$1 limit 30`
 	selectBasicUserDataByTrip = `select distinct hash,name from messages where trip=$1 limit 30`
-	selectLastOnline          = `SELECT message,created_on FROM messages WHERE (name = $1 or trip = $2) and (message not in ('LEFT','JOINED')) order by created_on desc limit 1`
+	selectLastOnline          = `SELECT message,created_on FROM messages WHERE (name = $1 or trip = $2) and visibility = 'PUBLIC' and (message not in ('LEFT','JOINED')) order by created_on desc limit 1`
 	selectSessionJoined       = `SELECT created_on FROM (
 		SELECT created_on FROM user_presence_log WHERE (name = $1 OR trip = $2) AND LOWER(event_type) = 'joined'
 		UNION ALL

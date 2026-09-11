@@ -23,7 +23,7 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 	if b == nil || b.Mail == nil {
 		return model.FAILED, fmt.Errorf("mail service unavailable")
 	}
-	receivers, e := b.Mail.QueueResolved(strings.Join(a[1:], " "), c.message.Name+"#"+c.message.Trip, a[0], c.message.IsWhisper)
+	receivers, e := b.Mail.QueueResolved(strings.Join(a[1:], " "), c.message.Name+"#"+c.message.Trip, a[0], true)
 	if e != nil {
 		if e.Error() == "receiver cannot be blank" {
 			reply(&c.commandBase, "Receiver cannot be blank.")
@@ -105,6 +105,8 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e != nil {
 		return model.FAILED, e
 	}
-	reply(&c.commandBase, "'s notes: \\n ```Text \\n"+fmt.Sprint(ns)+"\\n```")
+	if _, err := c.engine.SendChatMessage(c.message.Name, "'s notes: \\n ```Text \\n"+fmt.Sprint(ns)+"\\n```", true); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

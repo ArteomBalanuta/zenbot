@@ -248,7 +248,13 @@ func (s *MailService) QueueResolved(message, owner, receiver string, whisper boo
 	if receiver == "" {
 		return "", fmt.Errorf("receiver cannot be blank")
 	}
-	rows, e := s.DB.Query(`SELECT t.trip FROM trip_names tn INNER JOIN names n ON tn.name_id=n.id INNER JOIN trips t ON tn.trip_id=t.id WHERE LOWER(n.name)=$1 OR LOWER(t.trip)=$2`, strings.ToLower(receiver), strings.ToLower(receiver))
+	// An exact registered trip takes precedence over a nickname with the same
+	// spelling. Trip identities are case-sensitive; only nickname lookup folds case.
+	rows, e := s.DB.Query(`SELECT DISTINCT t.trip FROM trips t
+		WHERE t.trip=$2 OR (NOT EXISTS (SELECT 1 FROM trips WHERE trip=$2) AND EXISTS (
+			SELECT 1 FROM trip_names tn INNER JOIN names n ON tn.name_id=n.id
+			WHERE tn.trip_id=t.id AND LOWER(n.name)=$1
+		)) ORDER BY t.trip`, strings.ToLower(receiver), receiver)
 	if e != nil {
 		return "", e
 	}
@@ -309,7 +315,12 @@ func (s *MailService) SaturnRegisteredUsers(ctx context.Context) ([]repository.S
 }
 
 func (s *MailService) Pending(receiver, trip string) ([]model.Mail, error) {
-	rows, e := s.DB.Query(`SELECT id,owner,receiver,message,status,created_on,is_whisper FROM mail WHERE status='PENDING' AND (LOCATE(',' || LOWER($1) || ',', ',' || LOWER(receiver) || ',') > 0 OR LOCATE(',' || LOWER($2) || ',', ',' || LOWER(receiver) || ',') > 0) ORDER BY id`, receiver, trip)
+	// Receivers are resolved trips, never claimant-controlled nicknames. Keep
+	// the nickname argument for callers, but authenticate delivery only by trip.
+	if strings.TrimSpace(trip) == "" || strings.Contains(trip, ",") {
+		return nil, nil
+	}
+	rows, e := s.DB.Query(`SELECT id,owner,receiver,message,status,created_on,is_whisper FROM mail WHERE status='PENDING' AND LOCATE(',' || $1 || ',', ',' || receiver || ',') > 0 ORDER BY id`, trip)
 	if e != nil {
 		return nil, e
 	}
