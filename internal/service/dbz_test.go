@@ -99,7 +99,7 @@ func (*failingFreeStatsDBZRepo) FreeStats(context.Context, string) (int, bool, e
 	return 0, false, errors.New("free stats query failed")
 }
 
-func TestDBZFreeStatsConvertsRepositoryReadErrorToSourceEquivalentNoFreeValue(t *testing.T) {
+func TestDBZFreeStatsPropagatesRepositoryReadError(t *testing.T) {
 	free, err := (&DBZService{Repo: &failingFreeStatsDBZRepo{}}).FreeStats(context.Background(), "goku")
 	if err == nil || free != 0 {
 		t.Fatalf("FreeStats()=%d, %v; want 0 and repository error", free, err)
