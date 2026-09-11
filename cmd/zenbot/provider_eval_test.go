@@ -28,6 +28,8 @@ import (
 	"zenbot/internal/agent/runtime"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/config"
+	"zenbot/internal/listener/snapshot"
+	"zenbot/internal/model"
 	"zenbot/internal/repository"
 )
 
@@ -302,11 +304,13 @@ func (f *providerEvalFixtures) Execute(_ context.Context, _ api.Context, command
 		return commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Action: &commandgateway.ActionReceipt{Count: 1}}, nil
 	}
 	var message string
+	var names []string
+	var data json.RawMessage
 	switch {
 	case command == "list" && arguments == "lounge":
-		message = "\nUsers online: \n1A2B3C - ------ - Iris\n2A2B3C - ------ - Moss\n3A2B3C - ------ - River\n\n"
+		names = []string{"Iris", "Moss", "River"}
 	case command == "list" && arguments == "programming":
-		message = "\nUsers online: \n4A2B3C - ------ - Ada\n5A2B3C - ------ - Lin\n6A2B3C - ------ - Sam\n7A2B3C - ------ - Terry\n\n"
+		names = []string{"Ada", "Lin", "Sam", "Terry"}
 	case command == "weather" && arguments == "Tokyo":
 		message = "Tokyo: clear, 24 °C, humidity 65%, wind 8 km/h."
 	case command == "ping" && arguments == "":
@@ -314,7 +318,20 @@ func (f *providerEvalFixtures) Execute(_ context.Context, _ api.Context, command
 	default:
 		return commandgateway.Execution{Status: commandgateway.OutcomeRejected}, nil
 	}
-	return commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Action: &commandgateway.ActionReceipt{Count: 1}, Delivery: &commandgateway.DeliveryReceipt{Count: 1}, Messages: []string{message}}, nil
+	if command == "list" {
+		users := make([]*model.User, len(names))
+		for index, name := range names {
+			users[index] = &model.User{Name: name, Hash: fmt.Sprintf("%06d", index+1)}
+		}
+		// Exercise the actual source formatter/data contract. Only the remote
+		// snapshot and delivery are fixtures; no live room/session is created.
+		result, err := snapshot.NewListRoomOperation().Apply(snapshot.RoomSnapshotContext{TargetChannel: arguments}, snapshot.Snapshot{Users: users})
+		if err != nil {
+			return commandgateway.Execution{Status: commandgateway.OutcomeRejected}, err
+		}
+		message, data = result.Reply, result.Data
+	}
+	return commandgateway.Execution{Status: commandgateway.OutcomeSucceeded, EffectsCommitted: true, Action: &commandgateway.ActionReceipt{Count: 1}, Delivery: &commandgateway.DeliveryReceipt{Count: 1}, Messages: []string{message}, Data: data}, nil
 }
 
 func (f *providerEvalFixtures) FindRoomUsers(room string) (tool.RoomUserSnapshot, bool) {
