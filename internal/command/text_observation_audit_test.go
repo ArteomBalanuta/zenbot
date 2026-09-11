@@ -211,10 +211,10 @@ func TestTextObservationAuditSourceReadInventoryRunsOnceAndRetainsText(t *testin
 	if got := executeTextObservationSource(t, users, "lastonline", "!lastonline merc", ""); !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || queries.calls != 1 {
 		t.Fatalf("lastonline observation=%q calls=%d", got, queries.calls)
 	}
-	if got := executeTextObservationSource(t, users, "users", "!users", ""); !strings.Contains(got, "Users:") || queries.registeredCalls != 1 {
+	if got := executeTextObservationSource(t, users, "users", "!users", ""); got != "No registered users found." || queries.registeredCalls != 1 {
 		t.Fatalf("users observation=%q calls=%d", got, queries.registeredCalls)
 	}
-	if got := executeTextObservationSource(t, users, "nicks", "!nicks unknown-trip", ""); got != "" || queries.nicksCalls != 1 {
+	if got := executeTextObservationSource(t, users, "nicks", "!nicks unknown-trip", ""); got != "No nicknames found for trip: unknown-trip." || queries.nicksCalls != 1 {
 		t.Fatalf("empty nicks observation=%q calls=%d", got, queries.nicksCalls)
 	}
 

@@ -380,8 +380,12 @@ func TestAgentCommandGatewayMapsMissingRecordToNotFoundOutcome(t *testing.T) {
 
 	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "lastonline", "absent")
 
-	if err != nil || result.Status != commandgateway.OutcomeNotFound || result.EffectsCommitted || result.Delivery != nil {
+	if err != nil || result.Status != commandgateway.OutcomeNotFound || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 {
 		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	want := "No public history found for nickname or trip: absent."
+	if len(result.Messages) != 1 || result.Messages[0] != want || !result.DataObserved {
+		t.Fatalf("missing-record explanation was not preserved: %#v", result)
 	}
 }
 

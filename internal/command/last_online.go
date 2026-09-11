@@ -2,10 +2,12 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"zenbot/internal/model"
+	"zenbot/internal/repository"
 )
 
 type lastonlineCommand struct{ commandBase }
@@ -35,10 +37,17 @@ func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, fmt.Errorf("last-online user queries unavailable")
 	}
 	text, err := services.Users.LastOnline(ctx, target)
-	if err != nil {
+	if errors.Is(err, repository.ErrNotFound) {
+		text = "No public history found for nickname or trip: " + target + "."
+	} else if err != nil {
 		return model.FAILED, err
 	}
 	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
+	// Deliver the explanation without turning a missing record into a found
+	// result for callers such as the agent gateway.
+	if err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

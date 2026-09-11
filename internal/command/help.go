@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"zenbot/internal/model"
 )
@@ -39,23 +41,25 @@ func fmtHelp(format string, args ...string) string {
 }
 
 func alignHelp(output string) string {
+	// Use the same description column in every section. A long alias/syntax
+	// belongs on its own line, not in the width calculation for every other row.
+	const descriptionColumn = 32
 	lines := strings.Split(output, "\n")
-	longest := 0
-	for _, line := range lines {
-		if i := strings.IndexByte(line, '-'); i >= 0 {
-			if n := len([]rune(line[:i])); n > longest {
-				longest = n
-			}
-		}
-	}
 	var b strings.Builder
 	for n, line := range lines {
-		if i := strings.IndexByte(line, '-'); i >= 0 {
-			b.WriteString(line[:i])
-			for n := len([]rune(line[:i])); n < longest; n++ {
-				b.WriteRune(' ')
+		// Description delimiters include a following space; options such as
+		// -c are part of the command syntax and must never be split or padded.
+		if command, description, ok := strings.Cut(line, "- "); ok {
+			command = strings.TrimRightFunc(command, unicode.IsSpace)
+			b.WriteString(command)
+			width := utf8.RuneCountInString(command)
+			if width >= descriptionColumn {
+				b.WriteByte('\n')
+				width = 0
 			}
-			b.WriteString(line[i:])
+			b.WriteString(strings.Repeat(" ", descriptionColumn-width))
+			b.WriteString("- ")
+			b.WriteString(description)
 		} else {
 			b.WriteString(line)
 		}

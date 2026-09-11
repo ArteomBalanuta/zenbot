@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
@@ -60,7 +61,7 @@ func TestHelpAliasesPrefixExpansionAndDispatch(t *testing.T) {
 
 func TestRegisteredHelpDescribesOnlySupportedTruthfulRoutes(t *testing.T) {
 	payload := executeRegisteredHelp(t)
-	logical := strings.ReplaceAll(payload, "\u2009", "")
+	logical := strings.ReplaceAll(strings.ReplaceAll(payload, "\u2009", ""), "\n- ", "- ")
 
 	for _, unsupported := range []string{"mine <room>", "whiskey <channel>"} {
 		if strings.Contains(logical, unsupported) {
@@ -86,7 +87,7 @@ func TestRegisteredHelpDescribesOnlySupportedTruthfulRoutes(t *testing.T) {
 
 func TestRegisteredHelpListsPublicMsgChannelOnceInUserCommands(t *testing.T) {
 	payload := executeRegisteredHelp(t)
-	logical := strings.ReplaceAll(payload, "\u2009", "")
+	logical := strings.ReplaceAll(strings.ReplaceAll(payload, "\u2009", ""), "\n- ", "- ")
 	want := "msgchannel,msgroom <room> <text>- requests an anonymous message relay to another room"
 	if count := strings.Count(logical, want); count != 1 {
 		t.Fatalf("public msgchannel row count=%d, want 1 in payload %q", count, payload)
@@ -103,7 +104,7 @@ func TestRegisteredHelpListsPublicMsgChannelOnceInUserCommands(t *testing.T) {
 
 func TestAlignHelpProcessesActualNewlinesAndPreservesNonCommandRows(t *testing.T) {
 	input := "\u9577\u547d\u4ee4 - first\nx - second\n\nExample: !x\n"
-	want := "\u9577\u547d\u4ee4 - first\nx \u2009\u2009- second\n\nExample: !x\n"
+	want := "長命令" + strings.Repeat("\u2009", 29) + "- first\nx" + strings.Repeat("\u2009", 31) + "- second\n\nExample: !x\n"
 	if got := alignHelp(input); got != want {
 		t.Fatalf("alignHelp() = %q, want %q", got, want)
 	}
@@ -124,4 +125,26 @@ func executeRegisteredHelp(t *testing.T) string {
 		t.Fatalf("registered help deliveries=%q", engine.chats)
 	}
 	return strings.TrimSuffix(strings.TrimPrefix(engine.chats[0], "alice|"), "|true")
+}
+
+func TestHelpSectionsShareCompactDescriptionColumn(t *testing.T) {
+	payload := executeRegisteredHelp(t)
+	rows := 0
+	for _, line := range strings.Split(payload, "\n") {
+		if i := strings.Index(line, "- "); i >= 0 {
+			rows++
+			if column := utf8.RuneCountInString(line[:i]); column != 32 {
+				t.Errorf("description at column %d, want 32: %q", column, line)
+			}
+		}
+	}
+	if rows < 50 {
+		t.Fatalf("help lost command descriptions: %d", rows)
+	}
+	if !strings.Contains(payload, "shadowban,sban <nick> | -c <fragment>\n") {
+		t.Error("long shadowban syntax must stay intact with description on next line")
+	}
+	if !strings.Contains(payload, "move,recover,heal,resurrect <nick> <source> <destination>\n") {
+		t.Error("long move syntax must not push the section's description column right")
+	}
 }

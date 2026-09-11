@@ -130,6 +130,9 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, e
 	}
 	text := "'s notes: \n ```Text \n" + fmt.Sprint(ns) + "\n```"
+	if len(ns) == 0 {
+		text = "No saved notes found."
+	}
 	if err := observeAndReply(ctx, &c.commandBase, text, true); err != nil {
 		return model.FAILED, err
 	}

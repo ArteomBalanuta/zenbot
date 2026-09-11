@@ -37,6 +37,9 @@ func (c *usersCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 	}
 	text := "Users: \n" + formatRegisteredUsers(users)
+	if len(users) == 0 {
+		text = "No registered users found."
+	}
 	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
@@ -57,14 +60,19 @@ func (c *nicksCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
-	if b == nil || b.Users == nil || b.Users.Queries == nil {
-		return model.SUCCESSFUL, nil
+	if b == nil || b.Users == nil || !configuredDependency(b.Users.Queries) {
+		return model.FAILED, fmt.Errorf("nickname lookup service unavailable")
 	}
-	nicks, err := b.Users.NicksByTrip(ctx, strings.TrimSpace(a[0]))
+	trip := strings.TrimSpace(a[0])
+	nicks, err := b.Users.NicksByTrip(ctx, trip)
 	if err != nil {
 		return model.FAILED, err
 	}
-	if err := observeAndReply(ctx, &c.commandBase, strings.Join(nicks, ","), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+	text := strings.Join(nicks, ",")
+	if len(nicks) == 0 {
+		text = "No nicknames found for trip: " + trip + "."
+	}
+	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
