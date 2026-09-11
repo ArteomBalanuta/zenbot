@@ -18,7 +18,7 @@ type SQLTable struct {
 	Rows    [][]string
 }
 
-// RawSQLService executes raw queries through the application's existing H2 DB.
+// RawSQLService executes raw queries through the application's existing SQLite DB.
 // Command parsing, rendering, and replies are intentionally deferred to tracer 8.
 type RawSQLService struct {
 	DB *sql.DB

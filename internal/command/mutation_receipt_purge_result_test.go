@@ -11,22 +11,21 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
+	sqlitedriver "modernc.org/sqlite"
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/tool"
 	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/agent/tool/execution"
 	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/common"
-	"zenbot/internal/repository/h2"
+	"zenbot/internal/repository/sqlite"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
-// Execute the real H2 deletion, changing only the affected-row response.
+// Execute the real SQLite deletion, changing only the affected-row response.
 type purgeResultConnector struct {
-	driver.Connector
+	path       string
 	countErr   error
 	executions *atomic.Int32
 }
@@ -41,12 +40,13 @@ type purgeResult struct {
 }
 
 func (c purgeResultConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := c.Connector.Connect(ctx)
+	conn, err := c.Driver().Open(c.path)
 	if err != nil {
 		return nil, err
 	}
 	return &purgeResultConn{Conn: conn, countErr: c.countErr, executions: c.executions}, nil
 }
+func (c purgeResultConnector) Driver() driver.Driver { return &sqlitedriver.Driver{} }
 func (c *purgeResultConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.executions.Add(1)
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
@@ -61,16 +61,14 @@ func (r purgeResult) RowsAffected() (int64, error) {
 	}
 	return r.Result.RowsAffected()
 }
-func purgeResultDatabase(t *testing.T, db *h2.Database, countErr error) (*sql.DB, *atomic.Int32) {
+func purgeResultDatabase(t *testing.T, db *sqlite.Database, countErr error) (*sql.DB, *atomic.Int32) {
 	t.Helper()
-	cfg, err := pgx.ParseConfig(fmt.Sprintf("postgres://sa@%s/db?sslmode=disable", db.Server.Addr()))
-	if err != nil {
+	var path string
+	if err := db.DB.QueryRow("SELECT file FROM pragma_database_list WHERE name='main'").Scan(&path); err != nil {
 		t.Fatal(err)
 	}
-	cfg.User = ""
-	cfg.RuntimeParams = map[string]string{}
 	calls := &atomic.Int32{}
-	wrapped := sql.OpenDB(purgeResultConnector{Connector: stdlib.GetConnector(*cfg), countErr: countErr, executions: calls})
+	wrapped := sql.OpenDB(purgeResultConnector{path: path, countErr: countErr, executions: calls})
 	t.Cleanup(func() {
 		if err := wrapped.Close(); err != nil {
 			t.Error(err)
@@ -92,7 +90,7 @@ func TestMutationReceiptPurgeAffectedRowsResult(t *testing.T) {
 		{"positive rows", true, nil, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := h2fixture.Open(t, "db")
+			db := sqlitefixture.Open(t, "db")
 			if tc.seed {
 				if _, err := db.DB.Exec("INSERT INTO notes(trip,note,created_on) VALUES('Trip','private',1)"); err != nil {
 					t.Fatal(err)
@@ -113,7 +111,7 @@ func TestMutationReceiptPurgeAffectedRowsResult(t *testing.T) {
 }
 
 func TestMutationReceiptPurgeCountFailureIsUnknownWithoutAckOrReplay(t *testing.T) {
-	db := h2fixture.Open(t, "db")
+	db := sqlitefixture.Open(t, "db")
 	if _, err := db.DB.Exec("INSERT INTO notes(trip,note,created_on) VALUES('Trip','private',1)"); err != nil {
 		t.Fatal(err)
 	}

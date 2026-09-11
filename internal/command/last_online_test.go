@@ -12,7 +12,7 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type lastOnlineCommandQueriesStub struct {
@@ -94,7 +94,7 @@ func TestLastOnlineCommandReturnsServiceErrorWithoutReply(t *testing.T) {
 	}
 }
 
-func TestLastOnlineAliasesDispatchAgainstRealH2AndRequireQueries(t *testing.T) {
+func TestLastOnlineAliasesDispatchAgainstRealSQLiteAndRequireQueries(t *testing.T) {
 	withoutQueries := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}}
 	if err := RegisterUserUtilities(withoutQueries); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestLastOnlineAliasesDispatchAgainstRealH2AndRequireQueries(t *testing.T) {
 		}
 	}
 
-	db := h2fixture.Open(t, "last-online-dispatch")
+	db := sqlitefixture.Open(t, "last-online-dispatch")
 	for _, statement := range []string{
 		"INSERT INTO messages(trip,name,message,created_on,visibility) VALUES('trip-a','merc','JOINED',1000,'PUBLIC')",
 		"INSERT INTO messages(trip,name,message,created_on,visibility) VALUES('trip-a','merc','hello',2000,'PUBLIC')",

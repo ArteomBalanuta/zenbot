@@ -9,7 +9,7 @@ import (
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type recordingRawSQLQuery struct {
@@ -110,8 +110,8 @@ func TestSQLCommandParsesRawSourcePayloadOnly(t *testing.T) {
 	}
 }
 
-func TestUserChatListenerSQLRepliesWithSaturnASCIIH2Goldens(t *testing.T) {
-	database := h2fixture.Open(t, "sql-reply-ascii")
+func TestUserChatListenerSQLRepliesWithSaturnASCIISQLiteGoldens(t *testing.T) {
+	database := sqlitefixture.Open(t, "sql-reply-ascii")
 	engine := &commandEngineStub{
 		bundle: &service.Bundle{SQLCommand: &service.RawSQLService{DB: database.SQLDB()}},
 		users:  map[string]*model.User{"alice": {Name: "alice", Trip: "admin"}},
@@ -128,12 +128,12 @@ func TestUserChatListenerSQLRepliesWithSaturnASCIIH2Goldens(t *testing.T) {
 		{
 			name:  "row includes column names and null",
 			query: "SELECT 7 AS \"ID\", CAST(NULL AS VARCHAR) AS \"NOTE\"",
-			want:  "\n```Text\n\n\n+------+--------+\n|  id  |  note  |\n+------+--------+\n|  7   |  null  |\n+------+--------+\n\n\n ```",
+			want:  "\n```Text\n\n\n+------+--------+\n|  ID  |  NOTE  |\n+------+--------+\n|  7   |  null  |\n+------+--------+\n\n\n ```",
 		},
 		{
 			name:  "zero rows retains table",
 			query: "SELECT 7 AS \"ID\", CAST(NULL AS VARCHAR) AS \"NOTE\" WHERE FALSE",
-			want:  "\n```Text\n\n\n+------+--------+\n|  id  |  note  |\n+------+--------+\n+------+--------+\n\n\n ```",
+			want:  "\n```Text\n\n\n+------+--------+\n|  ID  |  NOTE  |\n+------+--------+\n+------+--------+\n\n\n ```",
 		},
 	} {
 		for _, whisper := range []bool{false, true} {
@@ -154,8 +154,8 @@ func TestUserChatListenerSQLRepliesWithSaturnASCIIH2Goldens(t *testing.T) {
 	}
 }
 
-func TestUserChatListenerSQLDoesNotPublishRawH2DriverError(t *testing.T) {
-	database := h2fixture.Open(t, "sql-driver-error")
+func TestUserChatListenerSQLDoesNotPublishRawSQLiteDriverError(t *testing.T) {
+	database := sqlitefixture.Open(t, "sql-driver-error")
 	query := "SELEC 1"
 	if _, err := (&service.RawSQLService{DB: database.SQLDB()}).Query(context.Background(), query); err == nil {
 		t.Fatal("malformed query unexpectedly succeeded")
@@ -217,8 +217,8 @@ func TestSQLCommandCancellationDuringQueryDoesNotReply(t *testing.T) {
 	}
 }
 
-func TestUserChatListenerSQLRepliesWithSaturnUnicodeControlH2Golden(t *testing.T) {
-	database := h2fixture.Open(t, "sql-reply-unicode")
+func TestUserChatListenerSQLRepliesWithSaturnUnicodeControlSQLiteGolden(t *testing.T) {
+	database := sqlitefixture.Open(t, "sql-reply-unicode")
 	engine := &commandEngineStub{
 		bundle: &service.Bundle{SQLCommand: &service.RawSQLService{DB: database.SQLDB()}},
 		users:  map[string]*model.User{"alice": {Name: "alice", Trip: "admin"}},
@@ -226,7 +226,7 @@ func TestUserChatListenerSQLRepliesWithSaturnUnicodeControlH2Golden(t *testing.T
 	if err := RegisterUserUtilities(engine); err != nil {
 		t.Fatal(err)
 	}
-	query := "SELECT STRINGDECODE('\\uD83D\\uDE00') AS emoji, 'quote' || CHAR(34) || ' slash' || CHAR(92) || ' tab' || CHAR(9) || 'ctrl' || CHAR(1) || 'cr' || CHAR(13) || 'nl' || CHAR(10) AS text"
+	query := "SELECT CHAR(128512) AS emoji, 'quote' || CHAR(34) || ' slash' || CHAR(92) || ' tab' || CHAR(9) || 'ctrl' || CHAR(1) || 'cr' || CHAR(13) || 'nl' || CHAR(10) AS text"
 	wantTable := "\n```Text\n\n\n+----------+----------------------------------+\n|  emoji   |               text               |\n+----------+----------------------------------+\n|    😀    |  quote\" slash\\ tab\tctrl\u0001cr\rnl\n   |\n+----------+----------------------------------+\n\n\n ```"
 
 	for _, whisper := range []bool{false, true} {

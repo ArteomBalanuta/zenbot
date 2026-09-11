@@ -2,24 +2,19 @@
 
 ## Runtime files and ownership
 
-The default container runs in `/app`, reads `/app/config.toml`, and stores the H2
+The default container runs in `/app`, reads `/app/config.toml`, and stores the SQLite
 database under `/app/database`. `make run` mounts the selected host configuration
 read-only and the selected host database directory read/write. Replacing a
 container does not remove that mounted database.
 
-The process owns its master connection, managed replicas, agent runtime, and any
-H2 child it starts. Temporary remote-room snapshots are bounded operations, not
+The process owns its master connection, managed replicas, agent runtime, and
+embedded SQLite connection. Temporary remote-room snapshots are bounded operations, not
 managed replicas. A successful websocket write proves a request was sent, not that
 the server applied an action. See [commands](commands.md) for individual semantics.
 
-Do not run two bot instances against the same database stem. Local application
-startup uses H2 port 5435. It can attach to an existing listener and then validates
-the H2 identity; do not treat an occupied port as proof that the intended database
-is already running. Test fixtures use separately owned ephemeral ports.
-
-`deploy/h2-server.sh` is retained for explicit external-server diagnostics. It is
-not a prerequisite for normal startup. Its environment options are `H2_JAR`,
-`H2_PORT` (5435), and `H2_BASE_DIR` (`./data`). Stop diagnostic servers when done.
+Do not run two bot instances against the same database file. SQLite runs inside
+the bot process; it has no database server or listening port. Test fixtures use
+separate temporary files.
 
 ## Lifecycle commands
 
@@ -52,17 +47,23 @@ make backup-db
 make start
 ```
 
-`backup-db` stops the container before copying the H2 file into
-`database/backups/`. It deliberately leaves the container stopped. Protect these
+`backup-db` stops the named container and uses SQLite's backup API through the
+image's `sqlite3` CLI to create `database/backups/snapshot-XXXXXXXX/zenbot.db`.
+This includes committed data still in the WAL; a plain copy of the live main
+file would not. It verifies the backup with `PRAGMA integrity_check` and fails
+if Docker, stopping, backup, or validation fails. It deliberately leaves the
+container stopped. Stop any native processes using this file yourself. Protect these
 backups like the live database: they can contain private messages and credentials
 stored by application features. Copy them to independently protected storage;
 backups in the same directory are not protection against disk loss.
 
 For a restore, stop **every** process using the database. Preserve a copy of the
 current database before replacing it with a known compatible backup. Restore to
-the configured database stem (default `database/database.mv.db`), preserving file
-permissions. Run `make db-check` and then `make start`; verify application behavior
-in a test room. Do not copy live H2 files or assume older binaries understand a
+the configured database filename (default `database/zenbot.db`), preserving file
+permissions. Archive the current main file and its `-wal`, `-shm`, and `-journal`
+sidecars together before restoring; stale sidecars must not accompany the restored
+file. Run `make db-check` and then `make start`; verify application behavior
+in a test room. Do not copy live SQLite files or assume older binaries understand a
 newer schema. This project has no automated downgrade migration.
 
 ```sh
@@ -70,28 +71,33 @@ make db-check
 ```
 
 `db-check` also stops the container and leaves it stopped. It requires a built
-image and queries the stopped database with the pinned H2 jar in read-only mode.
-It checks the version and application-table count, not every application invariant
+image and runs `PRAGMA integrity_check` through its SQLite CLI. The mount is
+writable so SQLite can recover journals or create required sidecars. It requires
+the result to be `ok`, but does not check every application invariant
 or backup's logical correctness.
 
-**Destructive reset:** `make fresh-db` archives the legacy SQLite input but
-deletes the active H2 database and its trace/lock sidecars. Back up first. The
-target name must not be mistaken for a lossless migration or restore operation.
+**Destructive reset:** `make fresh-db` first creates and validates a backup,
+then removes the active SQLite file and its WAL/shared-memory/rollback-journal
+sidecars. A failed backup prevents removal. Stop all other writers first. Startup
+creates a fresh schema; restore the reported backup to recover the previous data.
 
-## SQLite import and H2 upgrades
+## SQLite schema upgrades
 
-H2 is the only runtime store. Startup applies the embedded schema and versioned
-upgrade logic in `internal/repository/h2/`. If a legacy `<dbPath>.db` SQLite file
-exists and the corresponding H2 application tables are empty, the migrator reads
-SQLite, recreates tables/indexes, imports rows, restores identity counters, and
-verifies row counts before committing. It archives the SQLite source and sidecars
-only after successful import. If both stores contain data, startup fails instead
-of merging potentially conflicting records.
+SQLite is the only runtime store. Startup applies the embedded schema and upgrade
+logic in `internal/repository/sqlite/`. The `dbPath` value is the exact filename;
+suffixes are neither added nor stripped. This release does not import other
+database formats. Preserve old deployments and their backups separately; changing
+`dbPath` creates a new store rather than transferring data.
 
-Keep an independent copy of the original SQLite files before migration. Do not
-delete a source merely because an H2 file appeared; verify the import completed
-and the expected records are available. For schema changes, use the
-[development tests](development.md), including migration and schema-upgrade cases.
+Supported SQLite upgrades are transactional: they retain identity sequences,
+message visibility and encoding, relationships, and supported indexes/triggers.
+An incompatible future schema, invalid foreign keys, null summary identities,
+or unsupported extra columns in a table requiring a rebuild cause startup to
+fail rather than silently discard data. Investigate the reported schema issue
+against a backup; do not use `fresh-db` as an upgrade repair shortcut.
+
+Keep an independent backup before upgrading. For schema changes, use the
+[development tests](development.md), including schema-upgrade cases.
 
 ## Profiling
 
@@ -136,9 +142,9 @@ profiling when finished if you do not need its overhead or exposed endpoint.
 | Symptom | Check |
 | --- | --- |
 | Cannot read configuration | Working directory and `config.toml`; Docker `CONFIG_FILE` mount |
-| H2 jar/runtime unavailable | Absolute `H2_JAR`, Java on `PATH`, pinned version/checksum |
-| H2 startup or identity error | Port 5435 ownership, file permissions, existing server version |
-| Tests fail on H2 setup | Install the jar; do not skip integration tests to hide missing prerequisites |
+| SQLite cannot open database | Exact `dbPath`, directory permissions, available disk space, valid SQLite file |
+| SQLite database busy | Another process using the same file; stop duplicate bot instances |
+| Backup/check fails | Docker availability, built image, configured database filename and permissions |
 | Bot connects but cannot moderate | Server-side moderator rights and application caller role are separate |
 | Agent disabled/unavailable | `[agent].enabled`, reachable base endpoint, creator trip, API key and capability gates |
 | Provider unreachable in Docker | Container `localhost` is not the host; check deployment-specific networking |

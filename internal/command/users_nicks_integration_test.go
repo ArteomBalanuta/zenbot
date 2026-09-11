@@ -8,11 +8,11 @@ import (
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
-func TestUsersAndNicksDispatchAgainstRealH2(t *testing.T) {
-	db := h2fixture.Open(t, "dispatch")
+func TestUsersAndNicksDispatchAgainstRealSQLite(t *testing.T) {
+	db := sqlitefixture.Open(t, "dispatch")
 	for _, statement := range []string{
 		"INSERT INTO trips(type,trip,created_on) VALUES('USER','trip-a',1)",
 		"INSERT INTO names(name,created_on) VALUES('merc',1)",

@@ -19,7 +19,7 @@ review than unrelated cleanup mixed with behavior changes.
 6. Open a pull request explaining the outcome, notable tradeoffs, and exact
    verification commands/results. Call out tests you could not run.
 
-Do not commit generated binaries, downloaded jars, credentials, database files,
+Do not commit generated binaries, dependency caches, credentials, database files,
 chat logs, editor metadata, or internal planning/handoff documents. Use fictional
 users and secrets in fixtures. Runtime prompt resources and regression tests are
 source files, not cleanup targets.
@@ -33,7 +33,7 @@ new dependencies when existing code already provides the needed behavior.
 - Errors must distinguish unavailable data from failed or ambiguous execution.
 - A sent request is not proof of a completed remote action.
 - Public history and private messages must retain their visibility boundaries.
-- Database upgrades need real H2 tests and a documented recovery path.
+- Database upgrades need real SQLite tests and a documented recovery path.
 - Tool argument/result schemas and resource descriptions must agree.
 - Tests should verify observable behavior, not merely repeat implementation
   constants or relax assertions until a failure disappears.

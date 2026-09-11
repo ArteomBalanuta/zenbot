@@ -3,8 +3,8 @@
 # See docs/configuration.md for aliases, validation, environment precedence, and wiring limitations.
 # Keep real credentials private. The binary does not load .env; Docker's Make target can.
 
-# H2 database file stem; this creates database/database.mv.db (omit the file suffix).
-dbPath = "database/database"
+# SQLite database filename, relative to the working directory or absolute.
+dbPath = "database/zenbot.db"
 
 # Hack.Chat WebSocket endpoint used by the bot and its room connections.
 wsUrl = "wss://hack.chat/chat-ws"

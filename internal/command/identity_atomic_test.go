@@ -9,17 +9,17 @@ import (
 	"zenbot/internal/config"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestAccessAtomicInvalidTargetAndSecondWriteFailure(t *testing.T) {
 	for _, targets := range []string{"first,,second", ",first", ",,,", "first,blocked"} {
 		t.Run(targets, func(t *testing.T) {
-			d := h2fixture.Open(t, "access-atomic")
+			d := sqlitefixture.Open(t, "access-atomic")
 			if _, err := d.DB.Exec(`INSERT INTO trips(type,trip,created_on) VALUES('USER','first',1)`); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := d.DB.Exec(`ALTER TABLE trips ADD CONSTRAINT rejected_grant CHECK (trip <> 'blocked')`); err != nil {
+			if _, err := d.DB.Exec(`CREATE TRIGGER rejected_grant BEFORE INSERT ON trips WHEN NEW.trip = 'blocked' BEGIN SELECT RAISE(ABORT, 'rejected grant'); END`); err != nil {
 				t.Fatal(err)
 			}
 			e := &commandEngineStub{bundle: &service.Bundle{Security: service.NewSecurityService(&config.Config{}, d)}}
@@ -36,7 +36,7 @@ func TestAccessAtomicInvalidTargetAndSecondWriteFailure(t *testing.T) {
 }
 
 func TestAccessAtomicExactTargetsDeduplicateAndPreserveTrailingSeparator(t *testing.T) {
-	d := h2fixture.Open(t, "access-exact")
+	d := sqlitefixture.Open(t, "access-exact")
 	e := &commandEngineStub{bundle: &service.Bundle{Security: service.NewSecurityService(&config.Config{}, d)}}
 	status, err := (&accessCommand{commandBase{engine: e, message: &model.ChatMessage{Name: "admin", Trip: "admin", Text: "!access AbC123,abc123,AbC123, USER"}}}).Execute(context.Background())
 	if status != model.SUCCESSFUL || err != nil {
@@ -65,7 +65,7 @@ func TestIdentityCommandsMissingStoresFailWithoutPanic(t *testing.T) {
 }
 
 func TestIdentityCommittedMutationPropagatesAcknowledgmentFailure(t *testing.T) {
-	d := h2fixture.Open(t, "identity-ack")
+	d := sqlitefixture.Open(t, "identity-ack")
 	want := errors.New("ack failed")
 	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{Identity: d}, Security: service.NewSecurityService(&config.Config{}, d)}}, sendErr: want}
 	for _, text := range []string{"!register Alice Trip", "!access Trip ADMIN"} {

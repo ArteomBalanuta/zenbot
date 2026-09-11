@@ -10,11 +10,11 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestLookupEmptyResultsDeliverExplanations(t *testing.T) {
-	db := h2fixture.Open(t, "lookup-empty-results")
+	db := sqlitefixture.Open(t, "lookup-empty-results")
 	bundle := &service.Bundle{Users: &service.UserService{Queries: db}, Notes: &service.NoteService{DB: db.DB}}
 	for _, tc := range []struct {
 		aliases    []string

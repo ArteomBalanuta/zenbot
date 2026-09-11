@@ -9,11 +9,11 @@ import (
 	"zenbot/internal/config"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestSecurityPersistedDemotionRevokesRuntimeGrant(t *testing.T) {
-	d := h2fixture.Open(t, "security-demotion")
+	d := sqlitefixture.Open(t, "security-demotion")
 	s := service.NewSecurityService(&config.Config{}, d)
 	if err := s.AuthorizeTrip("Trip"); err != nil {
 		t.Fatal(err)

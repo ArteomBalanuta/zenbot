@@ -23,6 +23,77 @@ Whisper invocations expose no tools. Public participation ignores whispers; a pr
 
 ## Model/tool protocol
 
+### Agent tool loop
+
+This diagram shows one admitted invocation. The loop belongs to the model;
+the surrounding runtime controls authority, resource limits, and delivery.
+
+```mermaid
+flowchart TD
+    A["Direct request, mention, ambient event, or moderation invocation"] --> B["Trusted identity and admission<br/>Deadline and memory-key ordering"]
+    B --> C["Assemble prompt, history, and eligible tools"]
+    S[("SQLite memory and public history")] --> C
+    C --> M["LLM: choose tools or write final answer"]
+    M --> P{"Response protocol valid?"}
+    P -->|"No; repair allowance remains"| R["Structural feedback; rejected calls do not execute"]
+    P -->|"Yes; tool calls"| V["Validate contracts, authority, prerequisites, and budgets"]
+    V --> X["Execute admitted calls<br/>Actions ordered; compatible safe reads may overlap"]
+    V -->|"Rejected call: coded observation"| O
+    X --> O["Retain full results and receipts<br/>Append paired, bounded tool observations"]
+    R --> L{"Tools and rounds remain?"}
+    O --> L
+    L -->|Yes| C2["Reproject context with results and runtime status"]
+    C2 --> M
+    L -->|No| T["Same LLM: terminal synthesis without tools"]
+    T --> P
+    P -->|"Yes; final candidate"| F["OutputFinalizer<br/>Structure, formatting, length, and reply policy"]
+    F --> D["Deliver final reply or accept verified tool-owned delivery"]
+    P -->|"Valid suppression with tool-owned delivery"| D
+    D -->|"Delivery succeeded or tool-owned"| W["AfterDelivery: persist turn and eligible evidence"]
+    W --> S
+    P -->|"Repair exhausted"| E["Interrupted-turn handling"]
+    F -->|Failure| E
+```
+
+Provider or context-assembly failures also enter interrupted-turn handling.
+Receipts and eligible evidence may be saved, with a bounded failure reply where
+permitted; cancellation does not send a reply. A delivery failure is logged and
+does not run normal `AfterDelivery` persistence. Optional or silent invocations
+can end without a reply; without verified tool-owned delivery they also skip
+normal persistence.
+
+The SQL store supplies context and persists outcomes; it does not select tools
+or certify task completion. A final candidate must also pass the loop's structural
+and silence checks before `OutputFinalizer`. Neither check is an LLM judge or a
+deterministic checklist of the user's requested subtasks.
+
+### Tool execution path
+
+```mermaid
+flowchart LR
+    E["Tool executor"] --> K{"Tool implementation"}
+    K -->|"saturn command"| G["Authorized command gateway"]
+    G --> C["Existing command handler and service"]
+    K -->|"Standalone read"| Q["Room directory, history, or SQL boundary"]
+    C --> R["Room operations or external utility service"]
+    C --> DB[("SQLite")]
+    Q --> DB
+    K -->|"read_tool_result"| O["Request-local observation store"]
+    C --> B["Typed result and action/delivery receipts"]
+    Q --> B
+    O --> B
+    B --> E
+```
+
+Some command tools send their own chat messages during execution. Their results
+still return to the loop for a final summary; requesting one summary does not
+suppress those tool-owned messages. `read_tool_result` retrieves retained output
+without repeating the original action. An `ACTION_OUTCOME_UNKNOWN` observation
+blocks further actions for that invocation and is non-retryable; eligible reads
+can still help the model explain what is known.
+
+### Protocol and bounds
+
 [`live/tool_loop.go`](../internal/agent/live/tool_loop.go) assembles each invocation with a fresh ledger, observation store, transcript, and `read_tool_result`. [`TurnEngine`](../internal/agent/live/turn_engine.go) runs the cycle:
 
 1. Build the caller-visible manifest and budget the initial context.
@@ -104,15 +175,15 @@ A page returns `content`, `nextOffset`, `totalRunes`, `done`, and the original r
 
 ## Memory, privacy, and SQL
 
-[`TurnMemory`](../internal/agent/turn/memory.go) and [`PersistentMemoryStore`](../internal/agent/live/memory.go) load bounded history by memory key, turn count, and TTL. Older complete user/assistant pairs can be summarized by a tool-free model call. H2 persists the summary, source fingerprint, and covered row ID; raw rows remain authoritative until TTL cleanup.
+[`TurnMemory`](../internal/agent/turn/memory.go) and [`PersistentMemoryStore`](../internal/agent/live/memory.go) load bounded history by memory key, turn count, and TTL. Older complete user/assistant pairs can be summarized by a tool-free model call. SQLite persists the summary, source fingerprint, and covered row ID; raw rows remain authoritative until TTL cleanup.
 
 Production appends conversation, outcome, and eligible read evidence in a single [`AppendAgentTurn`](../internal/repository/agent_turn.go) transaction. Only successful model-data results whose durable schemas validate become reusable evidence. Room deliveries and unknown actions do not become reusable read facts. Historical evidence is labeled historical and must not be mistaken for live presence.
 
 Recent-room and user-history queries explicitly select `PUBLIC` messages. Whispers have separate visibility and conversation keys. Legacy null visibility is classified as public by the compatibility upgrade. These controls limit context selection; they do not mean data stays on the host. The configured model provider receives the assembled request, including selected history, identity metadata, and tool data; memory summarization also calls that provider.
 
-Dynamic SQL has a broader privilege boundary than public-message retrieval. [`agent_schema.go`](../internal/repository/h2/agent_schema.go) discovers application base tables in H2's `PUBLIC` schema. That name is a SQL namespace, not a filter for public messages: capability holders can query application tables admitted by the discovered schema, potentially including private application data. Enable and grant this capability accordingly.
+Dynamic SQL has a broader privilege boundary than public-message retrieval. [`agent_schema.go`](../internal/repository/sqlite/agent_schema.go) discovers SQLite application tables. Capability holders can query tables admitted by the discovered schema, potentially including private application data. Enable and grant this capability accordingly.
 
-[`sql/policy.go`](../internal/agent/sql/policy.go) parses exactly one read-only `SELECT`, validates tables against discovered schema, and restricts functions and statement forms. Writes, locking selects, and server-internal tables are rejected. Execution is additionally bounded by timeout, SQL length, rows, columns, cell size, and result size. Parser compatibility does not imply that every accepted SQL expression will execute on H2; failures are returned as coded observations. The ordinary privileged chat SQL service is a separate boundary from these agent SQL tools.
+[`SQLiteSelectPolicy`](../internal/agent/sql/sqlite_policy.go) uses a SQLite SQL parser to accept exactly one read-only `SELECT`, validates tables against discovered schema, and restricts functions and statement forms. Validation includes nested CTEs, scalar subqueries, null tests, and SQLite's implicit table reads in `IN` expressions. Writes, locking selects, schema-qualified references, and SQLite internal tables are rejected. [`ExecuteAgentSQL`](../internal/repository/sqlite/agent_sql.go) additionally enables connection-local `query_only` while executing and restores the connection before returning it to the pool. Execution is bounded by timeout, SQL length, rows, columns, cell size, and result size. Parser compatibility does not imply that every accepted SQL expression will execute on SQLite; failures are returned as coded observations. The ordinary privileged chat SQL service is a separate boundary from these agent SQL tools.
 
 Agent structured events avoid raw prompt/result bodies, but the overall application also has legacy logging paths such as [`CoreListener.Notify`](../internal/listener/core_listener.go), which logs incoming payloads. Do not treat process logs as privacy-filtered agent context.
 
@@ -120,7 +191,7 @@ Agent structured events avoid raw prompt/result bodies, but the overall applicat
 
 The model chooses its final answer and can use the configured no-reply marker when permitted. For reply-required turns, suppression requires verified tool-owned room delivery and is rejected after unknown actions or when committed silent actions need confirmation. This checks delivery evidence; it does not prove that every part of a compound task was completed.
 
-[`OutputFinalizer`](../internal/agent/live/runner.go) checks required nonempty content, internal evidence/protocol leakage, formatting, and Unicode output bounds. Runtime delivers through the current room/whisper sink, and `AfterDelivery` persists after visible delivery or verified tool-owned output.
+The final answer is LLM-authored, including the tool-free terminal synthesis when needed. [`OutputFinalizer`](../internal/agent/live/runner.go) is a code-level output guard, not another model call: it checks required nonempty content, internal evidence/protocol leakage, formatting, and Unicode output bounds. Runtime delivers through the current room/whisper sink, and `AfterDelivery` persists after visible delivery or verified tool-owned output.
 
 If a later provider call, context projection, or finalization fails after tools ran, the partial completion retains receipts and valid evidence in an `IncompleteTurnError`. The runner attempts a bounded persistence of an interrupted-turn record and eligible reads. The interruption record is untrusted metadata, with call identity/status/effect counts rather than raw action bodies. Cancellation permits a separate short persistence attempt. This is a recovery record, not an automatic resume mechanism.
 
@@ -140,7 +211,7 @@ Verify the affected boundaries using [development](development.md). Useful test 
 | Receipt, retry, cancellation, batching | `internal/agent/tool/execution` |
 | Loop/protocol/finalization | `internal/agent/live`, `internal/agent/llm/openai` |
 | Projection and retrieval | `internal/agent/assemble`, `internal/agent/live/observation_tool_test.go` |
-| Memory and public/private selection | `internal/agent/turn`, `internal/repository/h2/agent_*_test.go` |
+| Memory and public/private selection | `internal/agent/turn`, `internal/repository/sqlite/agent_*_test.go` |
 | Production wiring and trusted identity | `cmd/zenbot/live_agent_test.go` |
 | Model-dependent behavior | `cmd/zenbot/provider_eval_test.go` (opt-in live provider with safe tool doubles) |
 

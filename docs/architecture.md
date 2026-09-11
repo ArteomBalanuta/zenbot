@@ -1,16 +1,16 @@
 # Architecture
 
-Zenbot is a Go application for Hack.Chat. The executable composes room connections, command handlers, services, H2 persistence, and an optional LLM agent. The agent uses the same authorized command execution boundary as chat commands; it does not own a second implementation of bot operations.
+Zenbot is a Go application for Hack.Chat. The executable composes room connections, command handlers, services, SQLite persistence, and an optional LLM agent. The agent uses the same authorized command execution boundary as chat commands; it does not own a second implementation of bot operations.
 
-See [configuration](configuration.md) for setup, [commands](commands.md) for the user interface, and [agent internals](agent.md) for model execution.
+See [configuration](configuration.md) for setup, [commands](commands.md) for the user interface, and the [agent tool-loop diagram](agent.md#agent-tool-loop) for model execution, feedback, finalization, and persistence.
 
 ## Process composition
 
-[`cmd/zenbot/main.go`](../cmd/zenbot/main.go) is the production entrypoint. It loads configuration, optionally starts profiling, opens H2, and creates process-owned replica management, temporary room-session coordination, and the agent runtime. A host supervisor then constructs and starts the master room engine.
+[`cmd/zenbot/main.go`](../cmd/zenbot/main.go) is the production entrypoint. It loads configuration, optionally starts profiling, opens SQLite, and creates process-owned replica management, temporary room-session coordination, and the agent runtime. A host supervisor then constructs and starts the master room engine.
 
 The master is replaceable. [`host_supervisor.go`](../cmd/zenbot/host_supervisor.go) coordinates replacement, while [`master_binding.go`](../cmd/zenbot/master_binding.go) supplies the current engine to process-owned callbacks. Agent command execution and reply delivery resolve this binding on use. Replacing a connection therefore does not require rebuilding the agent runtime or retaining a stale master pointer.
 
-[`startup.go`](../cmd/zenbot/startup.go) connects transport failures and health checks to the host lifecycle controller. Shutdown closes the agent, stops the master and managed replicas, and closes the database and any owned H2 process. Timeouts bound the attempted cleanup; failures remain reportable errors.
+[`startup.go`](../cmd/zenbot/startup.go) connects transport failures and health checks to the host lifecycle controller. Shutdown closes the agent, stops the master and managed replicas, and closes the embedded database. Timeouts bound the attempted cleanup; failures remain reportable errors.
 
 ## Request path
 
@@ -26,7 +26,7 @@ flowchart TD
     M --> G[Authorized command gateway]
     G --> R
     R --> S[Services and engine operations]
-    S --> DB[H2 repositories]
+    S --> DB[SQLite repositories]
     S --> E
     E --> T
 ```
@@ -55,11 +55,17 @@ Remote roster lookup returns typed `{room, users, count, returnedCount, truncate
 
 ## Persistence boundary
 
-[`internal/repository/h2/database.go`](../internal/repository/h2/database.go) connects to a real H2 database through its PostgreSQL wire protocol using `pgx`/`database/sql`. This is H2, not a PostgreSQL server. The default process path requires Java and the pinned H2 JAR, can start an owned H2 server, and verifies database identity during open. The schema and upgrades are maintained alongside the adapter; see [`schema-h2.sql`](../internal/repository/h2/schema-h2.sql).
+[`internal/repository/sqlite/database.go`](../internal/repository/sqlite/database.go) opens the configured SQLite file through `modernc.org/sqlite` and `database/sql`. SQLite runs inside the Go process, with WAL journaling, foreign-key enforcement, and a five-second busy timeout on each connection. Transactions acquire the write lock before reading. The schema and upgrades are maintained alongside the adapter; see [`schema.sql`](../internal/repository/sqlite/schema.sql).
 
-Repositories store identities and roles, presence and messages, command data, and agent memory. Agent conversation, outcome, and eligible read evidence use a single turn transaction. Summaries have their own source coverage metadata. Public-message queries filter message visibility; the H2 SQL schema named `PUBLIC` is a database namespace and is not a privacy label.
+Repositories store identities and roles, presence and messages, command data, and agent memory. Agent conversation, outcome, and eligible read evidence use a single turn transaction. Summaries have their own source coverage metadata. Public-message queries filter message visibility; access to a database table does not imply its rows are public chat.
 
-SQLite-related migration code is an import boundary for older data, not the production runtime backend. Database files are operational state and belong outside the published source tree.
+Database files and their WAL/journal sidecars are operational state and belong outside the published source tree.
+
+SQL parameters use SQLite's numbered `?1` form when positional reuse matters.
+The adapter registers a Unicode-aware `LOWER` function so nickname lookups agree
+with Go normalization; trips and hashes remain exact identifiers. Schema upgrades
+run atomically, preserve identity sequences, and reject unsupported extra columns
+instead of discarding data during a required table rebuild.
 
 ## Trust and failure boundaries
 
@@ -67,7 +73,7 @@ Room metadata and configured/persisted roles determine authority. Chat text, mod
 
 An accepted local action or outgoing delivery is represented by a receipt. Such receipts support duplicate protection and honest failure reporting; they do not establish that a human read a message or that a compound natural-language request was satisfied. Cancellation is cooperative, especially across action and transport implementations.
 
-Agent structured logging is designed around request IDs, counts, timings, and error codes. This is not a process-wide promise of content-free logs: [`CoreListener.Notify`](../internal/listener/core_listener.go) logs incoming payloads. Treat logs, H2 files, and provider access as part of deployment data handling. See [operations](operations.md).
+Agent structured logging is designed around request IDs, counts, timings, and error codes. This is not a process-wide promise of content-free logs: [`CoreListener.Notify`](../internal/listener/core_listener.go) logs incoming payloads. Treat logs, SQLite files, and provider access as part of deployment data handling. See [operations](operations.md).
 
 ## Where to change behavior
 
@@ -78,8 +84,8 @@ Agent structured logging is designed around request IDs, counts, timings, and er
 | Incoming event handling | `internal/listener`, `internal/listener/message` |
 | Commands and their agent contracts | `internal/command`, `internal/command/catalog` |
 | Domain operations and external utilities | `internal/service` |
-| Storage and schema upgrades | `internal/repository`, `internal/repository/h2` |
+| Storage and schema upgrades | `internal/repository`, `internal/repository/sqlite` |
 | Model invocation, tools, memory, budgets | `internal/agent` |
 | Prompt text and tool copy | `resources/agent` |
 
-Follow [development](development.md) for build and verification commands. Source-level tests cover these boundaries separately: factory isolation, listener dispatch, command catalog parity, lifecycle ownership, H2 transactions, and agent protocol/receipt behavior. Passing those tests does not certify the semantic reliability of a configured model.
+Follow [development](development.md) for build and verification commands. Source-level tests cover these boundaries separately: factory isolation, listener dispatch, command catalog parity, lifecycle ownership, SQLite transactions, and agent protocol/receipt behavior. Passing those tests does not certify the semantic reliability of a configured model.

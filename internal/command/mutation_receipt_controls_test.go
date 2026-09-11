@@ -13,7 +13,7 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type receiptIdentity struct {
@@ -34,8 +34,8 @@ func (r receiptIdentity) Register(ctx context.Context, name, trip string, role m
 }
 
 func TestMutationReceiptSourceFailuresAndCancellation(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-controls")
-	if _, err := db.DB.Exec("ALTER TABLE trips ADD CONSTRAINT reject_receipt_trip CHECK (trip <> 'RollbackTrip')"); err != nil {
+	db := sqlitefixture.Open(t, "mutation-receipt-controls")
+	if _, err := db.DB.Exec("CREATE TRIGGER reject_receipt_trip BEFORE INSERT ON trips WHEN NEW.trip = 'RollbackTrip' BEGIN SELECT RAISE(ABORT, 'rejected trip'); END"); err != nil {
 		t.Fatal(err)
 	}
 	users := &service.UserService{Identity: db, GroupB: db}
@@ -75,7 +75,7 @@ func TestMutationReceiptSourceFailuresAndCancellation(t *testing.T) {
 }
 
 func TestMutationReceiptAliasAndCancellationAfterCommit(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-alias")
+	db := sqlitefixture.Open(t, "mutation-receipt-alias")
 	ctx, receipt := common.WithMutationRecorder(context.Background())
 	users := &service.UserService{Identity: db}
 	if err := users.Register(ctx, "Name", "ExactTrip", model.REGULAR); err != nil {
@@ -106,7 +106,7 @@ func TestMutationReceiptAliasAndCancellationAfterCommit(t *testing.T) {
 }
 
 func TestMutationReceiptSourceErrorSurvivesErrorAcknowledgmentFailure(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-source-error")
+	db := sqlitefixture.Open(t, "mutation-receipt-source-error")
 	sourceErr := repository.ErrCommitOutcomeUnknown
 	sendErr := errors.New("ack failed")
 	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{Identity: receiptIdentity{IdentityRepository: db, sourceErr: sourceErr}}}}, sendErr: sendErr}
@@ -181,7 +181,7 @@ func TestMutationReceiptMultipleRepliesStopOnFailureOrCancellation(t *testing.T)
 }
 
 func TestMutationReceiptAuditCancellationAfterSuccessfulAcknowledgment(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-cancel-audit")
+	db := sqlitefixture.Open(t, "mutation-receipt-cancel-audit")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	e := &mutationExitEngine{gatewayEngine: &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Notes: &service.NoteService{DB: db.DB}}}}, cancelAudit: cancel}

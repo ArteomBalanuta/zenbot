@@ -18,7 +18,7 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestTextObservationAuditPingFactSurvivesFailedDelivery(t *testing.T) {
@@ -78,7 +78,7 @@ func TestTextObservationAuditForcedPrivateHelpUsesActualVisibility(t *testing.T)
 }
 
 func TestTextObservationAuditForcedPrivateNotesUseActualVisibility(t *testing.T) {
-	database := h2fixture.Open(t, "text-observation-private-notes")
+	database := sqlitefixture.Open(t, "text-observation-private-notes")
 	if err := (&service.NoteService{DB: database.DB}).Save(context.Background(), "trip", "secret 🍵"); err != nil {
 		t.Fatal(err)
 	}

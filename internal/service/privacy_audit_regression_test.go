@@ -7,11 +7,11 @@ import (
 
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestUtilityAuditPrivateMailCannotBeClaimedByNickname(t *testing.T) {
-	db := h2fixture.Open(t, "audit-private-mail")
+	db := sqlitefixture.Open(t, "audit-private-mail")
 	if _, err := db.DB.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES('sender#trip','AbC123','secret','PENDING',1,'true')`); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestUtilityAuditPrivateMailCannotBeClaimedByNickname(t *testing.T) {
 }
 
 func TestPrivateMailQueueResolvesExactTripBeforeNickname(t *testing.T) {
-	db := h2fixture.Open(t, "audit-mail-resolution")
+	db := sqlitefixture.Open(t, "audit-mail-resolution")
 	for _, query := range []string{
 		`INSERT INTO trips(type,trip,created_on) VALUES('USER','AbC123',1),('USER','abc123',1),('USER','other',1)`,
 		`INSERT INTO names(name,created_on) VALUES('Owner',1),('OwnerAlias',1),('LowerOwner',1),('AbC123',1)`,
@@ -79,7 +79,7 @@ func TestMailPreservesExplicitPublicVisibility(t *testing.T) {
 }
 
 func TestUtilityAuditLastOnlineDoesNotRevealWhispers(t *testing.T) {
-	db := h2fixture.Open(t, "audit-last-online")
+	db := sqlitefixture.Open(t, "audit-last-online")
 	if _, err := db.DB.Exec(`INSERT INTO messages(trip,name,message,created_on,visibility) VALUES('target-trip','target','public hello',1,'PUBLIC'),('target-trip','target','!note private secret',2,'WHISPER'),('private-trip','private-only','only private secret',3,'WHISPER')`); err != nil {
 		t.Fatal(err)
 	}

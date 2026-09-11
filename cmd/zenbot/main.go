@@ -37,7 +37,7 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/profiling"
 	"zenbot/internal/repository"
-	"zenbot/internal/repository/h2"
+	"zenbot/internal/repository/sqlite"
 	"zenbot/internal/transport"
 )
 
@@ -446,18 +446,13 @@ func main() {
 			}
 		}()
 	}
-	db, err := h2.Open(ctx, h2.Config{DatabaseStem: c.DbPath, H2Jar: os.Getenv("H2_JAR"), Java: os.Getenv("JAVA"), Port: 5435})
+	db, err := sqlite.Open(ctx, sqlite.Config{Path: c.DbPath})
 	if err != nil {
 		log.Fatal("Can't connect to db: ", err)
 	}
 	defer func() {
-		if db.DB != nil {
-			_ = db.DB.Close()
-		}
-		if db.Server != nil {
-			stop, done := context.WithTimeout(context.Background(), 5*time.Second)
-			defer done()
-			_ = db.Server.Stop(stop)
+		if err := db.Close(); err != nil {
+			log.Printf("database shutdown: %v", err)
 		}
 	}()
 

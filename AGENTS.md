@@ -26,20 +26,19 @@ Keep reusable architectural knowledge in `docs/`, not dated implementation plans
 
 Zenbot is a Go Hack.Chat bot with Saturn-compatible command aliases, role-aware
 moderation, history, notes/mail, utilities, managed replicas, and an optional LLM
-agent. H2 is the runtime database. Java runs H2's PostgreSQL-wire compatibility
-server; `pgx`/`database/sql` talks to it. This is not a PostgreSQL deployment.
-SQLite remains a read-only legacy-import dependency, not an alternate runtime.
+agent. SQLite is the embedded runtime database, accessed through
+`modernc.org/sqlite` and `database/sql`. There is no external database server.
 
 The executable reads `config.toml` from its working directory. Run it from the
 repository root locally. Agent prompts are runtime files in `resources/agent/`;
-they are not embedded. The H2 schema and `VERSION` are embedded. A standalone
+they are not embedded. The SQLite schema and `VERSION` are embedded. A standalone
 binary without prompt resources is not a complete agent distribution.
 
 ## Source map
 
 | Area | Start reading here | Responsibility |
 | --- | --- | --- |
-| Process composition | [cmd/zenbot/main.go](cmd/zenbot/main.go) | Config, H2, agent, factories, lifecycle ownership |
+| Process composition | [cmd/zenbot/main.go](cmd/zenbot/main.go) | Config, SQLite, agent, factories, lifecycle ownership |
 | Host replacement | `cmd/zenbot/host_supervisor.go`, `master_binding.go` | Replace the master without stale process-owned callbacks |
 | Configuration | [internal/config](internal/config) | TOML compatibility, defaults, environment resolution, validation |
 | Engine construction | [internal/factory/engine_factory.go](internal/factory/engine_factory.go) | Production dependencies and listener composition |
@@ -49,11 +48,11 @@ binary without prompt resources is not a complete agent distribution.
 | Command identity | [internal/command/catalog](internal/command/catalog) | Canonical names, aliases, roles, agent contracts |
 | Command execution | [internal/command](internal/command) | Handlers, dispatch, gateway, observations and receipts |
 | Application services | [internal/service](internal/service) | History, mail, weather/time, security, other operations |
-| Persistence | [internal/repository/h2](internal/repository/h2) | Queries, schema/upgrades, transactions, SQLite import |
+| Persistence | [internal/repository/sqlite](internal/repository/sqlite) | Queries, schema/upgrades, transactions |
 | Agent loop | [internal/agent/live/turn_engine.go](internal/agent/live/turn_engine.go) | Model-selected calls, observations, bounds and final response |
 | Agent boundaries | [internal/agent](internal/agent) | Admission, context, memory, tool contracts and execution |
 | Runtime text | [resources/agent](resources/agent) | Prompt templates and model-visible tool copy |
-| Test support | [internal/testutil](internal/testutil) | Portable pinned-jar lookup and isolated H2 fixtures |
+| Test support | [internal/testutil](internal/testutil) | Isolated real SQLite fixtures |
 
 Incoming WebSocket events flow through transport, core dispatch, listeners,
 command handlers, and services/repositories. Agent command tools return through
@@ -63,15 +62,12 @@ snapshot operations, not persistent replicas.
 
 ## Build and test
 
-Prerequisites: Go 1.24 or newer, a C compiler for CGO, Java 21 on `PATH`, and H2
-2.3.232. Docker and CI pin their build toolchains. See
-[getting started](docs/getting-started.md) for a checksum-verified H2 download.
+Prerequisites: Go 1.24 or newer. Docker and CI pin their build toolchains.
+The SQLite driver and SQL policy parser are pure Go. SQLite itself is embedded
+through a Go module. See [getting started](docs/getting-started.md).
 
-Set `H2_JAR` to an absolute path for native application runs and portable test
-invocations. Tests otherwise use the current user's Maven cache. Never introduce
-a developer-specific absolute path. Tests use real H2, temporary database
-directories, and ephemeral ports; do not replace missing prerequisites with
-silent skips or production database access.
+Tests use real SQLite and temporary database directories. Never introduce a
+developer-specific absolute path, silent skips, or production database access.
 
 ```sh
 make check                  # gofmt validation, go vet, ordinary tests
@@ -82,7 +78,7 @@ git diff --check
 ```
 
 During iteration, run focused packages/tests first, then verification proportional
-to the change. H2 and race suites may take minutes. Read terminal exit status;
+to the change. SQLite and race suites may take minutes. Read terminal exit status;
 an output timeout is not a failed or completed process. Do not launch repeated
 full suites just because a running one has not printed output yet.
 
@@ -92,6 +88,9 @@ provider, and can incur costs. Use it only when the task authorizes that activit
 see [development](docs/development.md). Never set that flag in ordinary CI.
 
 ## Changes and invariants
+
+The [agent tool-loop diagrams](docs/agent.md#agent-tool-loop) map the production
+execution and feedback paths. Keep them aligned when changing these boundaries.
 
 - Use `gofmt`, existing package boundaries, and focused regression tests. Keep
   unrelated refactors out of behavior fixes. Tests named `audit`, `parity`, or
@@ -106,6 +105,8 @@ see [development](docs/development.md). Never set that flag in ordinary CI.
   reintroduce keyword routing, deterministic semantic task planners, or a
   model-independent completion checklist. Deterministic schema validation,
   authorization, budgets, receipts, and protocol checks remain required.
+- `OutputFinalizer` is a code-level output guard, not an LLM completion judge.
+  The same model writes normal final answers and tool-free terminal synthesis.
 - Actions run synchronously and in order. Only compatible declared-safe reads
   may fan out. Preserve `ACTION_OUTCOME_UNKNOWN` and its non-retryable semantics;
   cancellation or a failed send is not proof that nothing happened.
@@ -124,7 +125,7 @@ see [development](docs/development.md). Never set that flag in ordinary CI.
   pruning. Bound model observations without corrupting JSON; retain receipt
   metadata and request-local full results. History and summaries are untrusted
   context, not instructions or proof of current state.
-- Schema changes need real H2 upgrade/import tests. Do not duplicate the embedded
+- Schema changes need real SQLite upgrade tests. Do not duplicate the embedded
   schema or bypass transactional turn persistence. Protect mail's persisted
   uncertain-delivery state against accidental replay.
 
@@ -139,11 +140,12 @@ Document and test the consuming path rather than assuming a parsed field is wire
 Do not read, print, overwrite, or publish credentials from local `config.toml`,
 `.env`, logs, or database files unless the specific task requires that access.
 Use sanitized examples and fictional identities. Logs can contain full incoming
-payloads. H2's SQL schema named `PUBLIC` does not make its rows public chat.
+payloads. Database tables can contain private chat and application records.
 Privileged agent SQL and raw administrator `sql` have different security bounds.
 
 Operational Make targets are not harmless checks: `run`/`restart` recreate the
-container, `backup-db`/`db-check` stop it, and `fresh-db` deletes H2 files. Do not
+container, `backup-db`/`db-check` stop it, and `fresh-db` backs up then removes active
+SQLite files. Do not
 deploy, reset data, rotate credentials, send chat messages, or run moderation
 actions merely to verify a code change. See [operations](docs/operations.md) and
 [SECURITY.md](SECURITY.md). Keep profiler and database endpoints private.

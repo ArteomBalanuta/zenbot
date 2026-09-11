@@ -8,7 +8,7 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type mailDeliveryAuditEngine struct {
@@ -38,9 +38,9 @@ func (e *mailDeliveryAuditEngine) SendChatMessage(_, body string, whisper bool) 
 }
 
 func TestMailDeliveryCompactFormatPreservesBodyAndPrivacy(t *testing.T) {
-	database := h2fixture.Open(t, "mail-compact-format")
+	database := sqlitefixture.Open(t, "mail-compact-format")
 	body := "first\nsecond \\n <>&"
-	if _, err := database.DB.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper,text_encoding) VALUES('sender','trip-a',$1,'PENDING',1,'true','PLAIN')`, body); err != nil {
+	if _, err := database.DB.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper,text_encoding) VALUES('sender','trip-a',?1,'PENDING',1,'true','PLAIN')`, body); err != nil {
 		t.Fatal(err)
 	}
 	engine := &mailDeliveryAuditEngine{mail: &service.MailService{DB: database.DB}}
@@ -54,10 +54,10 @@ func TestMailDeliveryCompactFormatPreservesBodyAndPrivacy(t *testing.T) {
 // A failure in a later public batch must not replay a previously delivered
 // private batch. The database and listener are real; only transport is scripted.
 func TestMailDeliveryAuditDoesNotReplaySuccessfulPrivateBatch(t *testing.T) {
-	database := h2fixture.Open(t, "mail-batch-replay-audit")
+	database := sqlitefixture.Open(t, "mail-batch-replay-audit")
 	db := database.SQLDB()
 	for _, whisper := range []string{"true", "false"} {
-		if _, err := db.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES('sender','trip-a','body','PENDING',1,$1)`, whisper); err != nil {
+		if _, err := db.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES('sender','trip-a','body','PENDING',1,?1)`, whisper); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -73,7 +73,7 @@ func TestMailDeliveryAuditDoesNotReplaySuccessfulPrivateBatch(t *testing.T) {
 }
 
 func TestMailDeliveryAuditCancellationStopsDelivery(t *testing.T) {
-	database := h2fixture.Open(t, "mail-cancel-audit")
+	database := sqlitefixture.Open(t, "mail-cancel-audit")
 	db := database.SQLDB()
 	if _, err := db.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES('sender','trip-a','body','PENDING',1,'true')`); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestMailDeliveryAuditCancellationStopsDelivery(t *testing.T) {
 }
 
 func TestMailDeliveryAuditRecipientsHaveIndependentDeliveryState(t *testing.T) {
-	database := h2fixture.Open(t, "mail-recipient-state-audit")
+	database := sqlitefixture.Open(t, "mail-recipient-state-audit")
 	db := database.SQLDB()
 	if _, err := db.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES('sender','trip-a,trip-b','body','PENDING',1,'true')`); err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestMailDeliveryAuditRecipientsHaveIndependentDeliveryState(t *testing.T) {
 }
 
 func TestMailDeliveryAuditAmbiguousSendIsNotAutomaticallyReplayed(t *testing.T) {
-	database := h2fixture.Open(t, "mail-unknown-send-audit")
+	database := sqlitefixture.Open(t, "mail-unknown-send-audit")
 	db := database.SQLDB()
 	if _, err := db.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES('sender','trip-a','body','PENDING',1,'true')`); err != nil {
 		t.Fatal(err)

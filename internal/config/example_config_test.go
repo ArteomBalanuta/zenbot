@@ -51,7 +51,7 @@ func TestExampleConfigDocumentsAndResolvesProductionAgentSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve example config: %v", err)
 	}
-	if cfg.DbPath != "database/database" || resolved.MemoryTurns != 30 || resolved.MemoryRawTurns != 20 || resolved.MemorySummaryMaxChars != 12000 || resolved.ContextMessageLimit != 60 || resolved.MaxPromptChars != 8000 || resolved.MaxContextTokens != 16000 || resolved.ContextReserveTokens != 2048 || resolved.MaxCallsPerTool != 2 || resolved.MaxToolFailures != 2 {
+	if cfg.DbPath != "database/zenbot.db" || resolved.MemoryTurns != 30 || resolved.MemoryRawTurns != 20 || resolved.MemorySummaryMaxChars != 12000 || resolved.ContextMessageLimit != 60 || resolved.MaxPromptChars != 8000 || resolved.MaxContextTokens != 16000 || resolved.ContextReserveTokens != 2048 || resolved.MaxCallsPerTool != 2 || resolved.MaxToolFailures != 2 {
 		t.Fatalf("example runtime values are stale: base=%+v agent=%+v", cfg, resolved.AgentConfig)
 	}
 }

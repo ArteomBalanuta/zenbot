@@ -4,15 +4,15 @@ A Go bot for Hack.Chat rooms, with role-aware commands, moderation, persistent
 history and mail, replica management, and an optional LLM agent.
 
 Zenbot retains many Saturn command aliases while using a Go runtime and a
-file-backed H2 database. Java is required for H2; SQLite is used only to import
-legacy databases. The agent is optional and disabled in the example configuration.
+file-backed embedded SQLite database. The agent is optional and disabled in the
+example configuration.
 
 ## Start here
 
 - [Installation and first run](docs/getting-started.md)
 - [Configuration reference](docs/configuration.md)
 - [Commands and permissions](docs/commands.md)
-- [Architecture](docs/architecture.md) and [agent execution](docs/agent.md)
+- [Architecture](docs/architecture.md) and [agent execution with tool-loop diagrams](docs/agent.md#agent-tool-loop)
 - [Operations, backups, and troubleshooting](docs/operations.md)
 - [Development and testing](docs/development.md)
 - [Security and privacy](SECURITY.md)
@@ -20,7 +20,7 @@ legacy databases. The agent is optional and disabled in the example configuratio
 
 ## Docker setup: download, configure, start
 
-You do **not** need to install Go, Java, H2, or Make on your computer for this
+You do **not** need to install Go, SQLite, or Make on your computer for this
 path. Docker builds the bot and packages its runtime dependencies automatically.
 You only need Docker, the project files, and a text editor. The first build takes
 longer because it downloads dependencies; later builds reuse the cache.
@@ -70,7 +70,7 @@ adminTrips = "YOUR_PUBLIC_ADMIN_TRIPCODE"
 
 Use a room you control. `trip` is the bot's **private trip-generation secret**;
 `adminTrips` contains your **public tripcode**, not your password. Keep the rest
-of the example settings initially, including `dbPath = "database/database"`
+of the example settings initially, including `dbPath = "database/zenbot.db"`
 and `[agent].enabled = false`. Save the file.
 
 The empty `.env` is ready for optional API credentials later. Both files are
@@ -96,8 +96,8 @@ Open your configured Hack.Chat room and send `*help` or `*ping` to check it.
 Help arrives privately. No web dashboard or inbound port is needed for ordinary
 bot operation.
 
-The image contains the binary, Java 21, checksum-pinned H2 2.3.232, and prompt
-resources. Configuration is mounted read-only; persistent data stays in your
+The image contains the binary, SQLite maintenance CLI, and prompt resources.
+Configuration is mounted read-only; persistent data stays in your
 host's `database/` folder even when the container is removed. Keep that folder
 private and [back it up](docs/operations.md#backups-and-restores).
 

@@ -21,7 +21,7 @@ type SecurityService struct {
 }
 
 // The variadic repository preserves the original constructor for callers that
-// only need configured-trip authorization, while production injects H2.
+// only need configured-trip authorization, while production injects SQLite.
 func NewSecurityService(c *config.Config, auth ...repository.AuthorizationRepository) *SecurityService {
 	s := &SecurityService{AdminTrips: append([]string(nil), c.AdminTrips...), UserTrips: append([]string(nil), c.UserTrips...)}
 	if len(auth) > 0 {

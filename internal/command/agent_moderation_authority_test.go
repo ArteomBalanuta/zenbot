@@ -9,7 +9,7 @@ import (
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type moderationReviewEngine struct{ *commandEngineStub }
@@ -29,7 +29,7 @@ func (e *moderationReviewEngine) SubmitCredentialedRoomSnapshot(request snapshot
 }
 
 func TestAgentCommandGatewayModerationReviewRejectsCommandsOutsideMatchingMute(t *testing.T) {
-	database := h2fixture.Open(t, "moderation-review-authority")
+	database := sqlitefixture.Open(t, "moderation-review-authority")
 	seedMailGroupCCommandRecipient(t, database.DB)
 	identity := &identityFake{}
 	shadowBans := &shadowBanRepositoryStub{}

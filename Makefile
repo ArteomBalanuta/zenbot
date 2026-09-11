@@ -9,12 +9,8 @@ APP_DIR ?= /app
 CONFIG_FILE ?= $(shell if [ -f "$(CURDIR)/config.toml" ]; then printf "%s" "$(CURDIR)/config.toml"; else printf "%s" "$(CURDIR)/config.example.toml"; fi)
 ENV_FILE ?= $(CURDIR)/.env
 DATABASE_DIR ?= $(CURDIR)/database
-DATABASE_STEM ?= $(DATABASE_DIR)/database
-DATABASE_FILE ?= $(DATABASE_STEM).mv.db
-LEGACY_DATABASE_FILE ?= $(DATABASE_STEM).db
+DATABASE_FILE ?= $(DATABASE_DIR)/zenbot.db
 DATABASE_BACKUP_DIR ?= $(DATABASE_DIR)/backups
-CONTAINER_DATABASE_STEM ?= $(APP_DIR)/database/$(notdir $(DATABASE_STEM))
-H2_CHECK_URL ?= jdbc:h2:file:$(CONTAINER_DATABASE_STEM);ACCESS_MODE_DATA=r;IFEXISTS=TRUE
 AGENT_API_KEY_ENV ?= SATURN_AGENT_API_KEY
 PROFILING_HOST ?= 127.0.0.1
 PROFILING_PORT ?= 6060
@@ -40,9 +36,9 @@ help:
 		"make rmi       - Remove the Docker image if it exists" \
 		"make clean     - Remove the container and image" \
 		"make rebuild   - Clean, build, and run the image" \
-		"make fresh-db  - Archive legacy SQLite and recreate H2 on next startup" \
-		"make db-check  - Stop Zenbot and verify the H2 file" \
-		"make backup-db - Stop Zenbot and create a consistent H2 file backup" \
+		"make fresh-db  - Back up SQLite and remove the active database for a fresh start" \
+		"make db-check  - Stop Zenbot and verify SQLite integrity" \
+		"make backup-db - Stop Zenbot and create a consistent SQLite backup" \
 		"make logs      - Follow container logs" \
 		"make shell     - Open a shell in the running container" \
 		"make ps        - Show matching containers" \
@@ -118,40 +114,45 @@ clean: rm rmi
 
 rebuild: clean build run
 
-fresh-db: stop
+# Maintenance must fail when Docker is unavailable; a failed inspect must never
+# be mistaken for proof that the writer has stopped.
+.PHONY: maintenance-stop
+maintenance-stop:
 	@set -eu; \
-	mkdir -p "$(DATABASE_DIR)" "$(DATABASE_BACKUP_DIR)"; \
-	if [ -f "$(LEGACY_DATABASE_FILE)" ]; then \
-		stamp="$$(date +%Y%m%d-%H%M%S)"; \
-		for source in "$(LEGACY_DATABASE_FILE)" "$(LEGACY_DATABASE_FILE)-wal" "$(LEGACY_DATABASE_FILE)-shm"; do \
-			if [ -f "$$source" ]; then mv "$$source" "$(DATABASE_BACKUP_DIR)/$$(basename "$$source").$$stamp"; fi; \
-		done; \
-		echo "Legacy SQLite input archived under $(DATABASE_BACKUP_DIR)."; \
+	$(DOCKER) info >/dev/null; \
+	containers="$$($(DOCKER) container ls -a --format '{{.Names}}')"; \
+	if printf '%s\n' "$$containers" | grep -Fxq "$(CONTAINER_NAME)"; then \
+		$(DOCKER) stop --timeout "$(STOP_TIMEOUT)" "$(CONTAINER_NAME)"; \
 	fi; \
-	rm -f "$(DATABASE_FILE)" "$(DATABASE_STEM).trace.db" "$(DATABASE_STEM).lock.db"; \
-	echo "H2 will create a fresh schema on the next Zenbot startup."
+	$(DOCKER) image inspect "$(IMAGE_NAME)" >/dev/null
 
-db-check: stop
-	@test -s "$(DATABASE_FILE)" || { echo "H2 database not found or empty: $(DATABASE_FILE)"; exit 1; }
-	@$(DOCKER) image inspect "$(IMAGE_NAME)" >/dev/null 2>&1 || { echo "Docker image not found: $(IMAGE_NAME). Run make build first."; exit 1; }
-	$(DOCKER) run --rm \
-		--entrypoint java \
-		-v "$(DATABASE_DIR):$(APP_DIR)/database" \
-		"$(IMAGE_NAME)" \
-		-cp /opt/h2/h2.jar org.h2.tools.Shell \
-		-url "$(H2_CHECK_URL)" \
-		-user sa \
-		-password "" \
-		-sql "SELECT H2VERSION(); SELECT COUNT(*) AS APPLICATION_TABLES FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC'"
+fresh-db: backup-db
+	rm -f "$(DATABASE_FILE)" "$(DATABASE_FILE)-wal" "$(DATABASE_FILE)-shm" "$(DATABASE_FILE)-journal"
+	@echo "SQLite will create a fresh schema on the next Zenbot startup."
 
-backup-db: stop
-	@test -s "$(DATABASE_FILE)" || { echo "H2 database not found or empty: $(DATABASE_FILE)"; exit 1; }
+db-check: maintenance-stop
+	@test -s "$(DATABASE_FILE)" || { echo "SQLite database not found or empty: $(DATABASE_FILE)"; exit 1; }
+	@set -eu; \
+	result="$$($(DOCKER) run --rm --entrypoint sqlite3 \
+		--mount "type=bind,source=$(abspath $(dir $(DATABASE_FILE))),target=/data" \
+		"$(IMAGE_NAME)" "/data/$(notdir $(DATABASE_FILE))" 'PRAGMA integrity_check;')"; \
+	printf '%s\n' "$$result"; test "$$result" = ok
+
+backup-db: maintenance-stop
+	@test -s "$(DATABASE_FILE)" || { echo "SQLite database not found or empty: $(DATABASE_FILE)"; exit 1; }
 	@set -eu; \
 	mkdir -p "$(DATABASE_BACKUP_DIR)"; \
-	backup="$(DATABASE_BACKUP_DIR)/database-$$(date +%Y%m%d-%H%M%S).mv.db"; \
-	cp "$(DATABASE_FILE)" "$$backup"; \
-	test -s "$$backup"; \
-	echo "Database backup created: $$backup"
+	backup_dir="$$(mktemp -d "$(abspath $(DATABASE_BACKUP_DIR))/snapshot-XXXXXXXX")"; \
+	$(DOCKER) run --rm --entrypoint sqlite3 \
+		--mount "type=bind,source=$(abspath $(dir $(DATABASE_FILE))),target=/data" \
+		--mount "type=bind,source=$$backup_dir,target=/backup" \
+		"$(IMAGE_NAME)" "/data/$(notdir $(DATABASE_FILE))" '.backup /backup/zenbot.db'; \
+	test -s "$$backup_dir/zenbot.db"; \
+	result="$$($(DOCKER) run --rm --entrypoint sqlite3 \
+		--mount "type=bind,source=$$backup_dir,target=/backup" \
+		"$(IMAGE_NAME)" /backup/zenbot.db 'PRAGMA journal_mode=DELETE; PRAGMA integrity_check;')"; \
+	test "$$result" = "$$(printf 'delete\nok')" || { printf '%s\n' "$$result"; exit 1; }; \
+	echo "Database backup created: $$backup_dir/zenbot.db"
 
 logs:
 	$(DOCKER) logs -f "$(CONTAINER_NAME)"

@@ -16,7 +16,7 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type receiptRoomDirectory struct{}
@@ -26,7 +26,7 @@ func (receiptRoomDirectory) FindRoomUsers(room string) (tool.RoomUserSnapshot, b
 }
 
 func TestMutationReceiptToolExecutorPreservesUnknownAndBlocksReplay(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-tool")
+	db := sqlitefixture.Open(t, "mutation-receipt-tool")
 	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Notes: &service.NoteService{DB: db.DB}}}, sendErr: errors.New("private transport credential")}
 	definition, _ := commandcatalog.AgentEntry("note")
 	save := tool.SaturnCommand{Definition: definition, Gateway: NewAgentCommandGateway(e)}
@@ -58,7 +58,7 @@ func TestMutationReceiptToolExecutorPreservesUnknownAndBlocksReplay(t *testing.T
 }
 
 func TestMutationReceiptShadowRemovalOnlyCountsChangedRows(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-shadow-rows")
+	db := sqlitefixture.Open(t, "mutation-receipt-shadow-rows")
 	s := &service.ShadowBanService{Repo: db}
 	ctx, receipt := common.WithMutationRecorder(context.Background())
 	if changed, err := s.Remove(ctx, "absent"); err != nil || changed != 0 || receipt.Count() != 0 {
@@ -82,7 +82,7 @@ func TestMutationReceiptShadowRemovalOnlyCountsChangedRows(t *testing.T) {
 }
 
 func TestMutationReceiptToolExecutorDoesNotReplaySuccessfulCommit(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-success-tool")
+	db := sqlitefixture.Open(t, "mutation-receipt-success-tool")
 	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Notes: &service.NoteService{DB: db.DB}}}}
 	definition, _ := commandcatalog.AgentEntry("note")
 	save := tool.SaturnCommand{Definition: definition, Gateway: NewAgentCommandGateway(e)}
@@ -104,7 +104,7 @@ func TestMutationReceiptToolExecutorDoesNotReplaySuccessfulCommit(t *testing.T) 
 }
 
 func TestMutationReceiptToolExecutorPreservesKnownPartialSource(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-partial-tool")
+	db := sqlitefixture.Open(t, "mutation-receipt-partial-tool")
 	e := &mutationExitEngine{gatewayEngine: &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: db}}, users: map[string]*model.User{"Present": {Name: "Present", Trip: "ExactTrip"}}}}, kickErr: repository.ErrNotFound}
 	definition, _ := commandcatalog.AgentEntry("shadowban")
 	action := tool.SaturnCommand{Definition: definition, Gateway: NewAgentCommandGateway(e)}
@@ -126,7 +126,7 @@ func TestMutationReceiptToolExecutorPreservesKnownPartialSource(t *testing.T) {
 }
 
 func TestMutationReceiptToolExecutorUnknownCommitNeverBecomesRetryable(t *testing.T) {
-	db := h2fixture.Open(t, "mutation-receipt-unknown-commit-tool")
+	db := sqlitefixture.Open(t, "mutation-receipt-unknown-commit-tool")
 	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{Identity: receiptIdentity{IdentityRepository: db, sourceErr: repository.ErrCommitOutcomeUnknown}}}}, sendErr: errors.New("ack failed")}
 	definition, _ := commandcatalog.AgentEntry("register")
 	action := tool.SaturnCommand{Definition: definition, Gateway: NewAgentCommandGateway(e)}

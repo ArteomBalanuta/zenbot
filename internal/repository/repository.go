@@ -34,7 +34,7 @@ type ShadowBanManagementRepository interface {
 }
 
 // ShadowBanRecord is Saturn's local banned_users identity tuple. Hash is raw
-// UTF-8 at this boundary; H2 encodes it for storage and decodes it on reads.
+// UTF-8 at this boundary; SQLite encodes it for storage and decodes it on reads.
 // Empty fields represent the source's nullable identity fields.
 type ShadowBanRecord struct {
 	Trip   string

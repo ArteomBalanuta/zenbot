@@ -2,14 +2,12 @@
 
 ## Prerequisites
 
-Follow [local setup](getting-started.md#local-development): Go, a C compiler,
-Java 21, and the checksum-verified H2 2.3.232 jar. Set `H2_JAR` to an absolute path.
-Runtime H2 startup supports `JAVA`; several tests invoke `java` directly, so the
-desired runtime must also be on `PATH`.
+Follow [local setup](getting-started.md#local-development): Go and Make.
+SQLite is embedded through the Go module `modernc.org/sqlite`.
 
-Go's SQL parser dependency uses CGO. `CGO_ENABLED=0` is not a supported substitute
-for installing compiler tooling. `modernc.org/sqlite` remains necessary for
-legacy import tests even though SQLite is not a runtime storage option.
+The SQLite driver and `github.com/rqlite/sql` policy parser are pure Go;
+`CGO_ENABLED=0` builds are supported. Race tests use Go's race instrumentation
+and require a supported platform with its usual compiler tooling.
 
 ## Verification commands
 
@@ -26,8 +24,8 @@ git diff --check
 the image without starting a bot. Neither a successful compile nor a Docker
 image build proves successful operation against a real room/provider.
 
-The [CI workflow](../.github/workflows/ci.yml) provisions Go, Java, and a
-checksum-verified H2 jar, then runs checks, compilation, full race tests, and a
+The [CI workflow](../.github/workflows/ci.yml) provisions Go,
+then runs checks, compilation, full race tests, and a
 Docker build. Actions are pinned to commit IDs. It has read-only repository
 permissions and does not start a bot or enable the live-provider evaluation.
 
@@ -35,13 +33,12 @@ For iteration, run the packages and tests relevant to your change:
 
 ```sh
 go test ./internal/command -run TestLastOnline -count=1
-go test ./internal/repository/h2 -run TestPublicHistory -count=1
+go test ./internal/repository/sqlite -run TestPublicHistory -count=1
 go test ./internal/agent/... -count=1
 go test -race ./internal/agent/... -count=1
 ```
 
-H2 integration tests start real Java processes on ephemeral loopback ports and
-use temporary database directories. They fail when prerequisites are missing;
+SQLite integration tests use real embedded databases in temporary directories;
 they do not silently switch to a mock database. Tests can take minutes on slower
 machines, especially with race instrumentation. Avoid concurrently launching
 several full database suites unless the machine has sufficient resources.
@@ -61,10 +58,9 @@ output or unfinished experiments.
 | `internal/command/` | Chat handlers, registry, authorization and agent gateway |
 | `internal/agent/` | Model protocol, tools, context, memory, participation and execution |
 | `internal/service/` | Application services and external-service formatting |
-| `internal/repository/h2/` | Storage, embedded schema, upgrades and SQLite import |
-| `internal/testutil/` | Portable, isolated real-H2 test setup |
+| `internal/repository/sqlite/` | Storage, embedded schema and upgrades |
+| `internal/testutil/` | Portable, isolated real-SQLite test setup |
 | `resources/agent/` | Runtime prompt templates and tool copy; ship with the binary |
-| `deploy/` | Explicit external-H2 diagnostic script |
 | `docs/` | Maintained user/operator/contributor references |
 
 ## Adding a command or tool

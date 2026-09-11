@@ -25,12 +25,12 @@ adding it to `.gitignore` does not remove it from existing Git history or clones
   incorrectly. Tool authorization is not a guarantee of appropriate decisions.
 - The provider receives selected conversation/history/tool context. Choose a
   provider whose handling of that data is acceptable to room participants.
-- Dynamic SQL is privileged. SQL's `PUBLIC` schema does not mean every stored
-  row is public chat; it can contain sensitive application records.
+- Dynamic SQL is privileged. Application tables can contain private chat and
+  sensitive application records.
 
 ## Data handling
 
-Local `config.toml`, `.env`, H2 files, backups, and logs must remain private.
+Local `config.toml`, `.env`, SQLite files, backups, and logs must remain private.
 Database records can include chat text, whispers, notes, mail, identity metadata,
 and agent conversation history. The application does not provide encrypted-at-rest
 storage; protect the host filesystem and backups accordingly.
@@ -46,8 +46,7 @@ runtime information without application authentication. Keep them on loopback or
 behind an authenticated access boundary. The default Make mapping binds the host
 port to `127.0.0.1`; changing that exposes a new attack surface.
 
-H2 is a local dependency, not a database service intended for public exposure.
-Do not publish its PostgreSQL-wire port to the Internet. Protect database and
+SQLite runs inside the bot process and has no listening port. Protect database and
 configuration mounts from untrusted local users.
 
 ## Before sharing a checkout or release

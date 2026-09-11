@@ -12,7 +12,7 @@ import (
 	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type cancelHistoryQueries struct {
@@ -27,7 +27,7 @@ func (q cancelHistoryQueries) LastOnline(ctx context.Context, target string) (re
 }
 
 func TestPublicHistoryGatewayAndToolsExposeSafeAmbiguity(t *testing.T) {
-	db := h2fixture.Open(t, "history-ambiguity-gateway")
+	db := sqlitefixture.Open(t, "history-ambiguity-gateway")
 	if _, err := db.DB.Exec(`INSERT INTO messages(name,trip,message,created_on) VALUES('SelectorSecret','other','name fact',1),('someone','SelectorSecret','trip fact',2)`); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestPublicHistoryGatewayAndToolsExposeSafeAmbiguity(t *testing.T) {
 }
 
 func TestPublicHistoryGatewayCancellationOverridesAmbiguity(t *testing.T) {
-	db := h2fixture.Open(t, "history-ambiguity-cancel")
+	db := sqlitefixture.Open(t, "history-ambiguity-cancel")
 	if _, err := db.DB.Exec(`INSERT INTO messages(name,trip,message,created_on) VALUES('target','other','name fact',1),('someone','target','trip fact',2)`); err != nil {
 		t.Fatal(err)
 	}

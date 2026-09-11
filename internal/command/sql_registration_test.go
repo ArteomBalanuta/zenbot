@@ -7,11 +7,11 @@ import (
 	"zenbot/internal/config"
 	"zenbot/internal/factory"
 	"zenbot/internal/model"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 // Tracer 7 only: the SQL shell is intentionally non-operational until tracer 8.
-func TestFactoryWiresRawH2SQLCapabilityAndRegistersConcreteSQLShell(t *testing.T) {
+func TestFactoryWiresRawSQLiteSQLCapabilityAndRegistersConcreteSQLShell(t *testing.T) {
 	withoutCapability, err := factory.NewEngineWithOptions(model.MASTER, &config.Config{
 		WebsocketUrl: "ws://127.0.0.1:1",
 		Channel:      "test",
@@ -26,7 +26,7 @@ func TestFactoryWiresRawH2SQLCapabilityAndRegistersConcreteSQLShell(t *testing.T
 		t.Fatal("sql registered without raw SQL capability")
 	}
 
-	database := h2fixture.Open(t, "raw_sql_command")
+	database := sqlitefixture.Open(t, "raw_sql_command")
 	engine, err := factory.NewEngineWithOptions(model.MASTER, &config.Config{
 		WebsocketUrl: "ws://127.0.0.1:1",
 		Channel:      "test",
@@ -42,7 +42,7 @@ func TestFactoryWiresRawH2SQLCapabilityAndRegistersConcreteSQLShell(t *testing.T
 		t.Fatal(err)
 	}
 	if len(table.Columns) != 2 || table.Columns[0] != "number" || table.Columns[1] != "absent" || len(table.Rows) != 1 || len(table.Rows[0]) != 2 || table.Rows[0][0] != "7" || table.Rows[0][1] != "null" {
-		t.Fatalf("raw H2 query result=%+v", table)
+		t.Fatalf("raw SQLite query result=%+v", table)
 	}
 
 	if err := RegisterUserUtilities(engine); err != nil {

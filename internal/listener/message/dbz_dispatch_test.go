@@ -11,9 +11,9 @@ import (
 	message "zenbot/internal/listener/message"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
-	"zenbot/internal/repository/h2"
+	"zenbot/internal/repository/sqlite"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 type recordedDBZReply struct {
@@ -152,27 +152,27 @@ func (e *dbzDispatchEngine) SendChatMessage(recipient, text string, whisper bool
 }
 func (e *dbzDispatchEngine) GetActiveUsers() *map[*model.User]struct{} { return &e.active }
 
-func openDBZDispatchTestDB(t *testing.T) *h2.Database {
+func openDBZDispatchTestDB(t *testing.T) *sqlite.Database {
 	t.Helper()
-	return h2fixture.Open(t, "dbz-dispatch")
+	return sqlitefixture.Open(t, "dbz-dispatch")
 }
 
-func seedDBZDispatchSnapshot(t *testing.T, database *h2.Database, name string) {
+func seedDBZDispatchSnapshot(t *testing.T, database *sqlite.Database, name string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := database.DB.ExecContext(ctx, "INSERT INTO dbz_characters(name,level,created_on) VALUES($1,$2,$3)", name, 2, 1); err != nil {
+	if _, err := database.DB.ExecContext(ctx, "INSERT INTO dbz_characters(name,level,created_on) VALUES(?1,?2,?3)", name, 2, 1); err != nil {
 		t.Fatal(err)
 	}
 	var id int64
-	if err := database.DB.QueryRowContext(ctx, "SELECT id FROM dbz_characters WHERE name=$1", name).Scan(&id); err != nil {
+	if err := database.DB.QueryRowContext(ctx, "SELECT id FROM dbz_characters WHERE name=?1", name).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.DB.ExecContext(ctx, "INSERT INTO dbz_stats(char_id,free_stats,str,agi,vit,ene,created_on) VALUES($1,$2,$3,$4,$5,$6,$7)", id, 5, 3, 4, 5, 6, 1); err != nil {
+	if _, err := database.DB.ExecContext(ctx, "INSERT INTO dbz_stats(char_id,free_stats,str,agi,vit,ene,created_on) VALUES(?1,?2,?3,?4,?5,?6,?7)", id, 5, 3, 4, 5, 6, 1); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func newDBZDispatchEngine(database *h2.Database, allowed map[model.Role]bool) *dbzDispatchEngine {
+func newDBZDispatchEngine(database *sqlite.Database, allowed map[model.Role]bool) *dbzDispatchEngine {
 	return &dbzDispatchEngine{
 		bundle:   &service.Bundle{DBZ: &service.DBZService{Repo: database}},
 		commands: map[string]common.CommandMetadata{},
@@ -315,7 +315,7 @@ func TestDispatchUserCommandDBZRegisterDeniedRegularDoesNotPersistAndUsesSharedU
 		t.Fatalf("RegisterCharacter calls=%d, want authorization to stop before DBZ write", repo.registerCalls)
 	}
 	var characters int
-	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=$1", "goku").Scan(&characters); err != nil {
+	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=?1", "goku").Scan(&characters); err != nil {
 		t.Fatal(err)
 	}
 	if characters != 0 {
@@ -356,7 +356,7 @@ func TestDispatchUserCommandDBZRegisterPreCancelledDoesNotPersistOrReply(t *test
 		t.Fatalf("RegisterCharacter calls=%d replies=%#v, want no write and no output", repo.registerCalls, engine.replies)
 	}
 	var characters int
-	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=$1", "goku").Scan(&characters); err != nil {
+	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=?1", "goku").Scan(&characters); err != nil {
 		t.Fatal(err)
 	}
 	if characters != 0 {
@@ -385,13 +385,13 @@ func TestDispatchUserCommandDBZRegisterAliasesPersistSelfAndPublishPublicSuccess
 	}
 
 	var characters, ignored, stats int
-	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=$1 AND level=$2", "goku", 1).Scan(&characters); err != nil {
+	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=?1 AND level=?2", "goku", 1).Scan(&characters); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=$1", "ignored").Scan(&ignored); err != nil {
+	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=?1", "ignored").Scan(&ignored); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM dbz_stats s JOIN dbz_characters c ON c.id=s.char_id WHERE c.name=$1 AND s.free_stats=$2 AND s.str=$3 AND s.agi=$4 AND s.vit=$5 AND s.ene=$6`, "goku", 0, 1, 1, 1, 1).Scan(&stats); err != nil {
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM dbz_stats s JOIN dbz_characters c ON c.id=s.char_id WHERE c.name=?1 AND s.free_stats=?2 AND s.str=?3 AND s.agi=?4 AND s.vit=?5 AND s.ene=?6`, "goku", 0, 1, 1, 1, 1).Scan(&stats); err != nil {
 		t.Fatal(err)
 	}
 	if characters != 1 || ignored != 0 || stats != 1 {
@@ -408,7 +408,7 @@ func TestDispatchUserCommandDBZRegisterAliasesPersistSelfAndPublishPublicSuccess
 
 func TestDispatchUserCommandDBZRegisterFailureRollsBackAndPublishesNoSuccess(t *testing.T) {
 	database := openDBZDispatchTestDB(t)
-	if _, err := database.DB.Exec(`ALTER TABLE dbz_stats ADD CONSTRAINT reject_dispatch_initial_stats CHECK (str > 1)`); err != nil {
+	if _, err := database.DB.Exec(`CREATE TRIGGER reject_dispatch_initial_stats BEFORE INSERT ON dbz_stats WHEN NEW.str <= 1 BEGIN SELECT RAISE(ABORT, 'rejected stats'); END`); err != nil {
 		t.Fatal(err)
 	}
 	engine := newDBZDispatchEngine(database, map[model.Role]bool{model.REGULAR: true})
@@ -424,7 +424,7 @@ func TestDispatchUserCommandDBZRegisterFailureRollsBackAndPublishesNoSuccess(t *
 		t.Fatal("dispatch lost the command failure")
 	}
 	var characters, stats int
-	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=$1", "goku").Scan(&characters); err != nil {
+	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=?1", "goku").Scan(&characters); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_stats").Scan(&stats); err != nil {
@@ -438,7 +438,7 @@ func TestDispatchUserCommandDBZRegisterFailureRollsBackAndPublishesNoSuccess(t *
 func TestDispatchUserCommandDBZStrengthAliasRejectsOverspendWithoutSuccessOutput(t *testing.T) {
 	database := openDBZDispatchTestDB(t)
 	seedDBZDispatchSnapshot(t, database, "goku")
-	if _, err := database.DB.Exec("UPDATE dbz_stats SET free_stats=$1 WHERE char_id=(SELECT id FROM dbz_characters WHERE name=$2)", 1, "goku"); err != nil {
+	if _, err := database.DB.Exec("UPDATE dbz_stats SET free_stats=?1 WHERE char_id=(SELECT id FROM dbz_characters WHERE name=?2)", 1, "goku"); err != nil {
 		t.Fatal(err)
 	}
 	engine := newDBZDispatchEngine(database, map[model.Role]bool{model.REGULAR: true})
@@ -458,7 +458,7 @@ func TestDispatchUserCommandDBZStrengthAliasRejectsOverspendWithoutSuccessOutput
 		t.Fatalf("replies=%#v, want no success output", engine.replies)
 	}
 	var strength, free int
-	if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=$1)", "goku").Scan(&strength, &free); err != nil {
+	if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=?1)", "goku").Scan(&strength, &free); err != nil {
 		t.Fatal(err)
 	}
 	if strength != 3 || free != 1 {
@@ -485,7 +485,7 @@ func TestDispatchUserCommandDBZStrengthSpendsExactBalanceBeforeAcknowledgement(t
 		t.Fatalf("replies=%#v, want %#v", got, want)
 	}
 	var strength, free int
-	if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=$1)", "goku").Scan(&strength, &free); err != nil {
+	if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=?1)", "goku").Scan(&strength, &free); err != nil {
 		t.Fatal(err)
 	}
 	if strength != 5 || free != 3 {
@@ -515,7 +515,7 @@ func TestDispatchUserCommandDBZStrengthInvalidAmountRepliesUsageWithoutMutation(
 				t.Fatalf("replies=%#v, want %#v", got, want)
 			}
 			var strength, free int
-			if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=$1)", "goku").Scan(&strength, &free); err != nil {
+			if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=?1)", "goku").Scan(&strength, &free); err != nil {
 				t.Fatal(err)
 			}
 			if strength != 3 || free != 5 {
@@ -528,7 +528,7 @@ func TestDispatchUserCommandDBZStrengthInvalidAmountRepliesUsageWithoutMutation(
 func TestDispatchUserCommandDBZStrengthNoFreeStatsDoesNotPublishSuccess(t *testing.T) {
 	database := openDBZDispatchTestDB(t)
 	seedDBZDispatchSnapshot(t, database, "goku")
-	if _, err := database.DB.Exec("UPDATE dbz_stats SET free_stats=$1 WHERE char_id=(SELECT id FROM dbz_characters WHERE name=$2)", 0, "goku"); err != nil {
+	if _, err := database.DB.Exec("UPDATE dbz_stats SET free_stats=?1 WHERE char_id=(SELECT id FROM dbz_characters WHERE name=?2)", 0, "goku"); err != nil {
 		t.Fatal(err)
 	}
 	engine := newDBZDispatchEngine(database, map[model.Role]bool{model.REGULAR: true})
@@ -544,7 +544,7 @@ func TestDispatchUserCommandDBZStrengthNoFreeStatsDoesNotPublishSuccess(t *testi
 		t.Fatalf("replies=%#v, want no success output", engine.replies)
 	}
 	var strength, free int
-	if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=$1)", "goku").Scan(&strength, &free); err != nil {
+	if err := database.DB.QueryRow("SELECT str,free_stats FROM dbz_stats WHERE char_id=(SELECT id FROM dbz_characters WHERE name=?1)", "goku").Scan(&strength, &free); err != nil {
 		t.Fatal(err)
 	}
 	if strength != 3 || free != 0 {
@@ -626,7 +626,7 @@ func TestDispatchUserCommandDBZFightAliasConsumesFirstMatchLevelsWithoutEnemyPro
 		t.Fatalf("enemies=%q, want %q", got, want)
 	}
 	var level, freeStats int
-	if err := database.DB.QueryRow("SELECT c.level,s.free_stats FROM dbz_characters c JOIN dbz_stats s ON s.char_id=c.id WHERE c.name=$1", "goku").Scan(&level, &freeStats); err != nil {
+	if err := database.DB.QueryRow("SELECT c.level,s.free_stats FROM dbz_characters c JOIN dbz_stats s ON s.char_id=c.id WHERE c.name=?1", "goku").Scan(&level, &freeStats); err != nil {
 		t.Fatal(err)
 	}
 	if level != 3 || freeStats != 10 {
@@ -656,7 +656,7 @@ func TestDispatchUserCommandDBZFightMissingEnemyDoesNotRewardOrPublishSuccess(t 
 		t.Fatalf("enemies=%q, want empty", enemies)
 	}
 	var level, freeStats int
-	if err := database.DB.QueryRow("SELECT c.level,s.free_stats FROM dbz_characters c JOIN dbz_stats s ON s.char_id=c.id WHERE c.name=$1", "goku").Scan(&level, &freeStats); err != nil {
+	if err := database.DB.QueryRow("SELECT c.level,s.free_stats FROM dbz_characters c JOIN dbz_stats s ON s.char_id=c.id WHERE c.name=?1", "goku").Scan(&level, &freeStats); err != nil {
 		t.Fatal(err)
 	}
 	if level != 2 || freeStats != 5 {
@@ -689,7 +689,7 @@ func TestDispatchUserCommandDBZFightMissingEnemyArgumentUsesSourceUsageWithoutMu
 		t.Fatalf("enemies=%q, want %q", got, want)
 	}
 	var level, freeStats int
-	if err := database.DB.QueryRow("SELECT c.level,s.free_stats FROM dbz_characters c JOIN dbz_stats s ON s.char_id=c.id WHERE c.name=$1", "goku").Scan(&level, &freeStats); err != nil {
+	if err := database.DB.QueryRow("SELECT c.level,s.free_stats FROM dbz_characters c JOIN dbz_stats s ON s.char_id=c.id WHERE c.name=?1", "goku").Scan(&level, &freeStats); err != nil {
 		t.Fatal(err)
 	}
 	if level != 2 || freeStats != 5 {

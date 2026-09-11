@@ -10,7 +10,7 @@ the code and tests, not by historical migration or implementation plans.
 | [Commands](commands.md) | Syntax, aliases, roles, and action semantics |
 | [Architecture](architecture.md) | Components, ownership, data flow, persistence boundaries |
 | [Agent](agent.md) | Model loop, tools, context, permissions, recovery, extension points |
-| [Operations](operations.md) | Lifecycle, backups, migration, profiling, troubleshooting |
+| [Operations](operations.md) | Lifecycle, SQLite backups and upgrades, profiling, troubleshooting |
 | [Development](development.md) | Building, tests, resources, source layout, provider evaluation |
 | [Contributing](../CONTRIBUTING.md) | Change and review expectations |
 | [Agent guide](../AGENTS.md) | Repository map and working rules for coding agents |

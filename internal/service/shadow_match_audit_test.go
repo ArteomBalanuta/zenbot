@@ -8,11 +8,11 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestShadowMatchAuditCorruptUnrelatedHashCannotDisableMatching(t *testing.T) {
-	db := h2fixture.Open(t, "shadow-match-audit")
+	db := sqlitefixture.Open(t, "shadow-match-audit")
 	ctx := context.Background()
 	if err := db.PersistShadowBanRecord(ctx, repository.ShadowBanRecord{Name: "blocked", Trip: "ExactTrip", Hash: "raw-hash"}); err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestShadowMatchAuditCorruptUnrelatedHashCannotDisableMatching(t *testing.T)
 }
 
 func TestShadowMatchAuditUsesOnlyNonblankExactOwnColumnIdentities(t *testing.T) {
-	db := h2fixture.Open(t, "shadow-match-exact-columns")
+	db := sqlitefixture.Open(t, "shadow-match-exact-columns")
 	ctx := context.Background()
 	for _, record := range []repository.ShadowBanRecord{
 		{Name: "Needle", Trip: "ExactTrip", Hash: "raw-hash"},
@@ -79,7 +79,7 @@ func TestShadowMatchAuditUsesOnlyNonblankExactOwnColumnIdentities(t *testing.T) 
 }
 
 func TestShadowMatchAuditPreservesCancellationDatabaseErrorsAndEmptyControls(t *testing.T) {
-	db := h2fixture.Open(t, "shadow-match-source-errors")
+	db := sqlitefixture.Open(t, "shadow-match-source-errors")
 	svc := &service.ShadowBanService{Repo: db}
 	if matched, err := svc.Matches(context.Background(), &model.User{Name: "absent"}); err != nil || matched {
 		t.Fatalf("empty database matched=%v err=%v", matched, err)

@@ -7,11 +7,11 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestRemoveAndUnshadowBanAliasesResolveMentionedNamesInPersistence(t *testing.T) {
-	d := h2fixture.Open(t, "nickname-persistence-aliases")
+	d := sqlitefixture.Open(t, "nickname-persistence-aliases")
 	e := &commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{GroupB: d}, ShadowBans: &service.ShadowBanService{Repo: d}}}
 	for _, alias := range []string{"del", "delete", "remove", "unshadowban", "shadowmercy", "unblock"} {
 		for _, raw := range []string{"merc", "@merc"} {

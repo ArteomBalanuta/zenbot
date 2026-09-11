@@ -7,12 +7,12 @@ import (
 
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func openMailGroupCParityEngine(t *testing.T) (*commandEngineStub, *sql.DB) {
 	t.Helper()
-	d := h2fixture.Open(t, "mail-group-c-command")
+	d := sqlitefixture.Open(t, "mail-group-c-command")
 
 	return &commandEngineStub{
 		users:  map[string]*model.User{"alice": {Name: "alice", Trip: "origin"}},

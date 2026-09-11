@@ -28,7 +28,7 @@ Empty environment strings replace string settings; empty or whitespace-only inte
 | `autoReconnect` | `true` | Enables recovery and health checks; omitted defaults to `false`. |
 | `healthCheckInterval` | `5` | Health interval in **minutes** when reconnect is enabled. Nonpositive/omitted values use a 15-second runtime fallback. |
 | `autorunCommands` | empty | Sent once after initial startup readiness; non-slash entries are prefixed and whispered to the bot itself, slash entries are sent directly. Supply command names without the command prefix. |
-| `dbPath` | `database/database` | Required H2 database stem relative to the working directory, or an absolute path. `.mv.db`/`.db` suffixes are stripped; use the stem convention. |
+| `dbPath` | `database/zenbot.db` | Required SQLite database filename relative to the working directory, or an absolute path. The filename is used exactly as configured. |
 
 `adminTrips`, `userTrips`, and `autorunCommands` accept TOML string arrays or comma-separated strings. String form trims whitespace and drops empty entries; array form is decoded as supplied. Use arrays when an autorun command contains a comma.
 
@@ -37,15 +37,8 @@ There are no general top-level environment aliases for room, nickname, prefix, d
 The obsolete `proxies` key is not a `Config` field and is ignored if present in
 older configurations. It does not configure a proxy pool or proxy selection.
 
-H2 startup additionally reads these environment-only settings:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `JAVA` | `java` | Java executable name or path. |
-| `H2_JAR` | none locally; `/opt/h2/h2.jar` in Docker | Required H2 JAR. Supported version is pinned to 2.3.232 by downloads; startup checks H2 identity, not exact version. |
-| `TOKEN` | none | Bot credential fallback described above. |
-
-The application starts H2 on port 5435; this port is not configurable through TOML or an application environment alias. Docker supplies Java and the pinned JAR. Changing Make's database mount variables does not rewrite `dbPath`.
+SQLite is embedded in the executable and has no database environment settings or
+listening port. Changing Make's database mount variables does not rewrite `dbPath`.
 
 ## Agent provider and execution
 
@@ -165,7 +158,7 @@ TOML zero sampling values are replaced by defaults; environment zero disables th
 
 The [Makefile](../Makefile) controls build/container operations. Its variables are not application settings and do not override TOML by themselves. For example, `make run SATURN_AGENT_ENABLED=true` does not automatically pass that value into Docker.
 
-`make run` passes `ENV_FILE` using Docker `--env-file` when that file exists. Otherwise, it forwards only a nonempty host environment variable named by `AGENT_API_KEY_ENV` (default `SATURN_AGENT_API_KEY`). It does not forward all exported `SATURN_AGENT_*`, profiling, `TOKEN`, `JAVA`, or `H2_JAR` values. If the environment file exists, even that API-key fallback is skipped. A custom key name must also be selected by the application's `apiKeyEnv`/`SATURN_AGENT_API_KEY_ENV`; the Make variable does not set it automatically.
+`make run` passes `ENV_FILE` using Docker `--env-file` when that file exists. Otherwise, it forwards only a nonempty host environment variable named by `AGENT_API_KEY_ENV` (default `SATURN_AGENT_API_KEY`). It does not forward all exported `SATURN_AGENT_*`, profiling, or `TOKEN` values. If the environment file exists, even that API-key fallback is skipped. A custom key name must also be selected by the application's `apiKeyEnv`/`SATURN_AGENT_API_KEY_ENV`; the Make variable does not set it automatically.
 
 | Make variable | Default | Purpose |
 | --- | --- | --- |
@@ -175,12 +168,8 @@ The [Makefile](../Makefile) controls build/container operations. Its variables a
 | `CONFIG_FILE` | local `config.toml` if present, otherwise `config.example.toml` | Read-only configuration mount source. |
 | `ENV_FILE` | repository `.env` | Optional Docker environment file. |
 | `DATABASE_DIR` | repository `database` | Host database directory mounted in the container. |
-| `DATABASE_STEM` | `$(DATABASE_DIR)/database` | Stem used by database maintenance targets. |
-| `DATABASE_FILE` | `$(DATABASE_STEM).mv.db` | H2 file checked/backed up/reset by maintenance targets. |
-| `LEGACY_DATABASE_FILE` | `$(DATABASE_STEM).db` | Legacy SQLite file archived by `fresh-db`. |
+| `DATABASE_FILE` | `$(DATABASE_DIR)/zenbot.db` | SQLite filename checked/backed up/reset by maintenance targets; keep aligned with `dbPath`. |
 | `DATABASE_BACKUP_DIR` | `$(DATABASE_DIR)/backups` | Backup/archive destination. |
-| `CONTAINER_DATABASE_STEM` | `$(APP_DIR)/database/$(notdir $(DATABASE_STEM))` | Database check target stem inside container. |
-| `H2_CHECK_URL` | `jdbc:h2:file:$(CONTAINER_DATABASE_STEM);ACCESS_MODE_DATA=r;IFEXISTS=TRUE` | JDBC URL for `db-check`. |
 | `AGENT_API_KEY_ENV` | `SATURN_AGENT_API_KEY` | Host key name forwarded only when no environment file exists. |
 | `PROFILING_HOST`, `PROFILING_PORT` | `127.0.0.1`, `6060` | Published host address/port and profiling client target. |
 | `CONTAINER_PROFILING_PORT` | `6060` | Published container port; keep consistent with application listen address. |
@@ -190,4 +179,4 @@ The [Makefile](../Makefile) controls build/container operations. Its variables a
 
 The [`.env.example`](../.env.example) is a template for Docker's environment-file format. A native process needs its environment supplied separately and still requires `config.toml` in its working directory.
 
-Implementation references: [top-level loading](../internal/config/config.go), [agent resolution](../internal/config/agent_config.go), [value lookup](../internal/config/value_reader.go), [profiling resolution](../internal/config/profiling_config.go), [runtime composition](../cmd/zenbot/main.go), and [H2 startup](../internal/repository/h2/database.go).
+Implementation references: [top-level loading](../internal/config/config.go), [agent resolution](../internal/config/agent_config.go), [value lookup](../internal/config/value_reader.go), [profiling resolution](../internal/config/profiling_config.go), [runtime composition](../cmd/zenbot/main.go), and [SQLite startup](../internal/repository/sqlite/database.go).

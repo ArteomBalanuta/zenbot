@@ -7,12 +7,12 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func openNotesParityEngine(t *testing.T) *commandEngineStub {
 	t.Helper()
-	d := h2fixture.Open(t, "notes")
+	d := sqlitefixture.Open(t, "notes")
 	return &commandEngineStub{
 		users:  map[string]*model.User{"alice": {Name: "alice", Trip: "trip"}},
 		bundle: &service.Bundle{Notes: &service.NoteService{DB: d.DB}},

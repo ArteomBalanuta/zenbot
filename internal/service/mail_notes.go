@@ -42,9 +42,9 @@ func (s *MailService) QueueResolved(ctx context.Context, message, owner, receive
 	// An exact registered trip takes precedence over a nickname with the same
 	// spelling. Trip identities are case-sensitive; only nickname lookup folds case.
 	rows, e := s.DB.QueryContext(ctx, `SELECT DISTINCT t.trip FROM trips t
-		WHERE t.trip=$2 OR (NOT EXISTS (SELECT 1 FROM trips WHERE trip=$2) AND EXISTS (
+		WHERE t.trip=?2 OR (NOT EXISTS (SELECT 1 FROM trips WHERE trip=?2) AND EXISTS (
 			SELECT 1 FROM trip_names tn INNER JOIN names n ON tn.name_id=n.id
-			WHERE tn.trip_id=t.id AND LOWER(n.name)=$1
+			WHERE tn.trip_id=t.id AND LOWER(n.name)=?1
 		)) ORDER BY t.trip`, strings.ToLower(nick), receiver)
 	if e != nil {
 		return "", e
@@ -70,7 +70,7 @@ func (s *MailService) QueueResolved(ctx context.Context, message, owner, receive
 	if message != "" {
 		message += " "
 	}
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper,text_encoding) VALUES($1,$2,$3,'PENDING',$4,$5,'PLAIN')`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper)); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper,text_encoding) VALUES(?1,?2,?3,'PENDING',?4,?5,'PLAIN')`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper)); err != nil {
 		return "", err
 	}
 	common.RecordCommittedMutation(ctx)
@@ -95,7 +95,7 @@ func (s *MailService) Pending(ctx context.Context, receiver, trip string) ([]mod
 	if strings.TrimSpace(trip) == "" || strings.Contains(trip, ",") {
 		return nil, nil
 	}
-	rows, e := s.DB.QueryContext(ctx, `SELECT id,owner,receiver,message,status,created_on,is_whisper,text_encoding FROM mail WHERE status='PENDING' AND NOT EXISTS (SELECT 1 FROM mail_delivery d WHERE d.mail_id=mail.id AND d.recipient_trip=$1 AND d.state<>'PENDING') AND LOCATE(',' || $1 || ',', ',' || receiver || ',') > 0 ORDER BY id`, trip)
+	rows, e := s.DB.QueryContext(ctx, `SELECT id,owner,receiver,message,status,created_on,is_whisper,text_encoding FROM mail WHERE status='PENDING' AND NOT EXISTS (SELECT 1 FROM mail_delivery d WHERE d.mail_id=mail.id AND d.recipient_trip=?1 AND d.state<>'PENDING') AND instr(',' || receiver || ',', ',' || ?1 || ',') > 0 ORDER BY id`, trip)
 	if e != nil {
 		return nil, e
 	}
@@ -130,14 +130,14 @@ type NoteService struct {
 }
 
 func (s *NoteService) Save(ctx context.Context, trip, note string) error {
-	_, e := s.DB.ExecContext(ctx, `INSERT INTO notes(trip,note,created_on) VALUES($1,$2,$3)`, trip, note, time.Now().UnixMilli())
+	_, e := s.DB.ExecContext(ctx, `INSERT INTO notes(trip,note,created_on) VALUES(?1,?2,?3)`, trip, note, time.Now().UnixMilli())
 	if e == nil {
 		common.RecordCommittedMutation(ctx)
 	}
 	return e
 }
 func (s *NoteService) List(ctx context.Context, trip string) ([]string, error) {
-	rows, e := s.DB.QueryContext(ctx, `SELECT note FROM notes WHERE trip=$1 ORDER BY id`, trip)
+	rows, e := s.DB.QueryContext(ctx, `SELECT note FROM notes WHERE trip=?1 ORDER BY id`, trip)
 	if e != nil {
 		return nil, e
 	}
@@ -153,7 +153,7 @@ func (s *NoteService) List(ctx context.Context, trip string) ([]string, error) {
 	return o, rows.Err()
 }
 func (s *NoteService) Clear(ctx context.Context, trip string) error {
-	result, err := s.DB.ExecContext(ctx, `DELETE FROM notes WHERE trip=$1`, trip)
+	result, err := s.DB.ExecContext(ctx, `DELETE FROM notes WHERE trip=?1`, trip)
 	if err != nil {
 		return err
 	}

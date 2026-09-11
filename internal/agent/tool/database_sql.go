@@ -44,7 +44,7 @@ func (t DatabaseSQL) Execute(ctx context.Context, agent api.Context, raw json.Ra
 	if err != nil {
 		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "SQL execution failed"), nil
 	}
-	validated, err := agentsql.NewJSqlParserAgentSqlPolicy(t.Config.MaxSQLChars).Validate(in.SQL, schema)
+	validated, err := agentsql.NewSQLiteSelectPolicy(t.Config.MaxSQLChars).Validate(in.SQL, schema)
 	if err != nil {
 		code := "EXECUTION_FAILED"
 		if e, ok := err.(*agentsql.AgentSqlPolicyError); ok {

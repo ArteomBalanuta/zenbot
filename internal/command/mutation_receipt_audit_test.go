@@ -14,11 +14,11 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func TestMutationReceiptAuditCommittedDatabaseChangesSurviveAckFailure(t *testing.T) {
-	database := h2fixture.Open(t, "mutation-receipt-audit")
+	database := sqlitefixture.Open(t, "mutation-receipt-audit")
 	ctx := context.Background()
 	if err := database.Register(ctx, "Recipient", "RecipientTrip", model.REGULAR); err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func (e *mutationExitEngine) LogCommand(context.Context, model.CommandAuditRecor
 func (e *mutationExitEngine) KickNick(context.Context, common.NickTarget) error { return e.kickErr }
 
 func TestMutationReceiptAuditFurtherCommittedExits(t *testing.T) {
-	database := h2fixture.Open(t, "mutation-receipt-exits")
+	database := sqlitefixture.Open(t, "mutation-receipt-exits")
 	services := &service.Bundle{Users: &service.UserService{Identity: database, GroupB: database}, Notes: &service.NoteService{DB: database.DB}, ShadowBans: &service.ShadowBanService{Repo: database}}
 	caller, _ := api.NewContextWithCapabilities("room", "caller", "CallerTrip", "hash", false, []string{}, []api.Capability{api.AdminCommands, api.ModerationCommands})
 	for _, tc := range []struct {
@@ -139,7 +139,7 @@ func TestMutationReceiptAuditFurtherCommittedExits(t *testing.T) {
 }
 
 func TestMutationReceiptAuditConcurrentInvocations(t *testing.T) {
-	database := h2fixture.Open(t, "mutation-receipt-concurrent")
+	database := sqlitefixture.Open(t, "mutation-receipt-concurrent")
 	services := &service.Bundle{Notes: &service.NoteService{DB: database.DB}}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

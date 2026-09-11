@@ -7,12 +7,12 @@ import (
 
 	"zenbot/internal/model"
 	"zenbot/internal/service"
-	"zenbot/internal/testutil/h2fixture"
+	"zenbot/internal/testutil/sqlitefixture"
 )
 
 func openMailGroupCDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db := h2fixture.Open(t, "mail-group-c")
+	db := sqlitefixture.Open(t, "mail-group-c")
 	return db.DB
 }
 
@@ -51,7 +51,7 @@ func TestMailGroupCQueuePersistsResolvedTripsAndPlainPayload(t *testing.T) {
 func TestMailGroupCQueueReturnsFailedWrite(t *testing.T) {
 	db := openMailGroupCDB(t)
 	seedMailRecipient(t, db)
-	if _, err := db.Exec("DROP TABLE mail CASCADE"); err != nil {
+	if _, err := db.Exec("DROP TABLE mail_delivery; DROP TABLE mail"); err != nil {
 		t.Fatal(err)
 	}
 
