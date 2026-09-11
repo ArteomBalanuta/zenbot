@@ -512,8 +512,7 @@ func (e *EngineImpl) ReplaceActiveUsers(users []*model.User) {
 	next := make(map[*model.User]struct{}, len(users))
 	for _, u := range users {
 		if u != nil {
-			v := *u
-			next[&v] = struct{}{}
+			next[copyRoomUser(u)] = struct{}{}
 		}
 	}
 	e.usersMu.Lock()
@@ -525,7 +524,7 @@ func (e *EngineImpl) AddActiveUser(joined *model.User) {
 	if joined == nil {
 		return
 	}
-	owned := *joined
+	owned := copyRoomUser(joined)
 	e.usersMu.Lock()
 	defer e.usersMu.Unlock()
 	if e.ActiveUsers == nil {
@@ -536,7 +535,7 @@ func (e *EngineImpl) AddActiveUser(joined *model.User) {
 			delete(e.ActiveUsers, u)
 		}
 	}
-	e.ActiveUsers[&owned] = struct{}{}
+	e.ActiveUsers[owned] = struct{}{}
 }
 
 func (e *EngineImpl) SubscribeTrip(trip string) bool {
@@ -603,8 +602,7 @@ func (e *EngineImpl) GetAfkUsers() *map[*model.User]string {
 	defer e.afkMu.RUnlock()
 	snapshot := make(map[*model.User]string, len(e.AfkUsers))
 	for user, reason := range e.AfkUsers {
-		copy := *user
-		snapshot[&copy] = reason
+		snapshot[copyRoomUser(user)] = reason
 	}
 	return &snapshot
 }
@@ -613,7 +611,7 @@ func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
 	if u == nil {
 		return
 	}
-	owned := *u
+	owned := copyRoomUser(u)
 	e.afkMu.Lock()
 	if e.AfkUsers == nil {
 		e.AfkUsers = make(map[*model.User]string)
@@ -624,7 +622,7 @@ func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
 			delete(e.AfkUsers, current)
 		}
 	}
-	e.AfkUsers[&owned] = reason
+	e.AfkUsers[owned] = reason
 	e.afkMu.Unlock()
 	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", owned.Name, owned.Trip, reason)
 }
@@ -683,8 +681,7 @@ func (e *EngineImpl) GetActiveUserByName(name string) *model.User {
 	defer e.usersMu.RUnlock()
 	for u := range e.ActiveUsers {
 		if strings.EqualFold(u.Name, strings.TrimSpace(name)) {
-			copy := *u
-			return &copy
+			return copyRoomUser(u)
 		}
 	}
 	return nil
@@ -726,8 +723,7 @@ func (e *EngineImpl) GetActiveUsers() *map[*model.User]struct{} {
 	defer e.usersMu.RUnlock()
 	snapshot := make(map[*model.User]struct{}, len(e.ActiveUsers))
 	for user := range e.ActiveUsers {
-		copy := *user
-		snapshot[&copy] = struct{}{}
+		snapshot[copyRoomUser(user)] = struct{}{}
 	}
 	return &snapshot
 }
