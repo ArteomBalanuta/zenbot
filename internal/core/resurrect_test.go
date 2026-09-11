@@ -5,18 +5,19 @@ import (
 	"testing"
 
 	"zenbot/internal/common"
+	"zenbot/internal/model"
 )
 
 func TestMoveFromServingRoomPrefersExactManagedReplicaThenHost(t *testing.T) {
-	host := &EngineImpl{Channel: "host", OutMessageQueue: make(chan string, 1)}
-	replica := &EngineImpl{Channel: "source", OutMessageQueue: make(chan string, 1)}
+	host := &EngineImpl{Channel: "host", ActiveUsers: map[*model.User]struct{}{&model.User{Name: "Alice"}: {}}, OutMessageQueue: make(chan string, 1)}
+	replica := &EngineImpl{Channel: "source", ActiveUsers: map[*model.User]struct{}{&model.User{Name: "@Alice"}: {}}, OutMessageQueue: make(chan string, 1)}
 	manager := NewReplicaManager(host.Channel)
 	if err := manager.Add("source", managedReplica{ManagedEngine: replica}); err != nil {
 		t.Fatal(err)
 	}
 	host.SetReplicaController(NewManagedReplicaController(manager, nil))
 
-	handled, err := host.MoveFromServingRoom(context.Background(), "source", common.NickTarget("@Alice"), common.Channel("destination"))
+	handled, err := host.MoveFromServingRoom(context.Background(), "source", "@alice", common.Channel("destination"))
 	if !handled || err != nil {
 		t.Fatalf("handled=%t err=%v", handled, err)
 	}
@@ -27,7 +28,7 @@ func TestMoveFromServingRoomPrefersExactManagedReplicaThenHost(t *testing.T) {
 		t.Fatal("host handled replica source")
 	}
 
-	handled, err = host.MoveFromServingRoom(context.Background(), "host", common.NickTarget("Alice"), common.Channel("destination"))
+	handled, err = host.MoveFromServingRoom(context.Background(), "host", "alice", common.Channel("destination"))
 	if !handled || err != nil {
 		t.Fatalf("host handled=%t err=%v", handled, err)
 	}
@@ -38,12 +39,12 @@ func TestMoveFromServingRoomPrefersExactManagedReplicaThenHost(t *testing.T) {
 
 func TestMoveFromServingRoomDoesNotActForMissingOrCancelledSource(t *testing.T) {
 	host := &EngineImpl{Channel: "host", OutMessageQueue: make(chan string, 1)}
-	if handled, err := host.MoveFromServingRoom(context.Background(), "missing", common.NickTarget("Alice"), common.Channel("destination")); handled || err != nil {
+	if handled, err := host.MoveFromServingRoom(context.Background(), "missing", "Alice", common.Channel("destination")); handled || err != nil {
 		t.Fatalf("missing handled=%t err=%v", handled, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if handled, err := host.MoveFromServingRoom(ctx, "host", common.NickTarget("Alice"), common.Channel("destination")); handled || err != context.Canceled {
+	if handled, err := host.MoveFromServingRoom(ctx, "host", "Alice", common.Channel("destination")); handled || err != context.Canceled {
 		t.Fatalf("cancelled handled=%t err=%v", handled, err)
 	}
 	if len(host.OutMessageQueue) != 0 {

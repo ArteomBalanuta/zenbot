@@ -59,7 +59,7 @@ func (e *snapshotGatewayEngine) SubmitCredentialedRoomSnapshot(request snapshot.
 	return nil
 }
 
-func (e *snapshotGatewayEngine) MoveFromServingRoom(context.Context, string, common.NickTarget, common.Channel) (bool, error) {
+func (e *snapshotGatewayEngine) MoveFromServingRoom(context.Context, string, string, common.Channel) (bool, error) {
 	return false, nil
 }
 

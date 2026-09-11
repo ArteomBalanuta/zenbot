@@ -23,11 +23,11 @@ type credentialedResurrectFallbackStub struct {
 
 type resurrectMove struct {
 	from   string
-	target common.NickTarget
+	target string
 	to     common.Channel
 }
 
-func (s *resurrectFallbackStub) MoveFromServingRoom(_ context.Context, from string, target common.NickTarget, to common.Channel) (bool, error) {
+func (s *resurrectFallbackStub) MoveFromServingRoom(_ context.Context, from, target string, to common.Channel) (bool, error) {
 	s.moves = append(s.moves, resurrectMove{from: from, target: target, to: to})
 	return false, nil
 }
@@ -102,7 +102,7 @@ func TestResurrectCommandFallsBackToCredentialedSnapshotOnlyWhenNoLiveSourceServ
 	if status != model.SUCCESSFUL || err != nil {
 		t.Fatalf("status=%v err=%v", status, err)
 	}
-	if len(engine.moves) != 1 || engine.moves[0] != (resurrectMove{from: "source-room", target: common.NickTarget("Alice"), to: common.Channel("destination-room")}) {
+	if len(engine.moves) != 1 || engine.moves[0] != (resurrectMove{from: "source-room", target: "Alice", to: common.Channel("destination-room")}) {
 		t.Fatalf("live moves=%+v", engine.moves)
 	}
 	if len(engine.requests) != 0 {

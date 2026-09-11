@@ -29,7 +29,7 @@ func (e *ownedSnapshotEngine) SubmitCredentialedRoomSnapshot(req snapshot.RoomSn
 	}
 	return e.coordinator.Submit(req)
 }
-func (e *ownedSnapshotEngine) MoveFromServingRoom(context.Context, string, common.NickTarget, common.Channel) (bool, error) {
+func (e *ownedSnapshotEngine) MoveFromServingRoom(context.Context, string, string, common.Channel) (bool, error) {
 	return false, nil
 }
 

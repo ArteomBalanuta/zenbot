@@ -35,7 +35,7 @@ func (c *resurrectCommand) Execute(ctx context.Context) (model.Status, error) {
 	if !ok {
 		return model.FAILED, fmt.Errorf("live room mover is not configured")
 	}
-	handled, err := mover.MoveFromServingRoom(ctx, arguments[1], common.NickTarget(nick), common.Channel(arguments[2]))
+	handled, err := mover.MoveFromServingRoom(ctx, arguments[1], nick, common.Channel(arguments[2]))
 	if err != nil || handled {
 		if err != nil {
 			return model.FAILED, err

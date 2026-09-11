@@ -390,12 +390,12 @@ func (e *agentCaptureEngine) DisableAutoMove(ctx context.Context) (common.AutoMo
 	return state, e.recordAction(err)
 }
 
-func (e *agentCaptureEngine) MoveFromServingRoom(ctx context.Context, source string, target common.NickTarget, destination common.Channel) (bool, error) {
+func (e *agentCaptureEngine) MoveFromServingRoom(ctx context.Context, source, selector string, destination common.Channel) (bool, error) {
 	mover, err := requiredAgentCapability[common.LiveRoomMover](e.Engine, "live room mover")
 	if err != nil {
 		return false, err
 	}
-	moved, err := mover.MoveFromServingRoom(ctx, source, target, destination)
+	moved, err := mover.MoveFromServingRoom(ctx, source, selector, destination)
 	if moved && err == nil {
 		e.recordAction(nil)
 	}

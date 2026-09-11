@@ -2,8 +2,9 @@ package common
 
 import "context"
 
-// LiveRoomMover moves a target only when a host or managed replica already
-// serves the exact source channel. handled=false means no source is serving it.
+// LiveRoomMover resolves a normalized user selector on the host or managed
+// replica serving the exact source channel before moving that canonical user.
+// handled=false means no source is serving it.
 type LiveRoomMover interface {
-	MoveFromServingRoom(context.Context, string, NickTarget, Channel) (handled bool, err error)
+	MoveFromServingRoom(context.Context, string, string, Channel) (handled bool, err error)
 }
