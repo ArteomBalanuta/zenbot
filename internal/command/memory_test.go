@@ -4,13 +4,27 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
 	"zenbot/internal/model"
 )
 
-func TestMemoryAliasesRegisterAndRenderSaturnShapedRuntimeReport(t *testing.T) {
+func TestFormatMemoryReportUsesTruthfulGoLabelsAndExactMiBValues(t *testing.T) {
+	stats := runtime.MemStats{
+		Alloc:    0,
+		HeapIdle: memoryMiB,
+		HeapSys:  3*memoryMiB - 1,
+		Sys:      4 * memoryMiB,
+	}
+	want := "Go Alloc: 0 MiB \\nGo HeapIdle: 1 MiB \\nGo HeapSys: 2 MiB \\nGo Sys: 4 MiB \\n"
+	if got := formatMemoryReport(stats); got != want {
+		t.Fatalf("formatMemoryReport() = %q, want %q", got, want)
+	}
+}
+
+func TestMemoryAliasesRegisterAndRenderGoRuntimeReport(t *testing.T) {
 	engine := &commandEngineStub{users: map[string]*model.User{
 		"admin": {Name: "admin", Hash: "admin-hash"},
 	}}
@@ -43,9 +57,9 @@ func TestMemoryAliasesRegisterAndRenderSaturnShapedRuntimeReport(t *testing.T) {
 		t.Fatalf("reply = %q, want whisper to admin", chat)
 	}
 	payload := strings.TrimSuffix(strings.TrimPrefix(chat, prefix), suffix)
-	report := regexp.MustCompile(`^JVM Used Memory : [0-9]+ MB \\nJVM Free Memory : [0-9]+ MB \\nJVM Total Memory: [0-9]+ MB \\nJVM Max Memory  : [0-9]+ MB \\n$`)
+	report := regexp.MustCompile(`^Go Alloc: [0-9]+ MiB \\nGo HeapIdle: [0-9]+ MiB \\nGo HeapSys: [0-9]+ MiB \\nGo Sys: [0-9]+ MiB \\n$`)
 	if !report.MatchString(payload) {
-		t.Fatalf("report = %q, want Saturn-shaped runtime report", payload)
+		t.Fatalf("report = %q, want Go runtime report", payload)
 	}
 
 	engine.chats = nil

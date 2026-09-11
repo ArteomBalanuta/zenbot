@@ -478,19 +478,6 @@ func (c *lockCommand) Execute(ctx context.Context) (model.Status, error) {
 	return model.SUCCESSFUL, nil
 }
 
-type unlockCommand struct{ commandBase }
-
-func (c *unlockCommand) Execute(ctx context.Context) (model.Status, error) {
-	if err := ctx.Err(); err != nil {
-		return model.FAILED, err
-	}
-	c.engine.Unlock()
-	if err := replyContext(ctx, &c.commandBase, " room unlocked"); err != nil {
-		return model.FAILED, err
-	}
-	return model.SUCCESSFUL, nil
-}
-
 func newCommand(canonical string, aliases []string, role model.Role, e common.Engine, m *model.ChatMessage) common.SaturnCommand {
 	b := commandBase{engine: e, message: m, role: role, aliases: aliases, canonical: canonical}
 	switch canonical {
@@ -578,8 +565,6 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 		return &captchaCommand{b}
 	case "overflow":
 		return &overflowCommand{b}
-	case "unlock":
-		return &unlockCommand{b}
 	case "memory":
 		return &memoryCommand{b}
 	case "prefix":

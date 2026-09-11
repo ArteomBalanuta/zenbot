@@ -76,24 +76,6 @@ func (s *MailService) QueueResolved(ctx context.Context, message, owner, receive
 	common.RecordCommittedMutation(ctx)
 	return receivers, nil
 }
-func (s *MailService) RegisteredUsers(ctx context.Context) string {
-	rows, e := s.DB.QueryContext(ctx, `SELECT DISTINCT n.name,t.trip FROM trip_names tn INNER JOIN trips t ON tn.trip_id=t.id INNER JOIN names n ON tn.name_id=n.id ORDER BY t.trip DESC`)
-	if e != nil {
-		return ""
-	}
-	defer rows.Close()
-	var b strings.Builder
-	for rows.Next() {
-		var name, trip string
-		if rows.Scan(&name, &trip) == nil {
-			b.WriteString(name)
-			b.WriteByte(' ')
-			b.WriteString(trip)
-			b.WriteString("\\n")
-		}
-	}
-	return b.String()
-}
 
 // SaturnRegisteredUsers exposes the Saturn-shaped compatibility read without
 // changing the existing formatted directory contract.

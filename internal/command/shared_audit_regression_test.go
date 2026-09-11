@@ -109,7 +109,7 @@ func TestSharedAuditCloneKeepsCanonicalMemoryBehavior(t *testing.T) {
 	if status != model.SUCCESSFUL || err != nil || len(engine.chats) != 1 {
 		t.Fatalf("clone lost executable canonical handler: status=%v err=%v replies=%v", status, err, engine.chats)
 	}
-	if !strings.HasPrefix(engine.chats[0], "alice|") || !strings.Contains(engine.chats[0], "MB") {
+	if !strings.HasPrefix(engine.chats[0], "alice|") || !strings.Contains(engine.chats[0], "MiB") {
 		t.Fatalf("clone did not deliver runtime measurements to the new caller: %q", engine.chats)
 	}
 }

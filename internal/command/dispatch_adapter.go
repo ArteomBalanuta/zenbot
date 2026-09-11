@@ -119,15 +119,6 @@ func RegisterUserUtilities(e common.Engine) error {
 // RegisterUserUtilitiesWithDirectAgent registers the concrete utility commands
 // and, when supplied, the composition-root direct l submitter.
 func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgentSubmitter) error {
-	if _, ok := e.(common.ModerationOperations); ok {
-		// Preserve legacy constructors for compatibility. The typed adapters below
-		// intentionally overwrite these aliases on fully composed engines.
-		e.RegisterCommand(&Ban{})
-		e.RegisterCommand(&Unban{})
-		e.RegisterCommand(&UnbanAll{})
-		e.RegisterCommand(&Lock{})
-	}
-
 	canonicals := []string{"help", "crashcourse", "say", "afk", "list", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub", "memory", "dbzhelp", "msgchannel"}
 	canonicals = append(canonicals, "captcha", "authorize", "deauthorize", "lock", "overflow", "ban", "kick", "unban", "unbanall", "mute", "unmute", "color", "flair", "nuke", "resurrect", "prefix")
 	if _, ok := e.(common.AutoMoveController); ok {

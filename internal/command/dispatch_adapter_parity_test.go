@@ -15,6 +15,33 @@ func (e *deniedConfiguredTripEngine) IsUserAuthorized(*model.User, *model.Role) 
 	return false
 }
 
+type registrationCountingEngine struct {
+	*commandEngineStub
+	counts map[string]int
+}
+
+func (e *registrationCountingEngine) RegisterCommand(command common.Command) {
+	for _, alias := range command.GetAliases() {
+		e.counts[alias]++
+	}
+	e.commandEngineStub.RegisterCommand(command)
+}
+
+func TestRegisterUserUtilitiesRegistersEachAliasOnce(t *testing.T) {
+	engine := &registrationCountingEngine{
+		commandEngineStub: &commandEngineStub{},
+		counts:            make(map[string]int),
+	}
+	if err := RegisterUserUtilities(engine); err != nil {
+		t.Fatal(err)
+	}
+	for alias, count := range engine.counts {
+		if count != 1 {
+			t.Errorf("alias %q registered %d times, want once", alias, count)
+		}
+	}
+}
+
 func TestLegacyAdapterUsesUserTripsOnlyForSourceWhitelistedCommands(t *testing.T) {
 	base := &commandEngineStub{
 		bundle: &service.Bundle{Security: &service.SecurityService{UserTrips: []string{"creator-trip"}}},

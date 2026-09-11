@@ -14,7 +14,7 @@ func TestCommandCloneRetainsCanonicalBehaviorAndNewEngine(t *testing.T) {
 		d, _ := commandDefinitionFor("memory")
 		clone := d.New(old, &model.ChatMessage{Name: "old", Text: "!memory"}).NewInstance(next, &model.ChatMessage{Name: "new", Text: "!mem"})
 		status, err := clone.Execute(context.Background())
-		if err != nil || status != model.SUCCESSFUL || len(old.chats) != 0 || len(next.chats) != 1 || !strings.HasPrefix(next.chats[0], "new|") || !strings.Contains(next.chats[0], "MB") {
+		if err != nil || status != model.SUCCESSFUL || len(old.chats) != 0 || len(next.chats) != 1 || !strings.HasPrefix(next.chats[0], "new|") || !strings.Contains(next.chats[0], "MiB") {
 			t.Fatalf("status=%s err=%v old=%v next=%v", status, err, old.chats, next.chats)
 		}
 	})

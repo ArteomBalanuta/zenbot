@@ -26,10 +26,8 @@ func (c *memoryCommand) Execute(ctx context.Context) (model.Status, error) {
 	return model.SUCCESSFUL, nil
 }
 
-// formatMemoryReport preserves Saturn's labels while adapting them to Go runtime metrics:
-// Alloc, HeapIdle, HeapSys, and Sys respectively.
 func formatMemoryReport(stats runtime.MemStats) string {
-	return fmt.Sprintf("JVM Used Memory : %d MB \\nJVM Free Memory : %d MB \\nJVM Total Memory: %d MB \\nJVM Max Memory  : %d MB \\n",
+	return fmt.Sprintf("Go Alloc: %d MiB \\nGo HeapIdle: %d MiB \\nGo HeapSys: %d MiB \\nGo Sys: %d MiB \\n",
 		stats.Alloc/memoryMiB,
 		stats.HeapIdle/memoryMiB,
 		stats.HeapSys/memoryMiB,
