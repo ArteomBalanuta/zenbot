@@ -29,7 +29,7 @@ func TestWeatherGetUsesSaturnEndpointsAndFormatsForecast(t *testing.T) {
 		t.Fatalf("got %q err %v", got, e)
 	}
 	lines := nonEmptyLiteralLines(got)
-	if len(lines) != 17 {
+	if len(lines) != 31 {
 		t.Fatalf("weather lines=%d: %q", len(lines), got)
 	}
 	assertAlignedSeparator(t, lines)

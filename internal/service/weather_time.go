@@ -114,8 +114,8 @@ func (s *WeatherService) Get(ctx context.Context, location string) (string, erro
 	q.Set("latitude", r.Lat)
 	q.Set("longitude", r.Lng)
 	q.Set("current_weather", "true")
-	q.Set("daily", "sunrise,sunset,shortwave_radiation_sum,uv_index_max")
-	q.Set("hourly", "pressure_msl,surface_pressure,soil_temperature_18cm,soil_moisture_3_to_9cm,diffuse_radiation,shortwave_radiation,apparent_temperature,relative_humidity_2m")
+	q.Set("daily", "sunrise,sunset,shortwave_radiation_sum,uv_index_max,temperature_2m_min,temperature_2m_max,apparent_temperature_min,apparent_temperature_max,precipitation_probability_max,precipitation_sum,snowfall_sum,daylight_duration,sunshine_duration")
+	q.Set("hourly", "pressure_msl,surface_pressure,soil_temperature_18cm,soil_moisture_3_to_9cm,diffuse_radiation,shortwave_radiation,apparent_temperature,relative_humidity_2m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,dew_point_2m")
 	q.Set("timezone", "auto")
 	q.Set("forecast_days", "1")
 	f.RawQuery = q.Encode()
@@ -147,36 +147,64 @@ type weatherPayload struct {
 		Windspeed   string `json:"windspeed"`
 	} `json:"current_weather_units"`
 	DailyRaw struct {
-		Time      []string       `json:"time"`
-		Sunrise   []string       `json:"sunrise"`
-		Sunset    []string       `json:"sunset"`
-		UV        []*json.Number `json:"uv_index_max"`
-		Radiation []*json.Number `json:"shortwave_radiation_sum"`
+		Time                     []string       `json:"time"`
+		Sunrise                  []string       `json:"sunrise"`
+		Sunset                   []string       `json:"sunset"`
+		UV                       []*json.Number `json:"uv_index_max"`
+		Radiation                []*json.Number `json:"shortwave_radiation_sum"`
+		TemperatureMin           []*json.Number `json:"temperature_2m_min"`
+		TemperatureMax           []*json.Number `json:"temperature_2m_max"`
+		ApparentMin              []*json.Number `json:"apparent_temperature_min"`
+		ApparentMax              []*json.Number `json:"apparent_temperature_max"`
+		PrecipitationProbability []*json.Number `json:"precipitation_probability_max"`
+		Precipitation            []*json.Number `json:"precipitation_sum"`
+		Snowfall                 []*json.Number `json:"snowfall_sum"`
+		Daylight                 []*json.Number `json:"daylight_duration"`
+		Sunshine                 []*json.Number `json:"sunshine_duration"`
 	} `json:"daily"`
 	DailyUnitsRaw struct {
-		UV        string `json:"uv_index_max"`
-		Radiation string `json:"shortwave_radiation_sum"`
+		UV                       string `json:"uv_index_max"`
+		Radiation                string `json:"shortwave_radiation_sum"`
+		TemperatureMin           string `json:"temperature_2m_min"`
+		TemperatureMax           string `json:"temperature_2m_max"`
+		ApparentMin              string `json:"apparent_temperature_min"`
+		ApparentMax              string `json:"apparent_temperature_max"`
+		PrecipitationProbability string `json:"precipitation_probability_max"`
+		Precipitation            string `json:"precipitation_sum"`
+		Snowfall                 string `json:"snowfall_sum"`
+		Daylight                 string `json:"daylight_duration"`
+		Sunshine                 string `json:"sunshine_duration"`
 	} `json:"daily_units"`
 	HourlyRaw struct {
-		Time      []string       `json:"time"`
-		Apparent  []*json.Number `json:"apparent_temperature"`
-		Humidity  []*json.Number `json:"relative_humidity_2m"`
-		Surface   []*json.Number `json:"surface_pressure"`
-		Sea       []*json.Number `json:"pressure_msl"`
-		Shortwave []*json.Number `json:"shortwave_radiation"`
-		Diffuse   []*json.Number `json:"diffuse_radiation"`
-		SoilTemp  []*json.Number `json:"soil_temperature_18cm"`
-		SoilMoist []*json.Number `json:"soil_moisture_3_to_9cm"`
+		Time          []string       `json:"time"`
+		Apparent      []*json.Number `json:"apparent_temperature"`
+		Humidity      []*json.Number `json:"relative_humidity_2m"`
+		Surface       []*json.Number `json:"surface_pressure"`
+		Sea           []*json.Number `json:"pressure_msl"`
+		Shortwave     []*json.Number `json:"shortwave_radiation"`
+		Diffuse       []*json.Number `json:"diffuse_radiation"`
+		SoilTemp      []*json.Number `json:"soil_temperature_18cm"`
+		SoilMoist     []*json.Number `json:"soil_moisture_3_to_9cm"`
+		WindDirection []*json.Number `json:"wind_direction_10m"`
+		WindGusts     []*json.Number `json:"wind_gusts_10m"`
+		CloudCover    []*json.Number `json:"cloud_cover"`
+		Visibility    []*json.Number `json:"visibility"`
+		DewPoint      []*json.Number `json:"dew_point_2m"`
 	} `json:"hourly"`
 	HourlyUnitsRaw struct {
-		Apparent  string `json:"apparent_temperature"`
-		Humidity  string `json:"relative_humidity_2m"`
-		Surface   string `json:"surface_pressure"`
-		Sea       string `json:"pressure_msl"`
-		Shortwave string `json:"shortwave_radiation"`
-		Diffuse   string `json:"diffuse_radiation"`
-		SoilTemp  string `json:"soil_temperature_18cm"`
-		SoilMoist string `json:"soil_moisture_3_to_9cm"`
+		Apparent      string `json:"apparent_temperature"`
+		Humidity      string `json:"relative_humidity_2m"`
+		Surface       string `json:"surface_pressure"`
+		Sea           string `json:"pressure_msl"`
+		Shortwave     string `json:"shortwave_radiation"`
+		Diffuse       string `json:"diffuse_radiation"`
+		SoilTemp      string `json:"soil_temperature_18cm"`
+		SoilMoist     string `json:"soil_moisture_3_to_9cm"`
+		WindDirection string `json:"wind_direction_10m"`
+		WindGusts     string `json:"wind_gusts_10m"`
+		CloudCover    string `json:"cloud_cover"`
+		Visibility    string `json:"visibility"`
+		DewPoint      string `json:"dew_point_2m"`
 	} `json:"hourly_units"`
 }
 
@@ -215,6 +243,19 @@ func metricAt(values []*json.Number, index int, unit string) string {
 		return metricUnavailable
 	}
 	return numberMetric(values[index], unit)
+}
+
+// Open-Meteo daily durations are seconds, not timestamps. Truncate partial
+// minutes; do not wrap polar-day durations at 24 hours or guess unknown units.
+func weatherDurationAt(values []*json.Number, index int, unit string) string {
+	if unit != "s" || index < 0 || index >= len(values) || values[index] == nil {
+		return metricUnavailable
+	}
+	seconds, err := values[index].Float64()
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 {
+		return metricUnavailable
+	}
+	return fmt.Sprintf("%.0fh %02.0fm", math.Floor(seconds/3600), math.Floor(math.Mod(seconds, 3600)/60))
 }
 
 func (w weatherPayload) format(area string) (string, error) {
@@ -288,6 +329,20 @@ func (w weatherPayload) format(area string) (string, error) {
 		"Sun rise: " + rise, "Sun set: " + set,
 		"Soil temp 18cm: " + metricAt(w.HourlyRaw.SoilTemp, hour, w.HourlyUnitsRaw.SoilTemp),
 		"Soil moist 3-9cm: " + metricAt(w.HourlyRaw.SoilMoist, hour, w.HourlyUnitsRaw.SoilMoist),
+		"Temperature min today: " + metricAt(w.DailyRaw.TemperatureMin, day, w.DailyUnitsRaw.TemperatureMin),
+		"Temperature max today: " + metricAt(w.DailyRaw.TemperatureMax, day, w.DailyUnitsRaw.TemperatureMax),
+		"Feels min today: " + metricAt(w.DailyRaw.ApparentMin, day, w.DailyUnitsRaw.ApparentMin),
+		"Feels max today: " + metricAt(w.DailyRaw.ApparentMax, day, w.DailyUnitsRaw.ApparentMax),
+		"Precip. chance max today: " + metricAt(w.DailyRaw.PrecipitationProbability, day, w.DailyUnitsRaw.PrecipitationProbability),
+		"Precipitation total today: " + metricAt(w.DailyRaw.Precipitation, day, w.DailyUnitsRaw.Precipitation),
+		"Snowfall total today: " + metricAt(w.DailyRaw.Snowfall, day, w.DailyUnitsRaw.Snowfall),
+		"Daylight today: " + weatherDurationAt(w.DailyRaw.Daylight, day, w.DailyUnitsRaw.Daylight),
+		"Sunshine today: " + weatherDurationAt(w.DailyRaw.Sunshine, day, w.DailyUnitsRaw.Sunshine),
+		"Wind direction (hourly): " + metricAt(w.HourlyRaw.WindDirection, hour, w.HourlyUnitsRaw.WindDirection),
+		"Wind gusts (prev hour max): " + metricAt(w.HourlyRaw.WindGusts, hour, w.HourlyUnitsRaw.WindGusts),
+		"Cloud cover (hourly): " + metricAt(w.HourlyRaw.CloudCover, hour, w.HourlyUnitsRaw.CloudCover),
+		"Visibility (hourly): " + metricAt(w.HourlyRaw.Visibility, hour, w.HourlyUnitsRaw.Visibility),
+		"Dew point (hourly): " + metricAt(w.HourlyRaw.DewPoint, hour, w.HourlyUnitsRaw.DewPoint),
 	}
 	return alignTextLines(lines, true), nil
 }

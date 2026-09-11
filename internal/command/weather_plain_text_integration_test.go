@@ -69,7 +69,15 @@ func TestWeatherChisinauAliasesDeliverAlignedPlainText(t *testing.T) {
 		if q.Get("latitude") != "47.00902" || q.Get("longitude") != "28.85938" || q.Get("timezone") != "auto" || q.Get("current_weather") != "true" {
 			t.Errorf("forecast query=%q", r.URL.RawQuery)
 		}
-		_, _ = w.Write([]byte(`{"timezone":"Europe/Chisinau","current_weather":{"temperature":21,"windspeed":7,"weathercode":1,"time":"2026-09-11T12:15"},"current_weather_units":{"temperature":"°C","windspeed":"km/h"},"hourly":{"time":["2026-09-11T12:00"],"apparent_temperature":[20],"relative_humidity_2m":[55]},"hourly_units":{"apparent_temperature":"°C","relative_humidity_2m":"%"},"daily":{"time":["2026-09-11"],"sunrise":["2026-09-11T06:36"],"sunset":["2026-09-11T19:24"]}}`))
+		_, _ = w.Write([]byte(`{
+			"timezone":"Europe/Chisinau",
+			"current_weather":{"temperature":21,"windspeed":7,"weathercode":1,"time":"2026-09-11T12:15"},
+			"current_weather_units":{"temperature":"°C","windspeed":"km/h"},
+			"hourly":{"time":["2026-09-11T12:00"],"apparent_temperature":[20],"relative_humidity_2m":[55],"wind_direction_10m":[270],"wind_gusts_10m":[35.2],"cloud_cover":[42],"visibility":[12000],"dew_point_2m":[-1.5]},
+			"hourly_units":{"apparent_temperature":"°C","relative_humidity_2m":"%","wind_direction_10m":"°","wind_gusts_10m":"km/h","cloud_cover":"%","visibility":"m","dew_point_2m":"°C"},
+			"daily":{"time":["2026-09-11"],"sunrise":["2026-09-11T06:36"],"sunset":["2026-09-11T19:24"],"temperature_2m_min":[-2.5],"temperature_2m_max":[21.5],"apparent_temperature_min":[-4],"apparent_temperature_max":[23],"precipitation_probability_max":[75],"precipitation_sum":[3.2],"snowfall_sum":[0],"daylight_duration":[46079.9],"sunshine_duration":[28980]},
+			"daily_units":{"temperature_2m_min":"°C","temperature_2m_max":"°C","apparent_temperature_min":"°C","apparent_temperature_max":"°C","precipitation_probability_max":"%","precipitation_sum":"mm","snowfall_sum":"cm","daylight_duration":"s","sunshine_duration":"s"}
+		}`))
 	}))
 	defer srv.Close()
 	weather := &service.WeatherService{HTTP: srv.Client(), GeoURL: srv.URL + "/geo", ForecastURL: srv.URL + "/forecast"}
@@ -77,7 +85,7 @@ func TestWeatherChisinauAliasesDeliverAlignedPlainText(t *testing.T) {
 		t.Run(alias, func(t *testing.T) {
 			got := runWeatherTextCommand(t, weather, "*"+alias+" chisinau")
 			lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-			if len(lines) != 17 {
+			if len(lines) != 31 {
 				t.Fatalf("rows=%d output=%q", len(lines), got)
 			}
 			for _, line := range lines {
@@ -91,6 +99,18 @@ func TestWeatherChisinauAliasesDeliverAlignedPlainText(t *testing.T) {
 					t.Errorf("missing %q from %q", want, got)
 				}
 			}
+			for _, want := range []string{
+				"Temperature min today: -2.5 °C", "Temperature max today: 21.5 °C",
+				"Feels min today: -4 °C", "Feels max today: 23 °C",
+				"Precip. chance max today: 75 %", "Precipitation total today: 3.2 mm", "Snowfall total today: 0 cm",
+				"Daylight today: 12h 47m", "Sunshine today: 8h 03m",
+				"Wind direction (hourly): 270 °", "Wind gusts (prev hour max): 35.2 km/h",
+				"Cloud cover (hourly): 42 %", "Visibility (hourly): 12000 m", "Dew point (hourly): -1.5 °C",
+			} {
+				if !strings.Contains(got, want+"\n") {
+					t.Errorf("missing extended metric %q from %q", want, got)
+				}
+			}
 		})
 	}
 }
@@ -100,7 +120,7 @@ func TestWeatherChisinauLiveProviders(t *testing.T) {
 		t.Skip("opt-in read-only provider check; never sends to a room")
 	}
 	got := runWeatherTextCommand(t, &service.WeatherService{}, "*weather chisinau")
-	if !strings.Contains(got, "Chișinău, Moldova") || strings.Count(got, "\n") != 17 {
+	if !strings.Contains(got, "Chișinău, Moldova") || strings.Count(got, "\n") != 31 {
 		t.Fatalf("unexpected live output %q", got)
 	}
 	t.Log(got)
