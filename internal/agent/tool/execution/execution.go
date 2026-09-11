@@ -87,6 +87,9 @@ func (e *Executor) prepare(agent api.Context, c Call) preparedCall {
 	if !ok {
 		return reject("UNKNOWN_TOOL", "unknown tool; choose an available tool")
 	}
+	if !tool.AuthorizedForInvocation(registered, agent) {
+		return reject("TOOL_NOT_AUTHORIZED", "tool is not authorized for this invocation")
+	}
 	d, err := registered.Descriptor(agent)
 	if err != nil {
 		return reject("INVALID_TOOL_CONTRACT", "invalid tool contract; choose another tool")

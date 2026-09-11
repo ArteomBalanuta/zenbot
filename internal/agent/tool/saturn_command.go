@@ -25,6 +25,11 @@ func (t SaturnCommand) Name() string {
 	return "saturn_" + strings.ToLower(strings.TrimSpace(t.Definition.Canonical))
 }
 
+func (t SaturnCommand) Authorized(caller api.Context) bool {
+	definition, ok := commandcatalog.AgentEntry(t.Definition.Canonical)
+	return ok && agentCommandAuthorized(caller, definition)
+}
+
 func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	definition, ok := commandcatalog.AgentEntry(t.Definition.Canonical)
 	if !ok {
@@ -142,6 +147,9 @@ func requiredCommandCapability(definition commandcatalog.Entry) (api.Capability,
 }
 
 func agentCommandAuthorized(caller api.Context, definition commandcatalog.Entry) bool {
+	if caller.ModerationTarget() != nil && !commandcatalog.ModerationReviewAllows(definition.Canonical) {
+		return false
+	}
 	required, restricted := requiredCommandCapability(definition)
 	return !restricted || caller.HasCapability(required)
 }

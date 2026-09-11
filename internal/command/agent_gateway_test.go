@@ -210,6 +210,7 @@ func TestAgentCommandGatewayKickVerifiesSilentActiveTargetAction(t *testing.T) {
 func TestAgentCommandGatewayWaitsForEverySnapshotBackedCommandOutcome(t *testing.T) {
 	public, _ := api.NewContext("programming", "caller", "trip", "hash", false, []string{})
 	moderator, _ := api.NewContextWithCapabilities("programming", "caller", "trip", "hash", false, []string{}, []api.Capability{api.ModerationCommands})
+	creator, _ := api.NewContextWithCapabilities("programming", "caller", "trip", "hash", false, []string{}, []api.Capability{api.PermanentBan})
 	tests := []struct {
 		name      string
 		command   string
@@ -218,7 +219,7 @@ func TestAgentCommandGatewayWaitsForEverySnapshotBackedCommandOutcome(t *testing
 	}{
 		{name: "remote list", command: "list", arguments: "lounge", caller: public},
 		{name: "remote message", command: "msgchannel", arguments: "lounge hello", caller: public},
-		{name: "remote nuke", command: "nuke", arguments: "lounge", caller: moderator},
+		{name: "remote nuke", command: "nuke", arguments: "lounge", caller: creator},
 		{name: "remote resurrect fallback", command: "resurrect", arguments: "target lounge programming", caller: moderator},
 	}
 	for _, test := range tests {

@@ -56,7 +56,7 @@ var entries = []Entry{
 	entry("messages", []string{"messages", "lastmessages"}, model.MODERATOR, agentTool("Recent user messages", "Display up to 30 recent messages associated with a trip.", "moderation", AgentModerator, positionalArguments(requiredToken("trip", "User trip."), requiredInteger("count", "Number of messages from 1 to 30.", 1, 30)), []string{"user messages"}, "Use when a moderator explicitly requests recent messages by trip.", "Do not use for live room membership or more than 30 messages.", "Show 10 messages for trip 595754", `{"trip":"595754","count":10}`, primaryIntent("trip_public_message_history"))),
 	entry("lock", []string{"lock", "lockroom"}, model.MODERATOR, agentTool("Set room lock", "Lock or unlock the current room.", "moderation", AgentModerator, booleanStateArguments("locked", "Whether the room must be locked.", "on", "off"), []string{"room lock"}, "Use for an explicit room lock-state request.", "Do not use to mute individual users.", "Lock the room", `{"locked":true}`)),
 	entry("mute", []string{"mute", "dumb"}, model.MODERATOR, agentTool("Mute user", "Mute one active user by nickname.", "moderation", AgentModerator, positionalArguments(requiredToken("nick", "Active nickname to mute.")), []string{"user"}, "Use for an explicit mute request targeting an active user.", "Do not use for kicking or permanent bans.", "Mute @spammer", `{"nick":"@spammer"}`, targetedCommand, runCommandCompatible)),
-	entry("nuke", []string{"nuke"}, model.MODERATOR, agentTool("Nuke room", "Remove users from a specified room through the room workflow.", "moderation", AgentModerator, positionalArguments(requiredToken("room", "Room to nuke.")), []string{"room"}, "Use only for an explicit moderator request naming a room.", "Do not use for removing one user.", "Nuke the raid room", `{"room":"raid-room"}`)),
+	entry("nuke", []string{"nuke"}, model.MODERATOR, agentTool("Nuke room", "Permanently ban every active user in a specified room, then lock that room.", "moderation", AgentPermanentBan, positionalArguments(requiredToken("room", "Room to nuke.")), []string{"room"}, "Use only for an explicit permanent-ban request by a creator naming a room.", "Do not use for removing one user.", "Nuke the raid room", `{"room":"raid-room"}`)),
 	entry("overflow", []string{"overflow", "shoot", "love", "hug", "kiss"}, model.MODERATOR, agentTool("Overflow user", "Apply the room overflow action to one active nickname.", "moderation", AgentModerator, positionalArguments(requiredToken("nick", "Active nickname.")), []string{"user"}, "Use when a moderator explicitly requests the overflow action.", "Do not infer this action from ordinary figurative language.", "Overflow @jill", `{"nick":"@jill"}`)),
 	entry("register", []string{"reg", "register"}, model.MODERATOR, agentTool("Register identity", "Register or associate a nickname and trip.", "identity", AgentModerator, positionalArguments(requiredToken("nick", "Nickname."), requiredToken("trip", "Trip.")), []string{"nickname", "trip"}, "Use when a moderator explicitly supplies both identity values.", "Do not use for DBZ character registration.", "Register jill with trip abc123", `{"nick":"jill","trip":"abc123"}`)),
 	entry("remove", []string{"del", "delete", "remove"}, model.MODERATOR, agentTool("Remove identity", "Delete a registered nickname or trip identity.", "identity", AgentModerator, positionalArguments(requiredToken("identity", "Nickname or trip selector.")), []string{"registered identity"}, "Use for an explicit registered-identity deletion.", "Do not use to kick an active room user.", "Remove registered identity jill", `{"identity":"jill"}`)),
@@ -173,9 +173,40 @@ func RunCommandAliases(allowModeration, allowPermanentBan bool) []string {
 	return out
 }
 
+// ModerationReviewRunCommandAliases returns legacy aliases whose commands are
+// admitted for an autonomous reviewed-author invocation.
+func ModerationReviewRunCommandAliases() []string {
+	unique := make(map[string]struct{})
+	for _, definition := range AgentEntries() {
+		if !definition.Agent.RunCommandCompatible || !ModerationReviewAllows(definition.Canonical) {
+			continue
+		}
+		for _, alias := range append([]string{definition.Canonical}, definition.Aliases...) {
+			alias = strings.ToLower(strings.TrimSpace(alias))
+			if alias != "" {
+				unique[alias] = struct{}{}
+			}
+		}
+	}
+	aliases := make([]string, 0, len(unique))
+	for alias := range unique {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	return aliases
+}
+
 func TargetsUser(command string) bool {
 	definition, found := AgentEntryByAlias(command)
 	return found && definition.Agent.TargetsUser
+}
+
+// ModerationReviewAllows is the fixed command authority granted to an
+// autonomous reviewed-author invocation. It does not decide whether the
+// reviewed message warrants that action.
+func ModerationReviewAllows(command string) bool {
+	definition, found := AgentEntryByAlias(command)
+	return found && definition.Canonical == "mute"
 }
 
 func ValidateAgentContracts() error {

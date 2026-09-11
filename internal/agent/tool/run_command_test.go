@@ -169,11 +169,42 @@ func TestRunCommandPreservesCommittedReceiptAlongsideGatewayError(t *testing.T) 
 	}
 }
 
-func TestRunCommandModerationAliasCannotRetargetReviewedAuthor(t *testing.T) {
+func TestRunCommandModerationReviewRejectsLegacyAliasBeforeGateway(t *testing.T) {
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("moderation complete")}
 	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), moderator, json.RawMessage(`{"command":"mute","arguments":"bob"}`))
-	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 0 {
+	if err != nil || !result.IsError || result.ErrorCode != "TOOL_NOT_AUTHORIZED" || gateway.calls != 0 {
+		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
+	}
+}
+
+func TestRunCommandModerationReviewHasNoLegacyAuthority(t *testing.T) {
+	caller, err := api.NewContextWithModerationTarget(
+		"room", "bot", "creator", "", false, []string{"alice"},
+		[]api.Capability{api.ModerationCommands, api.PermanentBan, api.AdminCommands}, "alice",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := (agenttool.RunCommand{}).Descriptor(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(descriptor.Parameters(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	if aliases := schema.Properties["command"].Enum; !slices.Equal(aliases, []string{"dumb", "mute"}) {
+		t.Fatalf("review run_command aliases=%#v", aliases)
+	}
+
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("muted")}
+	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"mute","arguments":"alice"}`))
+	if err != nil || !result.IsError || result.ErrorCode != "TOOL_NOT_AUTHORIZED" || gateway.calls != 0 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
 	}
 }

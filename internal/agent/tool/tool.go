@@ -16,6 +16,20 @@ type Tool interface {
 	Execute(context.Context, api.Context, json.RawMessage) (contract.Result, error)
 }
 
+// InvocationAuthorizer optionally narrows a valid tool contract for a trusted
+// invocation context. This is independent of descriptor capabilities so a
+// denied context never requires a fabricated capability or invalid schema.
+type InvocationAuthorizer interface {
+	Authorized(api.Context) bool
+}
+
+// AuthorizedForInvocation reports whether a tool admits the trusted caller
+// context in addition to its ordinary manifest and descriptor checks.
+func AuthorizedForInvocation(t Tool, ctx api.Context) bool {
+	authorizer, restricted := t.(InvocationAuthorizer)
+	return !restricted || authorizer.Authorized(ctx)
+}
+
 // ArgumentString returns only nonblank JSON string primitives.
 func ArgumentString(args json.RawMessage, name string) string {
 	var m map[string]json.RawMessage
@@ -52,6 +66,9 @@ func (r *Registry) Find(ctx api.Context, n string) (Tool, bool) {
 	if !ok {
 		return nil, false
 	}
+	if !AuthorizedForInvocation(t, ctx) {
+		return nil, false
+	}
 	descriptor, err := t.Descriptor(ctx)
 	if err != nil || descriptor.InternalFallback() {
 		return nil, false
@@ -65,6 +82,9 @@ func (r *Registry) Manifest(ctx api.Context) (contract.Manifest, error) {
 	intentOwners := make(map[string]string, len(r.tools))
 	for name, registered := range r.tools {
 		if !r.allow[name] {
+			continue
+		}
+		if !AuthorizedForInvocation(registered, ctx) {
 			continue
 		}
 		descriptor, err := registered.Descriptor(ctx)

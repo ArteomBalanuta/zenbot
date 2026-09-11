@@ -170,13 +170,107 @@ func TestNonListSaturnCommandsDoNotAdvertiseRemoteRosterData(t *testing.T) {
 	}
 }
 
-func TestSaturnModerationCommandCannotRetargetReviewedAuthor(t *testing.T) {
+func TestSaturnModerationReviewRejectsKickBeforeGateway(t *testing.T) {
 	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("not reached")}
 	moderator, _ := api.NewContextWithModerationTarget("room", "bot", "creator", "", false, []string{}, []api.Capability{api.ModerationCommands}, "alice")
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "kick"), Gateway: gateway}
 	result, err := tool.Execute(context.Background(), moderator, json.RawMessage(`{"nick":"bob"}`))
-	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 0 {
+	if err != nil || !result.IsError || result.ErrorCode != "TOOL_NOT_AUTHORIZED" || gateway.calls != 0 {
 		t.Fatalf("result=%#v calls=%d err=%v", result, gateway.calls, err)
+	}
+}
+
+func TestModerationReviewRegistryExposesOnlyMuteAndNativeReads(t *testing.T) {
+	caller, err := api.NewContextWithModerationTarget(
+		"room", "bot", "creator", "", false, []string{"alice"},
+		[]api.Capability{api.ModerationCommands, api.PermanentBan, api.AdminCommands}, "alice",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []agenttool.Tool{
+		agenttool.RoomUsers{},
+		agenttool.RunCommand{},
+		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "mute")},
+		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "nuke")},
+		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "notes")},
+	}
+	allowed := make([]string, len(tools))
+	for index, registered := range tools {
+		allowed[index] = registered.Name()
+	}
+	registry := agenttool.NewRegistry(tools, allowed)
+	manifest, err := registry.Manifest(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := map[string]bool{}
+	for _, entry := range manifest.Tools {
+		visible[entry.Name] = true
+	}
+	if len(visible) != 2 || !visible["room_users"] || !visible["saturn_mute"] {
+		t.Fatalf("review manifest=%#v", visible)
+	}
+	for _, name := range []string{"run_command", "saturn_nuke", "saturn_notes"} {
+		if _, found := registry.Find(caller, name); found {
+			t.Errorf("review registry found %q", name)
+		}
+	}
+	if _, found := registry.Find(caller, "saturn_mute"); !found {
+		t.Fatal("review registry hid saturn_mute")
+	}
+}
+
+func TestModerationReviewSaturnDirectExecutionAllowsOnlyMatchingMute(t *testing.T) {
+	caller, err := api.NewContextWithModerationTarget(
+		"room", "bot", "creator", "", false, []string{"Alice"},
+		[]api.Capability{api.ModerationCommands, api.PermanentBan, api.AdminCommands}, "alice",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("done")}
+	for _, test := range []struct {
+		canonical string
+		arguments string
+	}{
+		{canonical: "nuke", arguments: `{"room":"other"}`},
+		{canonical: "notes", arguments: `{"operation":"purge"}`},
+		{canonical: "kick", arguments: `{"nick":"alice"}`},
+	} {
+		command := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, test.canonical), Gateway: gateway}
+		result, err := command.Execute(context.Background(), caller, json.RawMessage(test.arguments))
+		if err != nil || !result.IsError || result.ErrorCode != "TOOL_NOT_AUTHORIZED" || gateway.calls != 0 {
+			t.Fatalf("%s result=%#v err=%v calls=%d", test.canonical, result, err, gateway.calls)
+		}
+	}
+
+	mute := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "mute"), Gateway: gateway}
+	result, err := mute.Execute(context.Background(), caller, json.RawMessage(`{"nick":"@ALICE"}`))
+	if err != nil || result.IsError || gateway.calls != 1 || gateway.command != "mute" || gateway.arguments != "@ALICE" {
+		t.Fatalf("matching mute result=%#v err=%v gateway=%#v", result, err, gateway)
+	}
+}
+
+func TestSaturnNukeDirectExecutionRequiresPermanentBanCapability(t *testing.T) {
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("nuke accepted")}
+	command := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "nuke"), Gateway: gateway}
+	moderator, err := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := command.Execute(context.Background(), moderator, json.RawMessage(`{"room":"other"}`))
+	if err != nil || !result.IsError || result.ErrorCode != "TOOL_NOT_AUTHORIZED" || gateway.calls != 0 {
+		t.Fatalf("moderator result=%#v err=%v calls=%d", result, err, gateway.calls)
+	}
+
+	creator, err := api.NewContextWithCapabilities("room", "creator", "trip", "", false, []string{}, []api.Capability{api.PermanentBan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = command.Execute(context.Background(), creator, json.RawMessage(`{"room":"other"}`))
+	if err != nil || result.IsError || gateway.calls != 1 || gateway.command != "nuke" || gateway.arguments != "other" {
+		t.Fatalf("creator result=%#v err=%v gateway=%#v", result, err, gateway)
 	}
 }
 

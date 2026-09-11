@@ -38,3 +38,29 @@ func TestAgentRunCommandAliasesExpandFromCapabilities(t *testing.T) {
 		t.Fatalf("creator aliases = %#v", got)
 	}
 }
+
+func TestAgentModerationReviewPolicyAllowsOnlyMute(t *testing.T) {
+	caller, err := api.NewContextWithModerationTarget(
+		"room", "bot", "creator-trip", "", false, []string{"reviewed"},
+		[]api.Capability{api.ModerationCommands, api.PermanentBan, api.AdminCommands}, "reviewed",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aliases := AgentRunCommandAliases(caller); !slices.Equal(aliases, []string{"dumb", "mute"}) {
+		t.Fatalf("review legacy aliases=%#v", aliases)
+	}
+	for _, canonical := range []string{"nuke", "lock", "notes", "register", "mail", "shadowban", "kick"} {
+		definition, ok := AgentCommandDefinition(canonical)
+		if !ok {
+			t.Fatalf("missing definition %q", canonical)
+		}
+		if AgentCommandAuthorized(caller, definition) {
+			t.Errorf("review authorized %q", canonical)
+		}
+	}
+	mute, ok := AgentCommandDefinition("mute")
+	if !ok || !AgentCommandAuthorized(caller, mute) {
+		t.Fatal("review did not authorize mute")
+	}
+}

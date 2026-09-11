@@ -197,6 +197,10 @@ func TestAgentCatalogDerivedPoliciesRemainExact(t *testing.T) {
 	if !ok || Access(prefix) != AgentAdmin || TargetsUser("prefix") || prefix.Agent.RunCommandCompatible {
 		t.Fatalf("prefix policy = %#v", prefix.Agent)
 	}
+	nuke, ok := AgentEntry("nuke")
+	if !ok || Access(nuke) != AgentPermanentBan || !strings.Contains(strings.ToLower(nuke.Agent.Description), "permanently ban") || !strings.Contains(strings.ToLower(nuke.Agent.Description), "lock") {
+		t.Fatalf("nuke policy = %#v", nuke.Agent)
+	}
 	if _, ok := AgentEntry("l"); ok {
 		t.Fatal("hidden recursive command l was exposed")
 	}

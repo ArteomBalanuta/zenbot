@@ -50,6 +50,9 @@ func AgentCommandCapability(definition common.CommandDefinition) (api.Capability
 }
 
 func AgentCommandAuthorized(caller api.Context, definition common.CommandDefinition) bool {
+	if caller.ModerationTarget() != nil && !commandcatalog.ModerationReviewAllows(definition.Canonical) {
+		return false
+	}
 	required, restricted := AgentCommandCapability(definition)
 	return !restricted || caller.HasCapability(required)
 }
@@ -57,6 +60,9 @@ func AgentCommandAuthorized(caller api.Context, definition common.CommandDefinit
 // AgentRunCommandAliases derives the compact compatibility tool's enum from
 // the same command catalog and the caller's trusted capabilities.
 func AgentRunCommandAliases(caller api.Context) []string {
+	if caller.ModerationTarget() != nil {
+		return commandcatalog.ModerationReviewRunCommandAliases()
+	}
 	return commandcatalog.RunCommandAliases(caller.HasCapability(api.ModerationCommands), caller.HasCapability(api.PermanentBan))
 }
 

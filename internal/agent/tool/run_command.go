@@ -27,6 +27,8 @@ type RunCommand struct{ Gateway commandgateway.Gateway }
 
 func (t RunCommand) Name() string { return runCommandName }
 
+func (t RunCommand) Authorized(caller api.Context) bool { return caller.ModerationTarget() == nil }
+
 func (t RunCommand) Descriptor(caller api.Context) (contract.Descriptor, error) {
 	parameters, err := json.Marshal(map[string]any{
 		"type":                 "object",
@@ -47,6 +49,9 @@ func (t RunCommand) Descriptor(caller api.Context) (contract.Descriptor, error) 
 func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.RawMessage) (contract.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return contract.ActionErrorResult("", t.Name(), "TOOL_BATCH_CANCELLED", "command was cancelled before execution", contract.EffectNotStarted), nil
+	}
+	if !t.Authorized(caller) {
+		return contract.ActionErrorResult("", t.Name(), "TOOL_NOT_AUTHORIZED", "Caller is not allowed to execute legacy Saturn commands in a moderation review", contract.EffectNotStarted), nil
 	}
 	if t.Gateway == nil {
 		return contract.ActionErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "command gateway is unavailable", contract.EffectNotStarted), nil
@@ -135,6 +140,9 @@ func commandExecutionFailure(toolName string, execution commandgateway.Execution
 }
 
 func runCommandAliases(caller api.Context) []string {
+	if caller.ModerationTarget() != nil {
+		return commandcatalog.ModerationReviewRunCommandAliases()
+	}
 	return commandcatalog.RunCommandAliases(caller.HasCapability(api.ModerationCommands), caller.HasCapability(api.PermanentBan))
 }
 
