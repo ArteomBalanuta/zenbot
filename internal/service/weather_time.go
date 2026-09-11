@@ -345,11 +345,16 @@ func solarDuration(value string) (string, error) {
 }
 
 func solarOffsetMatchesDate(current time.Time, minutes int) bool {
-	start := time.Date(current.Year(), current.Month(), current.Day(), 0, 0, 0, 0, current.Location())
-	end := start.AddDate(0, 0, 1)
-	// Daily solar metadata may use either side of a timezone transition.
-	// Walk actual zone boundaries, not assumptions about when DST changes.
-	for at := start; at.Before(end); {
+	if minutes < -24*60 || minutes > 24*60 {
+		return false
+	}
+	// Under the candidate offset, this UTC interval maps exactly to the requested
+	// civil date. Accept only if a real zone segment with that offset intersects
+	// the interval. Constructing midnight in the local zone could normalize to
+	// the previous date when a transition skips midnight.
+	start := time.Date(current.Year(), current.Month(), current.Day(), 0, 0, 0, 0, time.UTC).Add(-time.Duration(minutes) * time.Minute)
+	end := start.Add(24 * time.Hour)
+	for at := start.In(current.Location()); at.Before(end); {
 		_, offset := at.Zone()
 		if offset%60 == 0 && offset/60 == minutes {
 			return true

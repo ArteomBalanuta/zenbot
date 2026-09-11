@@ -73,6 +73,30 @@ func TestTimeCoherenceAllowsSolarDayOffsetAcrossDSTTransition(t *testing.T) {
 	}
 }
 
+func TestTimeCoherenceValidatesSolarOffsetWhenLocalMidnightIsSkipped(t *testing.T) {
+	clock := `{"dateTime":"2026-09-06T12:15:00-03:00","timeZone":"America/Santiago"}`
+	for _, tc := range []struct {
+		name   string
+		offset int
+		valid  bool
+	}{
+		{"previous date offset", -240, false},
+		{"requested date offset", -180, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sun := fmt.Sprintf(`{"results":{"date":"2026-09-06","timezone":"America/Santiago","utc_offset":%d}}`, tc.offset)
+			got, err := auditTimeService(auditProviderClient(auditGeo, auditForecast, sun, clock)).Get(context.Background(), "City")
+			if tc.valid {
+				if err != nil || !strings.Contains(got, "2026-09-06") || !strings.Contains(got, "-03:00") {
+					t.Fatalf("valid offset rejected or wrong current date/offset: %q err=%v", got, err)
+				}
+			} else if err == nil || got != "" {
+				t.Fatalf("offset %d never occurs on requested date but was accepted: err=%v", tc.offset, err)
+			}
+		})
+	}
+}
+
 type auditCountedBody struct {
 	io.Reader
 	read   int
