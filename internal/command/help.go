@@ -40,7 +40,7 @@ func fmtHelp(format string, args ...string) string {
 }
 
 func alignHelp(output string) string {
-	lines := strings.Split(output, `\n`)
+	lines := strings.Split(output, "\n")
 	longest := 0
 	for _, line := range lines {
 		if i := strings.IndexByte(line, '-'); i >= 0 {
@@ -50,13 +50,17 @@ func alignHelp(output string) string {
 		}
 	}
 	var b strings.Builder
-	for _, line := range lines {
+	for n, line := range lines {
 		if i := strings.IndexByte(line, '-'); i >= 0 {
 			b.WriteString(line[:i])
 			for n := len([]rune(line[:i])); n < longest; n++ {
 				b.WriteRune(' ')
 			}
 			b.WriteString(line[i:])
+		} else {
+			b.WriteString(line)
+		}
+		if n < len(lines)-1 {
 			b.WriteString(`\n`)
 		}
 	}
@@ -67,16 +71,13 @@ const helpHeader = "All commands can be used through '/whisper'\nPrefix: %s \nCo
 
 const adminCommands = " grant,access <trip> <role> - grants a role to a trip\n" +
 	" sql <SQL>    - runs SQL against the bot database\n" +
-	" mine <room> <start|stop> - controls the trip miner in a room\n" +
-	" mem,memory   - shows JVM memory usage\n" +
+	" mem,memory,memstats - shows Go runtime memory values in MiB\n" +
 	" prefix <char>   - changes the live command prefix\n" +
-	" msgroom,msgchannel <room> <text> - sends a message to another room\n" +
 	" replica,bot <channel> - starts a replica in a room\n" +
 	" replicaoff <channel> - stops a running replica\n" +
 	" replicastatus,status - shows host and replica status\n" +
-	" whiskey <channel> <name> - starts an agent replica with a custom nick\n" +
-	" restart,reload  - restarts the host and its replicas\n" +
-	" shutdown,exit  - stops the application\n"
+	" restart,reload,re - submits a request to restart this host only; completion is unconfirmed\n" +
+	" shutdown,exit,quit - submits a request to shut down this host only; completion is unconfirmed\n"
 
 const moderatorCommands = " activity <trip>   - shows recent activity patterns for a trip\n" +
 	" automove <on|off>  - toggles auto-move between configured rooms\n" +
@@ -84,14 +85,13 @@ const moderatorCommands = " activity <trip>   - shows recent activity pa
 	" auth,authorize <trip> - authorizes a trip on the room\n" +
 	" deauth <trip>   - removes trip authorization\n" +
 	" kick,k,out <nick>  - kicks a user from the room\n" +
-	" nuke <room>   - locks a room and clears users from it\n" +
+	" nuke <room>   - requests permanent bans for every active user in a room, then locks it\n" +
 	" messages,lastmessages <trip> <count> - shows recent messages for a trip\n" +
 	" lock,lockroom <on|off> - locks or unlocks the current room\n" +
 	" overflow,shoot <nick> - sends the selected overflow action\n" +
 	" register,reg <nick> <trip> - registers or updates a nick/trip pair\n" +
 	" remove <name|trip>  - removes a registered user\n" +
-	" move <name> <from> <to> - moves a user between rooms\n" +
-	" resurrect    - moves the last kicked user back\n" +
+	" move,recover,heal,resurrect <nick> <source> <destination> - requests moving a user between rooms\n" +
 	" shadowban,sban <target> - shadow-bans by nick, trip, or hash\n" +
 	" shadowbanlist,banlist - lists shadow-banned users\n" +
 	" unshadowban <target> - removes a shadow ban\n" +
@@ -111,7 +111,7 @@ const userCommands = " help,h       - shows this help output\n" 
 	" lastseen <name>  - shows when a user was last active\n" +
 	" list <channel>   - lists users in a room\n" +
 	" msg,mail <nick> <text> - sends mail to a registered user\n" +
-	" msgroom <room> <text> - sends a message to another room\n" +
+	" msgchannel,msgroom <room> <text> - requests an anonymous message relay to another room\n" +
 	" nicks,t2n <trip>  - lists known nicks for a trip\n" +
 	" notes       - lists your saved notes\n" +
 	" note,save <text>  - saves a note\n" +
