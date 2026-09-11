@@ -66,6 +66,18 @@ type ObservationReceipt struct {
 	ActionCount        int                  `json:"actionCount,omitempty"`
 }
 
+// ObservationIndexEntry adds bounded factual evidence to an execution receipt.
+// Truncated describes the preview, never whether the user's task is complete.
+type ObservationIndexEntry struct {
+	ObservationReceipt
+	Data              json.RawMessage `json:"data,omitempty"`
+	Message           string          `json:"message,omitempty"`
+	ReturnedCount     int             `json:"returnedCount,omitempty"`
+	Truncated         bool            `json:"truncated"`
+	OmittedFields     []string        `json:"omittedFields,omitempty"`
+	OmittedFieldCount int             `json:"omittedFieldCount,omitempty"`
+}
+
 func (store *ObservationStore) RecordCall(callID, toolName string, arguments json.RawMessage) {
 	if store == nil {
 		return
@@ -96,6 +108,43 @@ func (store *ObservationStore) Index(maxArgumentBytes int) []ObservationReceipt 
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
+	return store.indexLocked(maxArgumentBytes)
+}
+
+// IndexWithData preserves bounded structured previews even when the optional
+// tool transcript is removed. maxDataBytes bounds each projected observation;
+// zero omits its payload explicitly, without changing the full stored result.
+func (store *ObservationStore) IndexWithData(maxArgumentBytes, maxDataBytes int) []ObservationIndexEntry {
+	if store == nil {
+		return nil
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	receipts := store.indexLocked(maxArgumentBytes)
+	index := make([]ObservationIndexEntry, 0, len(receipts))
+	for _, receipt := range receipts {
+		entry := ObservationIndexEntry{ObservationReceipt: receipt}
+		if maxDataBytes <= 0 {
+			entry.Truncated = true
+		} else {
+			view := projectObservation(store.results[receipt.CallID], maxDataBytes)
+			entry.ReturnedCount = view.ReturnedCount
+			entry.Truncated = view.Truncated
+			if len(view.JSON()) <= maxDataBytes {
+				entry.Data, entry.Message = view.Data, view.Message
+				entry.OmittedFields, entry.OmittedFieldCount = view.OmittedFields, view.OmittedFieldCount
+			} else {
+				// Identity and receipt metadata may themselves exceed this preview
+				// budget. Retain them and omit only the disposable payload.
+				entry.Truncated = true
+			}
+		}
+		index = append(index, entry)
+	}
+	return index
+}
+
+func (store *ObservationStore) indexLocked(maxArgumentBytes int) []ObservationReceipt {
 	index := make([]ObservationReceipt, 0, len(store.order))
 	for _, callID := range store.order {
 		view, call := store.views[callID], store.calls[callID]
@@ -315,10 +364,27 @@ func fitObservationObject(view ObservationView, object map[string]any, maxBytes 
 		view.Data, _ = json.Marshal(selected)
 		if len(view.JSON()) > maxBytes {
 			delete(selected, key)
+			// Structured wrappers can contain small facts beside a large field.
+			// Project such objects within the remaining space instead of losing
+			// the wrapper wholesale. Each nesting level reduces the byte budget.
+			view.Data, _ = json.Marshal(selected)
+			encodedKey, _ := json.Marshal(key)
+			nestedBudget := maxBytes - len(view.JSON()) - len(encodedKey) - 2
+			if nested, ok := object[key].(map[string]any); ok && nestedBudget > 0 {
+				preview := fitObservationObject(ObservationView{Truncated: true}, nested, nestedBudget)
+				if len(preview.Data) > 2 && len(preview.JSON()) <= nestedBudget {
+					selected[key] = preview.Data
+					for _, field := range preview.OmittedFields {
+						view.OmittedFields = append(view.OmittedFields, key+"."+field)
+					}
+					view.OmittedFieldCount += preview.OmittedFieldCount
+					continue
+				}
+			}
 			view.OmittedFields = append(view.OmittedFields, key)
+			view.OmittedFieldCount++
 		}
 	}
-	view.OmittedFieldCount = len(view.OmittedFields)
 	view.Data, _ = json.Marshal(selected)
 	if len(view.JSON()) > maxBytes {
 		view.OmittedFields = nil

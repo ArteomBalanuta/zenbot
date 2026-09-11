@@ -620,8 +620,8 @@ func TestCreatorProviderManifestFitsConfiguredContextBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(encoded) > 32*1024 {
-		t.Fatalf("creator provider manifest = %d bytes, want at most %d", len(encoded), 32*1024)
+	if len(encoded) > 40*1024 {
+		t.Fatalf("creator provider manifest = %d bytes, want at most %d", len(encoded), 40*1024)
 	}
 	t.Logf("creator provider manifest: %d bytes across %d tools", len(encoded), len(definitions))
 	var providerDefinitions []struct {
@@ -706,6 +706,65 @@ func TestRegistryToolLoopRepairsReusedCallIDWithoutExecutingRejectedCall(t *test
 	for index, request := range client.requests {
 		assertAtomicToolProtocol(t, index, request.Messages())
 	}
+}
+
+func TestTurnEngineProtectsBoundedRepairFeedbackWithCompetingObservations(t *testing.T) {
+	const original = "Compare the three counts, including the empty room, and report failures."
+	const maxTokens = 1300
+	projector, err := assemble.New(assemble.Config{MaxPromptChars: 200, MaxContextTokens: maxTokens}, tinyBudgetCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := &correctingReadTool{}
+	registry := agenttool.NewRegistry([]agenttool.Tool{read}, []string{read.Name()})
+	store := assemble.NewObservationStore()
+	newest := llm.NewLlmMessage("user", original, nil, "")
+	messages := []llm.LlmMessage{llm.NewLlmMessage("system", "policy", nil, ""), newest}
+	for i := 0; i < 3; i++ {
+		id := fmt.Sprintf("done-%d", i)
+		view := store.Store(contract.SuccessResult(id, read.Name(), map[string]any{"count": i + 1, "details": strings.Repeat("observation ", 500)}), 1500)
+		messages = append(messages,
+			llm.NewLlmMessage("assistant", nil, []llm.LlmToolCall{llm.NewLlmToolCall(id, read.Name(), `{}`)}, ""),
+			llm.NewLlmMessage("tool", string(view.JSON()), nil, id))
+	}
+	// An invalid batch can contain arbitrarily large names, IDs and arguments.
+	// None of these calls may execute or crowd the current correction out.
+	huge := strings.Repeat("😀\\\"", 5000)
+	calls := []llm.LlmToolCall{llm.NewLlmToolCall(huge, read.Name(), `{"value":"valid"}`)}
+	for i := 0; i < 20; i++ {
+		calls = append(calls, llm.NewLlmToolCall(huge, huge, huge))
+	}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse("Counts compared from the available evidence.", nil, "stop")}}
+	limits := turn.ExecutionLimits{MaxSteps: 2, MaxToolCalls: 1}
+	engine := TurnEngine{Client: client, Registry: registry, Projector: projector, NewestRequest: newest, Observations: store, Allowed: []string{read.Name()}, Limits: limits}
+	_, _, batch, err := engine.Complete(context.Background(), messages, nil, llm.NewLlmResponse(nil, calls, "tool_calls"), turn.NewState(limits))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 1 || read.calls.Load() != 0 || len(batch) != 0 || len(store.Index(0)) != 3 {
+		t.Fatalf("rejected batch executed or became evidence: requests=%d executions=%d results=%d", len(client.requests), read.calls.Load(), len(batch))
+	}
+	next := client.requests[0]
+	if !messagesContain(next.Messages(), "TOOL_LOOP_FEEDBACK=") {
+		t.Fatal("current repair feedback was evicted by competing observations")
+	}
+	if !messagesContain(next.Messages(), original) || !messagesContain(next.Messages(), "TOOL_LOOP_STATUS=") || !messagesContain(next.Messages(), `"count":3`) {
+		t.Fatal("repair request lost original prompt, loop status or factual count")
+	}
+	feedbackCount := 0
+	for _, message := range next.Messages() {
+		if strings.HasPrefix(message.Content(), "TOOL_LOOP_FEEDBACK=") {
+			feedbackCount++
+			if len(message.Content()) > 2200 || !strings.Contains(message.Content(), `"truncated":true`) || !strings.Contains(message.Content(), "No calls") {
+				t.Fatalf("repair diagnostic is unbounded or hides truncation: bytes=%d", len(message.Content()))
+			}
+		}
+	}
+	if feedbackCount != 1 || len(next.Tools()) != 0 {
+		t.Fatal("repair feedback duplicated or terminal synthesis exposed tools")
+	}
+	assertRequestWithinBudget(t, 0, next, maxTokens, 0)
+	assertAtomicToolProtocol(t, 0, next.Messages())
 }
 
 func TestRegistryToolLoopKeepsToolsAvailableForArgumentSelfCorrection(t *testing.T) {

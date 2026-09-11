@@ -94,6 +94,68 @@ func TestThreeRoundsKeepOriginalRequestAndReceiptsWhenResultsArePruned(t *testin
 	}
 }
 
+func TestTerminalProjectionKeepsSmallFactsAndErrorsAfterAllToolMessagesArePruned(t *testing.T) {
+	store := NewObservationStore()
+	policy := llm.NewLlmMessage("system", "policy", nil, "")
+	request := llm.NewLlmMessage("user", "Compare all three room counts and explain any unavailable result.", nil, "")
+	status := llm.NewLlmMessage("user", `TOOL_LOOP_STATUS={"terminal":true,"toolsAvailable":false}`, nil, "")
+	messages := []Message{policy, request}
+	originals := []contract.Result{
+		contract.SuccessResult("first", "list", map[string]any{"count": 3, "roster": strings.Repeat("alice ", 1500)}),
+		contract.SuccessResult("empty", "list", map[string]any{"count": 0, "roster": strings.Repeat("empty ", 1500)}),
+		contract.ErrorResult("failed", "list", "SNAPSHOT_FAILED", "Room snapshot unavailable. "+strings.Repeat("detail ", 1500)),
+	}
+	for _, result := range originals {
+		args := json.RawMessage(`{"room":"test","detail":"` + strings.Repeat("argument ", 700) + `"}`)
+		store.RecordCall(result.CallID, result.ToolName, args)
+		view := store.Store(result, 5000)
+		messages = append(messages,
+			llm.NewLlmMessage("assistant", nil, []llm.LlmToolCall{llm.NewLlmToolCall(result.CallID, result.ToolName, string(args))}, ""),
+			llm.NewLlmMessage("tool", string(view.JSON()), nil, result.CallID))
+	}
+	projection, err := ProjectTurn(messages, nil, store, ContextInput{RequiredPrefix: []Message{policy}, RequiredSuffix: []Message{request}, RequiredRuntime: []Message{status}, MaxTokens: 750})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index struct {
+		Results []struct {
+			CallID, Status, Code, Message string
+			Data                          map[string]any
+			Truncated                     bool
+			OmittedFields                 []string
+		}
+		OmittedContextUnits int
+	}
+	for _, message := range projection.Messages {
+		if message.Role() == "tool" || len(message.ToolCalls()) > 0 {
+			t.Fatal("fixture did not prune every optional tool exchange")
+		}
+		if strings.HasPrefix(message.Content(), resultIndexPrefix) {
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(message.Content(), resultIndexPrefix)), &index); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(index.Results) != 3 || index.Results[0].Data["count"] != float64(3) || index.Results[1].Data["count"] != float64(0) {
+		t.Fatalf("required index lost terminal count facts, including zero: %#v", index)
+	}
+	if index.Results[2].Status != "error" || index.Results[2].Code != "SNAPSHOT_FAILED" || !strings.HasPrefix(index.Results[2].Message, "Room snapshot unavailable.") {
+		t.Fatalf("required index lost error evidence: %#v", index.Results[2])
+	}
+	for i, result := range originals {
+		if !index.Results[i].Truncated || index.Results[i].CallID != result.CallID {
+			t.Fatalf("preview omission or retrieval identity missing: %#v", index.Results[i])
+		}
+		full, ok := store.Full(result.CallID)
+		if !ok || full.Content != result.Content {
+			t.Fatal("projection changed full stored evidence")
+		}
+	}
+	if index.OmittedContextUnits != 3 || projection.SerializedChars > projection.BudgetChars || projection.Messages[len(projection.Messages)-1].Content() != status.Content() {
+		t.Fatalf("projection lost budget, omission count or terminal status: %#v", projection)
+	}
+}
+
 func TestContextBudgeterDeduplicatesAcrossSourcesAndKeepsHigherPriorityUnit(t *testing.T) {
 	duplicate := llm.NewLlmMessage("user", "same evidence", nil, "")
 	projection, err := (ContextBudgeter{}).Project(ContextInput{
@@ -170,7 +232,9 @@ func TestProjectTurnPreservesNewestRequestAndAtomicBoundedObservation(t *testing
 		llm.NewLlmMessage("tool", string(result.Envelope()), nil, "call-1"),
 	}, []any{map[string]any{"name": "lookup"}}, store, ContextInput{
 		RequiredPrefix: []Message{policy}, RequiredSuffix: []Message{newest},
-		MaxTokens: 350, ReserveTokens: 20,
+		// Include room for the required factual preview as well as the atomic
+		// transcript exchange; the much larger old context still cannot fit.
+		MaxTokens: 500, ReserveTokens: 20,
 	})
 	if err != nil {
 		t.Fatal(err)

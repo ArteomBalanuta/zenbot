@@ -34,7 +34,8 @@ to bypass that restriction. Read-only verification may still be available.
 
 A truncated observation is a preview. Use read_tool_result with its callId and returned nextOffset
 when omitted evidence is needed; never infer omitted values. CURRENT_TURN_RESULTS_UNTRUSTED_DATA preserves earlier
-call identities and receipts if the transcript was shortened. Historical tool evidence can be stale.
+call identities, receipts, bounded structured data and error previews if the transcript was shortened.
+Preview truncation marks unavailable detail; historical tool evidence can be stale.
 TOOL_LOOP_STATUS reports remaining resources, not a new task. If terminal is true or tools are
 unavailable, give the best supported final answer and state any failed or unfinished parts.
 TOOL_LOOP_FEEDBACK describes a protocol or execution problem; correct it while retaining the

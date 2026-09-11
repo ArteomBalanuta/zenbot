@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/assemble"
@@ -90,12 +91,8 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 				}
 				repaired = true
 				feedback = "No calls from the last response were executed. Return complete native tool calls with nonblank names and fresh unique IDs."
-				if protocolErr != nil {
-					feedback += " " + protocolErr.Error()
-				}
 				// Invalid protocol cannot form an assistant/tool pair; keep it as data.
-				raw, _ := json.Marshal(callsForFeedback(calls))
-				feedback += " Rejected calls: " + string(raw)
+				feedback += " Rejected calls: " + rejectedCallsFeedback(calls, protocolErr)
 			} else {
 				batch := e.executeBatch(ctx, executor, state, batchCalls, terminal)
 				all = append(all, batch...)
@@ -113,8 +110,11 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 				}
 			}
 		}
+		var requiredRuntime []llm.LlmMessage
 		if feedback != "" {
-			messages = append(messages, llm.NewLlmMessage("user", "TOOL_LOOP_FEEDBACK="+feedback, nil, ""))
+			correction := llm.NewLlmMessage("user", "TOOL_LOOP_FEEDBACK="+feedback, nil, "")
+			messages = append(messages, correction)
+			requiredRuntime = append(requiredRuntime, correction)
 		}
 		tools := e.availableProviderTools(providerTools, executor.Ledger)
 		stage := fmt.Sprintf("llm.tool_follow_up.%d", cycle)
@@ -132,7 +132,8 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 			"blockedByUnknownAction": executor.Ledger.UnknownActionCallID(),
 		})
 		statusMessage := llm.NewLlmMessage("user", "TOOL_LOOP_STATUS="+string(status), nil, "")
-		request, err := e.projectRequest(messages, tools, statusMessage)
+		requiredRuntime = append(requiredRuntime, statusMessage)
+		request, err := e.projectRequest(messages, tools, requiredRuntime...)
 		if err != nil {
 			return response, messages, all, err
 		}
@@ -146,16 +147,49 @@ func (e TurnEngine) Complete(ctx context.Context, messages []llm.LlmMessage, pro
 	}
 }
 
-func callsForFeedback(calls []llm.LlmToolCall) []map[string]string {
-	out := make([]map[string]string, 0, len(calls))
-	for _, call := range calls {
-		raw := []rune(call.RawArguments())
-		if len(raw) > 2000 {
-			raw = raw[:2000]
-		}
-		out = append(out, map[string]string{"id": call.ID(), "name": call.Name(), "arguments": string(raw)})
+func rejectedCallsFeedback(calls []llm.LlmToolCall, protocolErr error) string {
+	type callPreview struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+		Truncated bool   `json:"truncated"`
 	}
-	return out
+	type diagnostic struct {
+		Reason    string        `json:"reason,omitempty"`
+		CallCount int           `json:"callCount"`
+		Calls     []callPreview `json:"calls"`
+		Truncated bool          `json:"truncated"`
+	}
+	// Bound the aggregate serialized diagnostic, including escaping, identities,
+	// validation text and call count. These are previews, never executable calls.
+	for previewBytes := 128; ; previewBytes /= 2 {
+		value := diagnostic{CallCount: len(calls), Truncated: len(calls) > 3}
+		if protocolErr != nil {
+			value.Reason = feedbackPrefix(protocolErr.Error(), previewBytes)
+			value.Truncated = value.Truncated || value.Reason != protocolErr.Error()
+		}
+		for _, call := range calls[:min(3, len(calls))] {
+			preview := callPreview{ID: feedbackPrefix(call.ID(), previewBytes), Name: feedbackPrefix(call.Name(), previewBytes), Arguments: feedbackPrefix(call.RawArguments(), previewBytes)}
+			preview.Truncated = preview.ID != call.ID() || preview.Name != call.Name() || preview.Arguments != call.RawArguments()
+			value.Truncated = value.Truncated || preview.Truncated
+			value.Calls = append(value.Calls, preview)
+		}
+		encoded, _ := json.Marshal(value)
+		if len(encoded) <= 1536 {
+			return string(encoded)
+		}
+	}
+}
+
+func feedbackPrefix(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end]
 }
 
 func (e TurnEngine) executeBatch(ctx context.Context, executor *execution.Executor, state *turn.State, calls []execution.Call, terminal bool) []toolBatchResult {

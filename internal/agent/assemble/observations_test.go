@@ -130,3 +130,53 @@ func TestOversizedObservationReportsOmittedFieldsAndKeepsLaterSmallFacts(t *test
 		t.Fatalf("observation exceeded its limit: %d", len(view.JSON()))
 	}
 }
+
+func TestRequiredIndexIncludesBoundedPreviewWithoutChangingReceiptOnlyIndex(t *testing.T) {
+	store := NewObservationStore()
+	store.Store(contract.SuccessResult("count", "lookup", map[string]any{"count": 0, "large": strings.Repeat("😀", 3000)}), 300)
+	store.Store(contract.ErrorResult("error", "lookup", "FAILED", strings.Repeat("é😀\"", 3000)), 300)
+	for _, limit := range []int{1024, 512, 256, 0} {
+		index := store.IndexWithData(0, limit)
+		if len(index) != 2 || index[1].Code != "FAILED" || index[1].Status != "error" {
+			t.Fatalf("preview lost receipt identities or errors: %#v", index)
+		}
+		for _, entry := range index {
+			if len(entry.Data)+len(entry.Message) > limit || !entry.Truncated || !utf8.Valid(entry.Data) || !utf8.ValidString(entry.Message) {
+				t.Fatalf("preview exceeds %d bytes or lacks valid truncation metadata: %#v", limit, entry)
+			}
+		}
+		if limit >= 256 && !strings.Contains(string(index[0].Data), `"count":0`) {
+			t.Fatalf("small zero fact was lost at %d bytes: %s", limit, index[0].Data)
+		}
+	}
+	encoded, err := json.Marshal(store.Index(0))
+	if err != nil || strings.Contains(string(encoded), `"data"`) || strings.Contains(string(encoded), `"message"`) {
+		t.Fatalf("receipt-only index exposed result payloads: %s (%v)", encoded, err)
+	}
+}
+
+func TestRequiredIndexPreservesNestedSourceFactsWhenLargeSiblingFieldsAreOmitted(t *testing.T) {
+	store := NewObservationStore()
+	result := contract.SuccessResult("remote", "saturn_list", map[string]any{
+		"messages": []string{strings.Repeat("room roster ", 1000)},
+		"data":     map[string]any{"count": 3, "returnedCount": 3, "room": "lounge", "truncated": false, "users": []string{strings.Repeat("a", 2000), "b", "c"}},
+	})
+	store.Store(result, 10000)
+	entries := store.IndexWithData(0, 512)
+	var payload struct {
+		Data struct {
+			Count int    `json:"count"`
+			Room  string `json:"room"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(entries[0].Data, &payload); err != nil || payload.Data.Count != 3 || payload.Data.Room != "lounge" {
+		t.Fatalf("large nested roster displaced source facts: %s (%v)", entries[0].Data, err)
+	}
+	if !entries[0].Truncated || len(entries[0].OmittedFields) == 0 {
+		t.Fatalf("nested preview hides omissions: %#v", entries[0])
+	}
+	full, _ := store.Full("remote")
+	if full.Content != result.Content {
+		t.Fatal("nested projection changed source data")
+	}
+}

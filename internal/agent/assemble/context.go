@@ -140,18 +140,18 @@ func ProjectTurn(messages []Message, tools []any, observations *ObservationStore
 		return (ContextBudgeter{}).Project(input)
 	}
 	// Reserve a compact factual index independently of the optional transcript.
-	// Shrink argument previews before sacrificing any result identity or receipt.
+	// Shrink data and argument previews before sacrificing any identity or receipt.
 	available := (input.MaxTokens-input.ReserveTokens-input.ManifestTokens)*4 - serialized(input.RequiredPrefix) - serialized(input.RequiredSuffix) - serialized(input.RequiredRuntime) - requestEnvelopeChars
 	omittedMaximum := len(input.Optional) + len(input.OptionalTail)
 	var indexMessage Message
-	var receipts []ObservationReceipt
-	for argumentBytes := 512; ; argumentBytes /= 2 {
-		receipts = observations.Index(argumentBytes)
+	var receipts []ObservationIndexEntry
+	for dataBytes, argumentBytes := 1024, 512; ; dataBytes, argumentBytes = dataBytes/2, argumentBytes/2 {
+		receipts = observations.IndexWithData(argumentBytes, dataBytes)
 		indexMessage = resultIndexMessage(receipts, omittedMaximum)
 		if serialized([]Message{indexMessage}) <= available {
 			break
 		}
-		if argumentBytes == 0 {
+		if dataBytes == 0 && argumentBytes == 0 {
 			return Projection{}, fmt.Errorf("required tool result receipts exceed token budget")
 		}
 	}
@@ -178,11 +178,11 @@ func ProjectTurn(messages []Message, tools []any, observations *ObservationStore
 const resultIndexPrefix = "CURRENT_TURN_RESULTS_UNTRUSTED_DATA="
 
 type resultIndexPayload struct {
-	Results             []ObservationReceipt `json:"results"`
-	OmittedContextUnits int                  `json:"omittedContextUnits"`
+	Results             []ObservationIndexEntry `json:"results"`
+	OmittedContextUnits int                     `json:"omittedContextUnits"`
 }
 
-func resultIndexMessage(results []ObservationReceipt, omitted int) Message {
+func resultIndexMessage(results []ObservationIndexEntry, omitted int) Message {
 	payload, _ := json.Marshal(resultIndexPayload{Results: results, OmittedContextUnits: omitted})
 	return llm.NewLlmMessage("user", resultIndexPrefix+string(payload), nil, "")
 }

@@ -255,6 +255,9 @@ func (entry ManifestEntry) ProviderDefinition() Definition {
 	default:
 		parts = append(parts, "Read-only; returns data.")
 	}
+	if hint := resultShapeHint(entry.ResultSchema); hint != "" {
+		parts = append(parts, hint)
+	}
 	return Definition{Name: entry.Name, Description: strings.Join(parts, " "), Parameters: clone(entry.Parameters)}
 }
 
