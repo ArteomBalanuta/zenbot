@@ -196,18 +196,18 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.FAILED, nil
 	}
+	s := userService(c.engine)
+	if s == nil || (!configuredDependency(s.GroupB) && !configuredDependency(s.Identity)) {
+		return model.FAILED, fmt.Errorf("user service unavailable")
+	}
 	if n > 30 {
 		if _, err := c.send(ctx, "Retrieving at max 30 messages! "); err != nil {
 			return model.FAILED, err
 		}
 		n = 30
 	}
-	s := userService(c.engine)
-	if s == nil || (s.GroupB == nil && s.Identity == nil) {
-		return model.FAILED, fmt.Errorf("user service unavailable")
-	}
 	var ms []repository.SaturnLastMessage
-	if s.GroupB != nil {
+	if configuredDependency(s.GroupB) {
 		ms, err = s.SaturnLastMessages(ctx, nil, strings.TrimSpace(a[0]), n)
 	} else {
 		var legacy []model.Message

@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"zenbot/internal/model"
@@ -15,11 +16,11 @@ func (c *usersCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	b := bundle(c.engine)
-	if b == nil || b.Users == nil {
-		return model.SUCCESSFUL, nil
+	if b == nil || b.Users == nil || (!configuredDependency(b.Users.GroupB) && !configuredDependency(b.Users.Queries)) {
+		return model.FAILED, fmt.Errorf("user service unavailable")
 	}
 	var users []repository.RegisteredUser
-	if b.Users.GroupB != nil {
+	if configuredDependency(b.Users.GroupB) {
 		groupUsers, err := b.Users.SaturnRegisteredUsers(ctx)
 		if err != nil {
 			return model.FAILED, err
@@ -28,14 +29,12 @@ func (c *usersCommand) Execute(ctx context.Context) (model.Status, error) {
 		for _, user := range groupUsers {
 			users = append(users, repository.RegisteredUser{Name: user.Name, Trip: user.Trip})
 		}
-	} else if b.Users.Queries != nil {
+	} else {
 		var err error
 		users, err = b.Users.RegisteredUsers(ctx)
 		if err != nil {
 			return model.FAILED, err
 		}
-	} else {
-		return model.SUCCESSFUL, nil
 	}
 	if err := replyContext(ctx, &c.commandBase, "Users: \\n"+formatRegisteredUsers(users)); err != nil {
 		return model.FAILED, err

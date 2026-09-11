@@ -1,8 +1,6 @@
 package command
 
 import (
-	"reflect"
-
 	"zenbot/internal/common"
 	"zenbot/internal/repository"
 )
@@ -107,13 +105,5 @@ func configuredCommandAvailable(engine common.Engine, canonical string, surface 
 }
 
 func configuredDependency(value any) bool {
-	if value == nil {
-		return false
-	}
-	v := reflect.ValueOf(value)
-	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return !v.IsNil()
-	}
-	return true
+	return common.DependencyConfigured(value)
 }

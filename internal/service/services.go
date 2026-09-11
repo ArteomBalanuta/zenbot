@@ -52,7 +52,10 @@ type UserService struct {
 }
 
 func (s *UserService) LastOnline(ctx context.Context, target string) (string, error) {
-	if s.Queries == nil {
+	if s == nil {
+		return "", fmt.Errorf("last-online persistence unavailable")
+	}
+	if !common.DependencyConfigured(s.Queries) {
 		return s.lastOnlineFromLastSeen(ctx, target)
 	}
 	record, err := s.Queries.LastOnline(ctx, target)
@@ -195,7 +198,7 @@ func (s *UserService) SeenRecently(ctx context.Context, user *model.User) (strin
 }
 
 func (s *UserService) lastOnlineFromLastSeen(ctx context.Context, target string) (string, error) {
-	if s.LastSeen == nil {
+	if !common.DependencyConfigured(s.LastSeen) {
 		return "", fmt.Errorf("last-online persistence unavailable")
 	}
 	record, err := s.LastSeen.LastSeen(ctx, target)
@@ -230,7 +233,7 @@ func (s *UserService) DeleteIdentity(ctx context.Context, nameOrTrip string) (re
 }
 
 func (s *UserService) SaturnRegisteredUsers(ctx context.Context) ([]repository.SaturnRegisteredUser, error) {
-	if s.GroupB == nil {
+	if s == nil || !common.DependencyConfigured(s.GroupB) {
 		return nil, fmt.Errorf("group B repository unavailable")
 	}
 	return s.GroupB.SaturnRegisteredUsers(ctx)
@@ -239,7 +242,7 @@ func (s *UserService) SaturnRegisteredUsers(ctx context.Context) ([]repository.S
 // SaturnLastMessages exposes the Saturn-shaped compatibility read without
 // changing the existing Zenbot history contract.
 func (s *UserService) SaturnLastMessages(ctx context.Context, name *string, trip string, count int) ([]repository.SaturnLastMessage, error) {
-	if s.GroupB == nil {
+	if s == nil || !common.DependencyConfigured(s.GroupB) {
 		return nil, fmt.Errorf("group B repository unavailable")
 	}
 	return s.GroupB.SaturnLastMessages(ctx, name, trip, count)
