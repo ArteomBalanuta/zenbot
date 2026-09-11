@@ -161,11 +161,16 @@ func (s *NoteService) List(ctx context.Context, trip string) ([]string, error) {
 	return o, rows.Err()
 }
 func (s *NoteService) Clear(ctx context.Context, trip string) error {
-	result, e := s.DB.ExecContext(ctx, `DELETE FROM notes WHERE trip=$1`, trip)
-	if e == nil {
-		if rows, err := result.RowsAffected(); err == nil && rows > 0 {
-			common.RecordCommittedMutation(ctx)
-		}
+	result, err := s.DB.ExecContext(ctx, `DELETE FROM notes WHERE trip=$1`, trip)
+	if err != nil {
+		return err
 	}
-	return e
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows > 0 {
+		common.RecordCommittedMutation(ctx)
+	}
+	return nil
 }
