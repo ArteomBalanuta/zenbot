@@ -41,18 +41,23 @@ func (ListRoomOperation) Apply(context RoomSnapshotContext, snapshot Snapshot) (
 	return result, nil
 }
 
-// FormatUsers deduplicates identities and sorts by hash before rendering.
+// FormatUsers renders the exact observed roster in stable hash/name/trip order.
 func FormatUsers(users []*model.User) string {
 	return formatUsers(orderedUniqueUsers(users))
 }
 
 func orderedUniqueUsers(users []*model.User) []*model.User {
+	// Presence is the set of source nicknames, including any bots in the
+	// observed roster. It does not infer unique humans or remove a temporary
+	// observer without source-certified identity metadata. Exact repeated
+	// nicknames retain their first source record; shared credentials do not
+	// merge distinct nicknames.
 	unique := make(map[string]*model.User, len(users))
 	for _, user := range users {
 		if user == nil {
 			continue
 		}
-		key := model.IdentityKey(user.Trip, user.Hash, user.Name)
+		key := user.Name
 		if _, exists := unique[key]; !exists {
 			copy := *user
 			unique[key] = &copy
@@ -76,7 +81,7 @@ func orderedUniqueUsers(users []*model.User) []*model.User {
 		if ordered[i].Trip != ordered[j].Trip {
 			return ordered[i].Trip < ordered[j].Trip
 		}
-		return model.IdentityKey(ordered[i].Trip, ordered[i].Hash, ordered[i].Name) < model.IdentityKey(ordered[j].Trip, ordered[j].Hash, ordered[j].Name)
+		return false
 	})
 	return ordered
 }
