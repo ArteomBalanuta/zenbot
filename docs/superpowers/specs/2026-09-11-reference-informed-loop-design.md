@@ -9,19 +9,9 @@ The LLM owns tool selection, task planning, conditions, recovery and completion.
 No streaming, deterministic intent routing, semantic completion judge, fixed workflows,
 keyword-based decisions, or unrelated security work.
 
-All requested references were examined before selecting these changes:
-
-| Source | Requested revision | Evidence caveat |
-| --- | --- | --- |
-| ace-kernel main | bf25f426ddf85bc161fd4f5295a418b4fca08716 | Working checkout is a newer feature branch; read main through Git. |
-| ace-first-pilot-dsl main | bfeb44d714f89848986f7b4ff48fb96b72ff18ca | App DSL delegates its runtime to Kernel; unmerged history is not main. |
-| saturn develop | 10a1ea3c2daecba168deac36f0e9a52a74cb19e5 | Dirty weather implementation excluded. |
-| pastor Markdown | Current five files | Descriptive guides and a comparison, not runtime authority; Kernel guides describe 1d2cab89, not main. |
-
-The five recursively discovered Markdown sources are AGENT_IMPLEMENTATION_COMPARISON.md,
-KERNEL_AGENT.md, KERNEL_AGENT_CLEAN.md, SATURN_AGENT.md and SATURN_AGENT_CLEAN.md.
-Relevant contracts, loop, context, state, failure, history and finalization sections were
-read; streaming-specific mechanisms and unrelated room automation are excluded.
+The reference implementation is Saturn `develop` at
+`10a1ea3c2daecba168deac36f0e9a52a74cb19e5`. Only committed behavior was
+examined; unrelated local weather changes were excluded.
 
 ## Baseline strengths
 
@@ -33,10 +23,9 @@ Existing flat concrete command schemas and the shared production command gateway
 
 ## Options considered
 
-1. Import a reference loop or a second execution language. Rejected: Kernel main can
-   discard prose-plus-call continuations; TCL reparses/replays entire programs; Saturn
-   injects keyword-selected history calls and correction policies. Complexity and loss
-   of model agency exceed the demonstrated benefit.
+1. Import a different execution loop. Rejected: the Saturn reference injects
+   keyword-selected history calls and correction policies. The existing loop already
+   provides model-driven execution and stronger effect tracking.
 2. Leave the loop unchanged and lengthen instructions. Rejected: prompts cannot recover
    typed data discarded by adapters or feedback evicted by context projection.
 3. Improve factual contracts and projection, retaining the loop. Selected: source-owned
@@ -66,8 +55,8 @@ failed/unknown snapshot is successful because it produced data.
 ProviderDefinition should expose a bounded, deterministic summary of ResultSchema.
 Use existing schema fields/types, optionality and shallow nesting; no duplicate authored
 schema or guessed domain semantics. Keep strings valid UTF-8 and summaries explicitly
-partial when bounded. Do not advertise result fields as callable arguments. This borrows
-the useful native Kernel pattern without its fallback schemas or executor heuristics.
+partial when bounded. Do not advertise result fields as callable arguments. Derive
+this guidance from the existing SDK schema without adding another schema owner.
 The measured creator manifest grows from 32,513 to 39,793 bytes (+22.39%); retain a
 40 KiB regression ceiling and count the complete invocation manifest in context budgets.
 This is an intentional information/context tradeoff, not a token optimization.
