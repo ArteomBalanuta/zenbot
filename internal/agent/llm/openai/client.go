@@ -240,12 +240,24 @@ func requestPayload(c Config, r llm.LlmRequest) (map[string]any, error) {
 	}
 	p["messages"] = messageJSON(r.Messages())
 	p["stream"] = false
-	thinkingOptions := map[string]any{}
-	if existing, ok := p["chat_template_kwargs"].(map[string]any); ok {
-		thinkingOptions = cloneMap(existing)
+	if isOpenRouter(c.Endpoint) {
+		// Local inference extensions are not part of OpenRouter's API.
+		delete(p, "chat_template_kwargs")
+		delete(p, "bypass_prompt_cache")
+		reasoning := map[string]any{}
+		if existing, ok := p["reasoning"].(map[string]any); ok {
+			reasoning = cloneMap(existing)
+		}
+		reasoning["enabled"] = c.ThinkingEnabled
+		p["reasoning"] = reasoning
+	} else {
+		thinkingOptions := map[string]any{}
+		if existing, ok := p["chat_template_kwargs"].(map[string]any); ok {
+			thinkingOptions = cloneMap(existing)
+		}
+		thinkingOptions["enable_thinking"] = c.ThinkingEnabled
+		p["chat_template_kwargs"] = thinkingOptions
 	}
-	thinkingOptions["enable_thinking"] = c.ThinkingEnabled
-	p["chat_template_kwargs"] = thinkingOptions
 	if c.Model != "" {
 		p["model"] = c.Model
 	}
@@ -262,7 +274,7 @@ func requestPayload(c Config, r llm.LlmRequest) (map[string]any, error) {
 	if v := r.ResponseFormat(); v != nil {
 		p["response_format"] = v
 	}
-	if r.BypassPromptCache() {
+	if r.BypassPromptCache() && !isOpenRouter(c.Endpoint) {
 		p["bypass_prompt_cache"] = true
 	}
 	return p, nil
@@ -288,6 +300,7 @@ func messageJSON(ms []llm.LlmMessage) []map[string]any {
 }
 
 type responseEnvelope struct {
+	Error   json.RawMessage `json:"error"`
 	Choices []struct {
 		Message *struct {
 			Content          *string `json:"content"`
@@ -309,6 +322,13 @@ func decodeResponse(data []byte) (llm.LlmResponse, error) {
 	var e responseEnvelope
 	if err := json.Unmarshal(data, &e); err != nil {
 		return llm.LlmResponse{}, &llm.LlmError{Code: "malformed_response", Err: fmt.Errorf("invalid JSON response: %w", err)}
+	}
+	if len(e.Error) > 0 && !bytes.Equal(bytes.TrimSpace(e.Error), []byte("null")) {
+		// An error envelope is not a completion, even when HTTP succeeded.
+		err := httpError(http.StatusOK, data)
+		err.Code = "provider"
+		err.Err = errors.New("upstream returned an error envelope")
+		return llm.LlmResponse{}, err
 	}
 	if len(e.Choices) == 0 {
 		return llm.LlmResponse{}, &llm.LlmError{Code: "malformed_response", Err: errors.New("response has no choices")}
@@ -399,18 +419,45 @@ func logMalformedResponse(ctx context.Context, data []byte, contentType string, 
 func httpError(status int, data []byte) *llm.LlmError {
 	var payload struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code    json.RawMessage `json:"code"`
+			Message string          `json:"message"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(data, &payload)
+	var providerCode string
+	if json.Unmarshal(payload.Error.Code, &providerCode) != nil {
+		var numeric json.Number
+		if json.Unmarshal(payload.Error.Code, &numeric) == nil {
+			providerCode = numeric.String()
+		}
+	}
 	snippet := strings.TrimSpace(string(data))
 	if len(snippet) > 256 {
 		snippet = snippet[:256]
 	}
-	return &llm.LlmError{Code: "http", Status: status, ProviderCode: payload.Error.Code, ProviderMessage: payload.Error.Message, Snippet: snippet, Err: fmt.Errorf("upstream status %d", status)}
+	return &llm.LlmError{Code: "http", Status: status, ProviderCode: providerCode, ProviderMessage: payload.Error.Message, Snippet: snippet, Err: fmt.Errorf("upstream status %d", status)}
 }
-func endpointURL(s string) string { return strings.TrimRight(s, "/") + "/v1/chat/completions" }
+func endpointURL(s string) string {
+	u, err := url.Parse(strings.TrimSpace(s))
+	if err != nil {
+		return s // Request construction reports invalid URLs.
+	}
+	path := strings.TrimRight(u.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/chat/completions"):
+	case strings.HasSuffix(path, "/v1"):
+		path += "/chat/completions"
+	default:
+		path += "/v1/chat/completions"
+	}
+	u.Path, u.RawPath = path, ""
+	return u.String()
+}
+
+func isOpenRouter(endpoint string) bool {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	return err == nil && strings.EqualFold(u.Hostname(), "openrouter.ai")
+}
 func retryable(s int) bool {
 	return s == http.StatusRequestTimeout || s == http.StatusTooManyRequests || (s >= 500 && s <= 599)
 }

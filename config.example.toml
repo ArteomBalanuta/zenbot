@@ -70,7 +70,8 @@ mutexProfileFraction = 5
 # Enable the optional LLM runtime; ordinary bot commands work without it.
 enabled = false
 
-# Model provider base URL; Zenbot appends /v1/chat/completions (do not include /v1).
+# Provider URL: base, /v1 base, or full /chat/completions endpoint.
+# OpenRouter: https://openrouter.ai/api/v1 (use model = "openai/gpt-4o", for example).
 # Inside Docker, localhost is the container, not your host model server.
 endpoint = "http://localhost:16261"
 
@@ -78,6 +79,7 @@ endpoint = "http://localhost:16261"
 model = ""
 
 # Name of the environment variable holding the provider API key; never put the key here.
+# For OpenRouter, use "OPENROUTER_API_KEY" and provide it to the process/container.
 apiKeyEnv = "SATURN_AGENT_API_KEY"
 
 # Provider operation timeout in seconds, including eligible HTTP retry attempts.
@@ -90,7 +92,8 @@ requestTimeoutMillis = 180000
 # The example uses 4096; the omitted-setting default is 1024.
 maxCompletionTokens = 4096
 
-# Send the provider's enable_thinking option; requires model/provider support.
+# OpenRouter uses reasoning.enabled; other hosts use chat_template_kwargs.enable_thinking.
+# Requires model/provider support; use false for the OpenRouter GPT-4o example.
 # The example enables reasoning; the omitted-setting default is false.
 thinkingEnabled = true
 

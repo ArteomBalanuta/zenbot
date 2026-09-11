@@ -47,13 +47,13 @@ All keys in this section belong under `[agent]`. Environment names have the pref
 | TOML key | Environment suffix | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | `ENABLED` | `false` | Enable agent runtime. |
-| `endpoint` | `ENDPOINT` | `http://localhost:16261` | Absolute HTTP(S) base URL; client appends `/v1/chat/completions`. Do not include that route or `/v1` in the base. |
+| `endpoint` | `ENDPOINT` | `http://localhost:16261` | Absolute HTTP(S) URL: base, `/v1` base, or full `/chat/completions` URL. Missing route segments are appended. OpenRouter: `https://openrouter.ai/api/v1`. |
 | `model` | `MODEL` | empty | Model identifier; omitted from provider payload when empty. |
 | `apiKeyEnv` | `API_KEY_ENV` | `SATURN_AGENT_API_KEY` | Name of the environment variable holding the API key. There is no TOML `apiKey` field. Empty environment override disables key lookup. |
 | `timeoutSeconds` | `TIMEOUT_SECONDS` | `30` | Provider call timeout. Canonical TOML `timeoutMillis` takes precedence when nonzero; environment `TIMEOUT_MILLIS` takes precedence over `TIMEOUT_SECONDS`. |
 | `requestTimeoutMillis` | `REQUEST_TIMEOUT_MILLIS` | `180000` | Runtime request deadline across the turn. |
 | `maxCompletionTokens` | `MAX_COMPLETION_TOKENS` | `1024` | Provider response token budget; canonical TOML `maxTokens` wins when nonzero. Example uses `4096`. |
-| `thinkingEnabled` | `THINKING_ENABLED` | `false` | Provider thinking option; example enables it. Provider/model support is required. |
+| `thinkingEnabled` | `THINKING_ENABLED` | `false` | On `openrouter.ai`, sends `reasoning.enabled`; other hosts retain `chat_template_kwargs.enable_thinking`. Example enables it; provider/model support is required. |
 | `maxConcurrentRequests` | `MAX_CONCURRENT_REQUESTS` | `2` | Concurrent runtime requests. |
 | `queueCapacity` | `QUEUE_CAPACITY` | `0` | Pending request capacity; zero has no pending queue. |
 | `maxSteps` | `MAX_STEPS` | `5` | Model/tool-loop step bound. |
@@ -72,6 +72,51 @@ All keys in this section belong under `[agent]`. Environment names have the pref
 The tool loop reserves a terminal response without tools after exhaustion. These limits do not guarantee a model will perform every requested action. A blank model and API key can be appropriate for a local provider; neither is required by agent configuration validation.
 
 `localhost` in the Docker container refers to the container. Set `endpoint` to a provider address reachable from that container.
+
+### OpenRouter
+
+Edit these values in your existing `[agent]` section (do not add a duplicate
+section). Keep your room identity, creator trip, and runtime limits unchanged:
+
+```toml
+[agent]
+enabled = true
+endpoint = "https://openrouter.ai/api/v1"
+model = "openai/gpt-4o"
+apiKeyEnv = "OPENROUTER_API_KEY"
+thinkingEnabled = false
+```
+
+Set `OPENROUTER_API_KEY` to a newly generated key using your private environment
+file or secret manager. Never place a real key in TOML, Git, screenshots, or chat.
+If a key has been exposed, revoke it and create a replacement.
+
+- **Docker via Make:** put the variable in the ignored `.env` file using your
+  editor. `make build` builds the updated client. When ready to deploy,
+  `make run` recreates the container and loads `.env`; this interrupts the bot.
+  If no environment file exists, export the variable securely and use
+  `make run AGENT_API_KEY_ENV=OPENROUTER_API_KEY` instead.
+- **Manual Docker:** pass the private file with `--env-file .env` when creating
+  the container, as in the README. Restarting an existing container does not
+  update its environment; recreate it to change credentials.
+- **Local binary:** provide the variable in the process environment. The binary
+  does not load `.env` automatically.
+
+OpenRouter uses the same chat-completion/tool loop, not a separate planner.
+The client recognizes the exact `openrouter.ai` hostname and omits local-server
+`chat_template_kwargs` and `bypass_prompt_cache` extensions. Custom proxy hosts
+retain the generic/local payload behavior; they are not auto-detected as OpenRouter.
+HTTP 200 error envelopes are treated as provider failures, not valid completions.
+HTTP retries retain the existing bounded policy; embedded errors are not retried
+automatically. Authentication/billing errors require fixing the key/account.
+
+Choose a tool-capable model and adequate output/context budgets. Reasoning
+support varies by model; this integration does not guarantee every OpenRouter
+model's reasoning/signature replay requirements. Start with the GPT-4o example
+and test a different model before deployment. Provider use incurs costs and
+sends the agent's selected conversation context to the provider.
+See [OpenRouter quickstart](https://openrouter.ai/docs/quickstart) and
+[reasoning options](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
 
 ## Agent memory and participation
 

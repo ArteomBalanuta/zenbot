@@ -108,7 +108,7 @@ Call IDs and names must be nonblank, and IDs must be unique across the turn. A m
 
 Compatible declared-safe reads can run concurrently. Actions and undeclared resource access are barriers in provider order. Dependent or conditional work needs a later model round after its input is known; the executor does not infer dependencies from prose. If an ordered action fails, later actions in the batch receive `ACTION_NOT_EXECUTED`, linked to the failed call, while eligible reads may still run.
 
-The [`OpenAI-compatible client`](../internal/agent/llm/openai/client.go) calls the configured endpoint's `/v1/chat/completions` route. It supplies the model, token limit, tools, and thinking configuration, preserves assistant/tool pairing, and retries eligible transient provider failures within the operation timeout. Provider HTTP retries are distinct from replaying a tool action.
+The [`OpenAI-compatible client`](../internal/agent/llm/openai/client.go) accepts a provider base, `/v1` base, or full `/chat/completions` URL. It supplies the model, token limit, tools, and thinking configuration, preserves assistant/tool pairing, and retries eligible transient provider failures within the operation timeout. OpenRouter uses this same loop with host-specific payload options; see [setup](configuration.md#openrouter). Provider HTTP retries are distinct from replaying a tool action. Error envelopes inside HTTP 200 responses are failures, not completions.
 
 ## Execution, receipts, and cancellation
 

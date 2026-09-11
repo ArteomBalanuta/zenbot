@@ -112,8 +112,8 @@ or API subscription. To use one you already have, edit the existing `[agent]`
 section in `config.toml`:
 
 - Set `enabled = true`.
-- Set `endpoint` to the provider's reachable base URL, without `/v1` or
-  `/v1/chat/completions`; Zenbot appends the latter route.
+- Set `endpoint` to the provider's reachable base URL, `/v1` base URL, or full
+  `/chat/completions` URL; Zenbot fills in missing route segments.
 - Set `model` to the provider's model name if required.
 - Replace `creatorTrip` with your public tripcode.
 
@@ -122,6 +122,10 @@ private `.env` file in your editor. Do not put real credentials in shell command
 or committed examples. Container `localhost` is not your host computer; consult
 [Docker networking](https://docs.docker.com/desktop/features/networking/) and
 the [configuration guide](docs/configuration.md) when using a host-side model.
+
+For OpenRouter, follow the [OpenRouter setup](docs/configuration.md#openrouter):
+use `https://openrouter.ai/api/v1`, a model such as `openai/gpt-4o`, and an
+`OPENROUTER_API_KEY` environment variable. No separate model server is needed.
 
 Apply these changes by stopping/removing the existing container and repeating
 the `docker run` command from step 3:

@@ -77,8 +77,10 @@ use isolated temporary database files, never the production database.
 ## Enable the agent
 
 Configure the provider base URL, model if required, API-key environment variable,
-and creator trip in `[agent]`, then enable it. The client appends
-`/v1/chat/completions` to the base URL. A provider must support the tool-calling
+and creator trip in `[agent]`, then enable it. The client accepts a base URL,
+a `/v1` base, or the full `/chat/completions` URL. See the
+[OpenRouter setup](configuration.md#openrouter) for a hosted provider example.
+A provider must support the tool-calling
 contract; a generic text endpoint is insufficient.
 
 For Docker, place only required overrides in an ignored `.env` or supply the
