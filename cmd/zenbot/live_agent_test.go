@@ -407,7 +407,7 @@ func TestProductionToolLoopStartsWithExecutionInsteadOfSemanticPlanning(t *testi
 	if completion.Response.Content() != "hello" {
 		t.Fatalf("response=%q", completion.Response.Content())
 	}
-	if client.plannerCalls != 0 || client.executionCalls != 1 || client.gateCalls != 1 {
+	if client.plannerCalls != 0 || client.executionCalls != 1 || client.gateCalls != 0 {
 		t.Fatalf("provider calls: planner=%d execution=%d gate=%d", client.plannerCalls, client.executionCalls, client.gateCalls)
 	}
 }

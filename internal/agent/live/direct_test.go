@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"zenbot/internal/agent/llm"
 	"zenbot/internal/agent/runtime"
 	agenttool "zenbot/internal/agent/tool"
+	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/agent/turn"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
@@ -26,13 +28,13 @@ func TestDirectInvokerPreservesCommandOriginatedRegularAnswer(t *testing.T) {
 	}
 }
 
-func TestDirectInvokerSuppressesOrdinaryReplyForCorrectedCommandDelivery(t *testing.T) {
+func TestDirectInvokerHonorsModelSilenceAfterVerifiedCommandDelivery(t *testing.T) {
 	gateway := &recordingCommandGateway{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse("`weather Tokyo`", nil, "stop"),
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("corrected", "run_command", map[string]any{"command": "weather", "arguments": "Tokyo"})}, "tool_calls"),
+		llm.NewLlmResponse("NO_REPLY", nil, "stop"),
 	}}
-	loop, _ := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{agenttool.UserMessageHistory{Repository: &loopHistoryRepository{}, Limit: 1}, agenttool.RoomUsers{Directory: &loopRoomDirectory{}}, agenttool.RunCommand{Gateway: gateway}}, []string{userMessageHistoryTool, roomUsersTool, "run_command"})
+	loop, _ := testBoundedLoop(testLiveAssembler(t), client, []agenttool.Tool{agenttool.UserMessageHistory{Repository: &loopHistoryRepository{}, Limit: 1}, agenttool.RoomUsers{Directory: &loopRoomDirectory{}}, agenttool.RunCommand{Gateway: gateway}}, []string{userMessageHistoryTool, roomUsersTool, "run_command"})
 	invoker := DirectInvoker{Assembler: testLiveAssembler(t), Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "none"}, ToolLoop: loop}
 	completion, err := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller", Text: "l weather?"}, "weather?")
 	if err != nil || completion.Text() != "" || len(completion.DurableEvidence()) != 0 || gateway.calls != 1 {
@@ -109,5 +111,75 @@ func TestDirectInvokerRejectsInternalEvidenceWithoutDeliveryArtifact(t *testing.
 	completion, got := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller", Text: "l hello?"}, "hello?")
 	if got == nil || completion.Text() != "" || got.Error() != "agent response exposed internal tool evidence" || strings.Contains(got.Error(), "secret") || len(client.requests) != 1 {
 		t.Fatalf("completion=%#v err=%v requests=%d", completion, got, len(client.requests))
+	}
+}
+
+func TestDirectInvokerRetainsExecutionWhenContinuationFails(t *testing.T) {
+	for _, fixture := range []struct {
+		name, code string
+		state      contract.EffectState
+	}{
+		{"committed", "", contract.EffectCommitted},
+		{"unknown", "ACTION_OUTCOME_UNKNOWN", contract.EffectUnknown},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			action := &engineActionTool{errorCode: fixture.code}
+			client := &scriptedToolClient{responses: []llm.LlmResponse{
+				llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("performed", action.Name(), map[string]any{})}, "tool_calls"),
+			}}
+			assembler := testLiveAssembler(t)
+			loop, err := NewRegistryToolLoop(assembler, client, []agenttool.Tool{action}, []string{action.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			memory, err := turn.NewTurnMemory(turn.NewMemoryStore())
+			if err != nil {
+				t.Fatal(err)
+			}
+			invoker := DirectInvoker{Assembler: assembler, Client: client, ToolLoop: loop, Memory: &memory}
+			completion, err := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller"}, "Perform the action and report.")
+			if err == nil || completion.Text() != "" || action.calls.Load() != 1 {
+				t.Fatalf("interrupted direct completion invented an answer or repeated an action: completion=%#v err=%v calls=%d", completion, err, action.calls.Load())
+			}
+			var interrupted *IncompleteTurnError
+			if !errors.As(err, &interrupted) {
+				t.Fatalf("direct error discarded request-local execution: %v", err)
+			}
+			retained, found := interrupted.Completion.Observations.Full("performed")
+			if !found || retained.EffectState != fixture.state {
+				t.Fatalf("direct error lost actual execution state: %#v", retained)
+			}
+			ctx, err := api.NewContext("room", "caller", "", "", false, []string{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, loadErr := memory.LoadContext(context.Background(), ctx, "later")
+			if loadErr != nil || len(loaded) != 2 || loaded[1].Role() != "user" || !strings.HasPrefix(loaded[1].Content(), turn.InterruptedToolTurnPrefix) || !strings.Contains(loaded[1].Content(), string(fixture.state)) {
+				t.Fatalf("direct interrupted receipt was lost or rendered as assistant success: messages=%#v err=%v", loaded, loadErr)
+			}
+		})
+	}
+}
+
+func TestDirectInvokerRetainsActionWhenFinalizerRejectsResponse(t *testing.T) {
+	action := &engineActionTool{}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{
+		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("performed", action.Name(), map[string]any{})}, "tool_calls"),
+		llm.NewLlmResponse("[Internal tool evidence from engine_action] secret", nil, "stop"),
+	}}
+	assembler := testLiveAssembler(t)
+	loop, err := NewRegistryToolLoop(assembler, client, []agenttool.Tool{action}, []string{action.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoker := DirectInvoker{Assembler: assembler, Client: client, ToolLoop: loop, Finalizer: OutputFinalizer{}}
+	completion, err := invoker.InvokeCompletion(context.Background(), &model.ChatMessage{Channel: "room", Name: "caller"}, "Perform the action and report.")
+	var interrupted *IncompleteTurnError
+	if completion.Text() != "" || !errors.As(err, &interrupted) || strings.Contains(err.Error(), "secret") || action.calls.Load() != 1 {
+		t.Fatalf("finalizer lost executed action or leaked rejected response: completion=%#v err=%v calls=%d", completion, err, action.calls.Load())
+	}
+	retained, found := interrupted.Completion.Observations.Full("performed")
+	if !found || retained.EffectState != contract.EffectCommitted {
+		t.Fatalf("finalizer rejection lost committed receipt: %#v", retained)
 	}
 }

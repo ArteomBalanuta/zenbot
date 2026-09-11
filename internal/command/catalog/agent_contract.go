@@ -313,17 +313,11 @@ func (contract shadowBanArgumentContract) Encode(raw json.RawMessage) (string, e
 type automoveArgumentContract struct{ schema json.RawMessage }
 
 func automoveArguments() AgentArgumentContract {
-	stateBranch := func(operation string) json.RawMessage {
-		return objectSchema(map[string]json.RawMessage{
-			"operation": constStringSchema("Auto-move operation.", operation),
-		}, []string{"operation"})
-	}
-	configure := objectSchema(map[string]json.RawMessage{
-		"operation":   constStringSchema("Configure auto-move rooms.", "configure"),
-		"source":      stringSchema("Source room for configure.", true),
-		"destination": stringSchema("Destination room for configure.", true),
-	}, []string{"operation", "source", "destination"})
-	return automoveArgumentContract{schema: oneOfSchema(stateBranch("enable"), stateBranch("disable"), configure)}
+	return automoveArgumentContract{schema: objectSchema(map[string]json.RawMessage{
+		"operation":   enumStringSchema("Enable or disable existing auto-move configuration, or configure its rooms.", []string{"enable", "disable", "configure"}),
+		"source":      stringSchema("Required only for configure: source room. Omit for enable or disable.", true),
+		"destination": stringSchema("Required only for configure: destination room. Omit for enable or disable.", true),
+	}, []string{"operation"})}
 }
 
 func (contract automoveArgumentContract) Schema() json.RawMessage { return cloneJSON(contract.schema) }
@@ -415,16 +409,6 @@ func enumStringSchema(description string, values []string) json.RawMessage {
 	return json.RawMessage(mustJSON(map[string]any{
 		"type": "string", "description": description, "enum": append([]string(nil), values...),
 	}))
-}
-
-func constStringSchema(description, value string) json.RawMessage {
-	return json.RawMessage(mustJSON(map[string]any{
-		"type": "string", "description": description, "const": value,
-	}))
-}
-
-func oneOfSchema(branches ...json.RawMessage) json.RawMessage {
-	return json.RawMessage(mustJSON(map[string]any{"oneOf": append([]json.RawMessage(nil), branches...)}))
 }
 
 func objectSchema(properties map[string]json.RawMessage, required []string) json.RawMessage {

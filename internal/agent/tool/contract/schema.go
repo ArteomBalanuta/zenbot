@@ -30,10 +30,65 @@ func ValidateSchema(raw json.RawMessage, parameters bool) error {
 	if err != nil {
 		return err
 	}
-	if parameters && typ != "object" {
-		return fmt.Errorf("parameter schema must be object")
+	if parameters {
+		var root struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(raw, &root)
+		if typ != "object" || root.Type != "object" {
+			return fmt.Errorf("parameter schema must declare a root object")
+		}
 	}
 	return nil
+}
+
+// SupportsStrictParameters reports whether this local schema can be sent
+// unchanged as an OpenAI strict function schema. Optional properties retain
+// their omission semantics and therefore require non-strict provider mode.
+func SupportsStrictParameters(raw json.RawMessage) bool {
+	if ValidateSchema(raw, true) != nil {
+		return false
+	}
+	var root map[string]json.RawMessage
+	if json.Unmarshal(raw, &root) != nil || string(root["type"]) != `"object"` {
+		return false
+	}
+	return supportsStrictNode(raw)
+}
+
+func supportsStrictNode(raw json.RawMessage) bool {
+	var node map[string]json.RawMessage
+	if json.Unmarshal(raw, &node) != nil || node["oneOf"] != nil {
+		return false
+	}
+	var typ string
+	if json.Unmarshal(node["type"], &typ) != nil || typ == "any" {
+		return false
+	}
+	if typ == "object" {
+		var additional bool
+		if json.Unmarshal(node["additionalProperties"], &additional) != nil || additional {
+			return false
+		}
+		var properties map[string]json.RawMessage
+		if json.Unmarshal(node["properties"], &properties) != nil || properties == nil {
+			return false
+		}
+		var required []string
+		if rawRequired := node["required"]; rawRequired != nil && json.Unmarshal(rawRequired, &required) != nil {
+			return false
+		}
+		// ValidateSchema already checks uniqueness and declared required names.
+		if len(required) != len(properties) {
+			return false
+		}
+		for _, property := range properties {
+			if !supportsStrictNode(property) {
+				return false
+			}
+		}
+	}
+	return typ != "array" || supportsStrictNode(node["items"])
 }
 
 func validateSchemaNode(raw json.RawMessage, path string) (string, error) {
@@ -244,6 +299,9 @@ func ValidateArguments(schema, raw json.RawMessage) error {
 	return validateValue("arguments", schema, raw)
 }
 func validateValue(n string, raw, v json.RawMessage) error {
+	if !json.Valid(v) {
+		return fmt.Errorf("invalid JSON for %s: expected one complete value", n)
+	}
 	var s map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return fmt.Errorf("invalid schema for parameter: %s", n)

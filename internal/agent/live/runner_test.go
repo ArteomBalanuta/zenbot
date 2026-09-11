@@ -3,6 +3,8 @@ package live
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -15,6 +17,8 @@ import (
 	"zenbot/internal/agent/prompt"
 	"zenbot/internal/agent/runtime"
 	agenttool "zenbot/internal/agent/tool"
+	"zenbot/internal/agent/tool/contract"
+	"zenbot/internal/agent/turn"
 	"zenbot/internal/repository"
 )
 
@@ -145,6 +149,128 @@ func TestRunnerRejectsCancelledContext(t *testing.T) {
 	}
 }
 
+func TestRunnerRetainsInterruptedExecutionWithoutClaimingSuccessOrRepeatingActions(t *testing.T) {
+	for _, fixture := range []struct {
+		name, code string
+		state      contract.EffectState
+	}{
+		{"committed", "", contract.EffectCommitted},
+		{"unknown", "ACTION_OUTCOME_UNKNOWN", contract.EffectUnknown},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			action := &engineActionTool{errorCode: fixture.code}
+			client := &scriptedToolClient{responses: []llm.LlmResponse{
+				llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("performed", action.Name(), map[string]any{})}, "tool_calls"),
+			}}
+			assembler := testLiveAssembler(t)
+			loop, err := NewRegistryToolLoop(assembler, client, []agenttool.Tool{action}, []string{action.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := turn.NewMemoryStore()
+			memory, err := turn.NewTurnMemory(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := Runner{Assembler: assembler, Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "NO_REPLY"}, ToolLoop: loop, Memory: &memory}
+			inv := runtime.NewInvocation("interrupted-"+fixture.name, runtime.NewContext("room", "caller", "", "", false, nil), "Perform the action and report its outcome.", runtime.DIRECT, "", true)
+			result, err := runner.Run(context.Background(), inv)
+			if err == nil || result.ShouldReply() || result.ToolDeliveryOwned() || result.Text() != "" || action.calls.Load() != 1 {
+				t.Fatalf("failed continuation invented a final answer or repeated action: result=%#v err=%v calls=%d", result, err, action.calls.Load())
+			}
+			var interrupted *IncompleteTurnError
+			if !errors.As(err, &interrupted) {
+				t.Fatalf("request-local evidence was discarded: %v", err)
+			}
+			retained, found := interrupted.Completion.Observations.Full("performed")
+			if !found || retained.EffectState != fixture.state {
+				t.Fatalf("lost actual execution state: %#v", retained)
+			}
+			loaded, loadErr := memory.LoadContext(context.Background(), apiContext(inv), "later")
+			if loadErr != nil || len(loaded) != 2 || loaded[1].Role() != "user" {
+				t.Fatalf("interrupted record was lost or represented as prior assistant speech: %#v err=%v", loaded, loadErr)
+			}
+			var record struct {
+				RequestID string                        `json:"requestId"`
+				Results   []assemble.ObservationReceipt `json:"results"`
+			}
+			if !strings.HasPrefix(loaded[1].Content(), turn.InterruptedToolTurnPrefix) {
+				t.Fatalf("missing explicit interruption marker: %s", loaded[1].Content())
+			}
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(loaded[1].Content(), turn.InterruptedToolTurnPrefix)), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record.RequestID != inv.RequestID() || len(record.Results) != 1 || record.Results[0].EffectState != fixture.state || record.Results[0].CallID != "performed" || len(record.Results[0].Arguments) != 0 {
+				t.Fatalf("durable interruption record lost receipts or exposed raw arguments: %#v", record)
+			}
+		})
+	}
+}
+
+func TestRunnerRetainsValidReadEvidenceWhenContinuationFails(t *testing.T) {
+	read := agenttool.RoomUsers{Directory: &loopRoomDirectory{}}
+	client := &scriptedToolClient{responses: []llm.LlmResponse{llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("read", read.Name(), map[string]any{})}, "tool_calls")}}
+	assembler := testLiveAssembler(t)
+	loop, err := NewRegistryToolLoop(assembler, client, []agenttool.Tool{read}, []string{read.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := turn.NewMemoryStore()
+	memory, err := turn.NewTurnMemory(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{Assembler: assembler, Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "NO_REPLY"}, ToolLoop: loop, Memory: &memory}
+	inv := runtime.NewInvocation("read-interrupted", runtime.NewContext("room", "caller", "", "", false, nil), "List current users and summarize.", runtime.DIRECT, "", true)
+	if result, err := runner.Run(context.Background(), inv); err == nil || result.ShouldReply() {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if evidence := store.EvidenceFor(apiContext(inv)); len(evidence) != 1 || evidence[0].Tool != read.Name() || !json.Valid([]byte(evidence[0].Content)) {
+		t.Fatalf("successful read evidence was dropped after later provider failure: %#v", evidence)
+	}
+}
+
+type cancellationAfterToolClient struct {
+	initial llm.LlmResponse
+	cancel  context.CancelFunc
+	calls   int
+}
+
+func (client *cancellationAfterToolClient) Complete(ctx context.Context, _ llm.LlmRequest) (llm.LlmResponse, error) {
+	client.calls++
+	if client.calls == 1 {
+		return client.initial, nil
+	}
+	client.cancel()
+	return llm.LlmResponse{}, ctx.Err()
+}
+
+func TestRunnerRetainsCommittedReceiptWhenContinuationCancelsRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	action := &engineActionTool{}
+	client := &cancellationAfterToolClient{cancel: cancel, initial: llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("performed", action.Name(), map[string]any{})}, "tool_calls")}
+	assembler := testLiveAssembler(t)
+	loop, err := NewRegistryToolLoop(assembler, client, []agenttool.Tool{action}, []string{action.Name()}, turn.ExecutionLimits{MaxSteps: 3, MaxToolCalls: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory, err := turn.NewTurnMemory(turn.NewMemoryStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{Assembler: assembler, Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "NO_REPLY"}, ToolLoop: loop, Memory: &memory}
+	inv := runtime.NewInvocation("cancelled-continuation", runtime.NewContext("room", "caller", "", "", false, nil), "Perform the action and report.", runtime.DIRECT, "", true)
+	result, err := runner.Run(ctx, inv)
+	if !errors.Is(err, context.Canceled) || result.ShouldReply() || action.calls.Load() != 1 || client.calls != 2 {
+		t.Fatalf("cancellation lost its cause or repeated work: result=%#v err=%v toolCalls=%d modelCalls=%d", result, err, action.calls.Load(), client.calls)
+	}
+	loaded, err := memory.LoadContext(context.Background(), apiContext(inv), "later")
+	if err != nil || len(loaded) != 2 || !strings.Contains(loaded[1].Content(), `"effectState":"COMMITTED"`) {
+		t.Fatalf("cancellation erased a committed effect: memory=%#v err=%v", loaded, err)
+	}
+}
+
 type captureLiveClient struct {
 	requests []llm.LlmRequest
 }
@@ -167,17 +293,17 @@ func testLiveAssembler(t *testing.T) *assemble.Assembler {
 	return assembler
 }
 
-func TestRunnerSuppressesOrdinaryReplyForCorrectedCommandDelivery(t *testing.T) {
+func TestRunnerHonorsModelSilenceAfterVerifiedCommandDelivery(t *testing.T) {
 	gateway := &recordingCommandGateway{}
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
-		llm.NewLlmResponse("`weather Tokyo`", nil, "stop"),
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("corrected", "run_command", map[string]any{"command": "weather", "arguments": "Tokyo"})}, "tool_calls"),
+		llm.NewLlmResponse("NO_REPLY", nil, "stop"),
 	}}
-	loop, _ := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{agenttool.UserMessageHistory{Repository: &loopHistoryRepository{}, Limit: 1}, agenttool.RoomUsers{Directory: &loopRoomDirectory{}}, agenttool.RunCommand{Gateway: gateway}}, []string{userMessageHistoryTool, roomUsersTool, "run_command"})
+	loop, _ := testBoundedLoop(testLiveAssembler(t), client, []agenttool.Tool{agenttool.UserMessageHistory{Repository: &loopHistoryRepository{}, Limit: 1}, agenttool.RoomUsers{Directory: &loopRoomDirectory{}}, agenttool.RunCommand{Gateway: gateway}}, []string{userMessageHistoryTool, roomUsersTool, "run_command"})
 	runner := Runner{Assembler: testLiveAssembler(t), Client: client, Finalizer: MarkerFinalizer{NoReplyMarker: "none"}, ToolLoop: loop}
 	inv := runtime.NewInvocation("runner-prose", runtime.NewContext("room", "caller", "", "", false, nil), "weather?", runtime.MENTION, "", false)
 	result, err := runner.Run(context.Background(), inv)
-	if err != nil || result.ShouldReply() || !result.ToolDeliveryOwned() || result.Text() != "" || len(result.DurableEvidence()) != 0 || gateway.calls != 1 {
+	if err != nil || result.ShouldReply() || !result.ToolDeliveryOwned() || !strings.Contains(result.Text(), "weather Tokyo") || len(result.DurableEvidence()) != 0 || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v gateway=%d", result, err, gateway.calls)
 	}
 }
@@ -214,7 +340,7 @@ func TestRunnerRejectsToolBackedInternalEvidenceWithoutThirdCompletion(t *testin
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("history", userMessageHistoryTool, map[string]any{"nick": "alice"})}, "tool_calls"),
 		llm.NewLlmResponse("[Internal tool evidence from user_message_history] secret", nil, "stop"),
 	}}
-	loop, err := NewBoundedToolLoop(testLiveAssembler(t), client, []agenttool.Tool{
+	loop, err := testBoundedLoop(testLiveAssembler(t), client, []agenttool.Tool{
 		agenttool.UserMessageHistory{Repository: &loopHistoryRepository{}, Limit: 1},
 		agenttool.RoomUsers{Directory: &loopRoomDirectory{}},
 		agenttool.RunCommand{Gateway: loopGateway{}},

@@ -162,7 +162,7 @@ func TestClientSendsRequiredToolChoice(t *testing.T) {
 }
 
 func TestCompleteMalformedSuccessfulResponse(t *testing.T) {
-	for _, body := range []string{`not-json`, `{"choices":[]}`, `{"choices":[{"message":{"tool_calls":[{"function":{"arguments":"["}}]}}]}`} {
+	for _, body := range []string{`not-json`, `{"choices":[]}`, `{"choices":[{}]}`} {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
 		_, err := NewClient(Config{Endpoint: s.URL}).Complete(context.Background(), testRequest())
 		s.Close()

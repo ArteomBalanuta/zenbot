@@ -114,36 +114,6 @@ func TestExecuteAllContiguousParallelOrderAndBarrier(t *testing.T) {
 		t.Fatal("all calls should run")
 	}
 }
-func TestLedgerDuplicateLimitAndFailure(t *testing.T) {
-	l := NewLedger(map[string]int{"x": 1}, 1)
-	if l.Reserve("k", "x") != "" || l.Reserve("k", "x") != "DUPLICATE_TOOL_CALL" {
-		t.Fatal("duplicate")
-	}
-	if l.Reserve("k2", "x") != "TOOL_CALL_LIMIT_REACHED" {
-		t.Fatal("limit")
-	}
-	l.Failure("y")
-	if l.Reserve("ykey", "y") != "TOOL_DISABLED" {
-		t.Fatal("disabled")
-	}
-}
-
-func TestLedgerAvailabilityReflectsCallAndFailureBudgets(t *testing.T) {
-	ledger := NewLedger(map[string]int{"limited": 1}, 1)
-	if !ledger.Available("limited") || !ledger.Available("failing") {
-		t.Fatal("fresh tools should be available")
-	}
-	if code := ledger.Reserve("one", "limited"); code != "" {
-		t.Fatalf("reserve failed: %s", code)
-	}
-	if ledger.Available("limited") {
-		t.Fatal("call-limited tool remained available")
-	}
-	ledger.Failure("failing")
-	if ledger.Available("failing") {
-		t.Fatal("failure-limited tool remained available")
-	}
-}
 func TestExecutorStableAuthorizationAndFailures(t *testing.T) {
 	c := ctx(t)
 	d := desc(t, "x", contract.ReadOnly, []string{"r"}, nil, true, 0, []string{"CAP"})

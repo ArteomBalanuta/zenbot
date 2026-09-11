@@ -58,7 +58,7 @@ func TestMailGroupCParityAliasesUsageAndBlankReceiver(t *testing.T) {
 		}
 
 		e.chats = nil
-		if got := executeMailGroupCCommand(t, e, alias, " @ message"); got != model.SUCCESSFUL {
+		if got := executeMailGroupCCommand(t, e, alias, " @ message"); got != model.FAILED {
 			t.Fatalf("%s blank-receiver status=%s", alias, got)
 		}
 		if len(e.chats) != 1 || e.chats[0] != "alice|Receiver cannot be blank.|true" {
@@ -71,7 +71,7 @@ func TestMailGroupCParityUnknownReceiverDirectory(t *testing.T) {
 	e, db := openMailGroupCParityEngine(t)
 	seedMailGroupCCommandRecipient(t, db)
 
-	if got := executeMailGroupCCommand(t, e, "mail", " unknown message"); got != model.SUCCESSFUL {
+	if got := executeMailGroupCCommand(t, e, "mail", " unknown message"); got != model.FAILED {
 		t.Fatalf("unknown-receiver status=%s", got)
 	}
 	want := "alice|User you specified is not registered. Please use a name from provided list to send a message to respective trip. \\\\nMerc trip-a\\n|true"

@@ -60,12 +60,13 @@ func (i DirectInvoker) InvokeCompletion(ctx context.Context, message *model.Chat
 		return runtime.DirectCompletion{}, err
 	}
 	var response llm.LlmResponse
+	var completion Completion
 	var evidence []turn.PersistableEvidence
 	suppressReply := false
 	var meta FinalizationContext
 	if i.ToolLoop != nil {
-		completion, loopErr := i.ToolLoop.CompleteWithEvidenceAndHistorical(ctx, inv, memory, recent, historical)
-		response, err, evidence, suppressReply = completion.Response, loopErr, completion.Evidence(), completion.SuppressReply
+		completion, err = i.ToolLoop.CompleteWithEvidenceAndHistorical(ctx, inv, memory, recent, historical)
+		response, evidence, suppressReply = completion.Response, completion.Evidence(), completion.SuppressReply
 		meta = FinalizationContext{CandidateKind: completion.CandidateKind, ToolAttempted: completion.ToolAttempted}
 	} else {
 		meta.CandidateKind = participation.Classifier{}.Classify(inv.Prompt())
@@ -76,7 +77,7 @@ func (i DirectInvoker) InvokeCompletion(ctx context.Context, message *model.Chat
 		response, err = i.Client.Complete(ctx, prepared.LlmRequest())
 	}
 	if err != nil {
-		return runtime.DirectCompletion{}, err
+		return runtime.DirectCompletion{}, (Runner{Memory: i.Memory}).incompleteTurn(ctx, inv, completion, err)
 	}
 	if suppressReply {
 		return runtime.DirectCompletion{}, nil
@@ -84,7 +85,7 @@ func (i DirectInvoker) InvokeCompletion(ctx context.Context, message *model.Chat
 	if i.Finalizer != nil {
 		text, reply, e := finalizeWithContext(i.Finalizer, inv, response.Content(), meta)
 		if e != nil {
-			return runtime.DirectCompletion{}, e
+			return runtime.DirectCompletion{}, (Runner{Memory: i.Memory}).incompleteTurn(ctx, inv, completion, e)
 		}
 		if !reply {
 			return runtime.DirectCompletion{}, nil

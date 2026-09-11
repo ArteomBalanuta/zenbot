@@ -36,7 +36,7 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 		} else {
 			return model.FAILED, e
 		}
-		return model.SUCCESSFUL, nil
+		return model.FAILED, nil
 	}
 	reply(&c.commandBase, "trips: "+receivers+" will receive your message as soon they chat")
 	return model.SUCCESSFUL, nil
@@ -61,15 +61,15 @@ func (c *noteCommand) Execute(ctx context.Context) (model.Status, error) {
 		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"note Jedi am I?!")
 		return model.FAILED, nil
 	}
+	if strings.TrimSpace(c.message.Trip) == "" {
+		reply(&c.commandBase, "Set your trip before saving a note.")
+		return model.FAILED, nil
+	}
 	b := bundle(c.engine)
 	if b == nil || b.Notes == nil {
 		return model.FAILED, fmt.Errorf("note service unavailable")
 	}
-	var e error
-	if c.message.Trip != "" {
-		e = b.Notes.Save(c.message.Trip, strings.Join(a, " "))
-	}
-	if e != nil {
+	if e := b.Notes.Save(c.message.Trip, strings.Join(a, " ")); e != nil {
 		return model.FAILED, e
 	}
 	reply(&c.commandBase, "note successfully saved!")

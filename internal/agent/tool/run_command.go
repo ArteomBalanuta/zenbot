@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -39,32 +38,29 @@ func (t RunCommand) Descriptor(caller api.Context) (contract.Descriptor, error) 
 
 func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.RawMessage) (contract.Result, error) {
 	if err := ctx.Err(); err != nil {
-		return contract.Result{}, err
+		return contract.ActionErrorResult("", t.Name(), "TOOL_BATCH_CANCELLED", "command was cancelled before execution", contract.EffectNotStarted), nil
 	}
 	if t.Gateway == nil {
-		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "command gateway is unavailable"), nil
+		return contract.ActionErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "command gateway is unavailable", contract.EffectNotStarted), nil
 	}
 	var input struct {
 		Command   string `json:"command"`
 		Arguments string `json:"arguments"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
-		return contract.Result{}, fmt.Errorf("invalid run command arguments")
+		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", "invalid run command arguments", contract.EffectNotStarted), nil
 	}
 	name := strings.ToLower(strings.TrimSpace(input.Command))
 	if !containsCommandAlias(runCommandAliases(caller), name) {
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "command is not allowed"), nil
+		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "command is not allowed", contract.EffectNotStarted), nil
 	}
 	arguments := strings.TrimSpace(input.Arguments)
 	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(name) && !sameModerationTarget(firstArgument(arguments), *target) {
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author"), nil
+		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author", contract.EffectNotStarted), nil
 	}
 	executed, err := t.Gateway.Execute(ctx, caller, name, arguments)
-	if err != nil {
-		if ctx.Err() != nil {
-			return contract.Result{}, ctx.Err()
-		}
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn command could not run"), nil
+	if err != nil && executed.Status != commandgateway.OutcomeRejected && executed.Status != commandgateway.OutcomeNotFound {
+		executed.Status = commandgateway.OutcomeUnknown
 	}
 	if failure, rejected := commandExecutionFailure(t.Name(), executed, false); rejected {
 		return failure, nil
@@ -82,25 +78,47 @@ func commandExecutionSuccess(toolName string, execution commandgateway.Execution
 		actionCount = execution.Action.Count
 	}
 	messages := append([]string{}, execution.Messages...)
-	return contract.ActionSuccessResult("", toolName, map[string]any{"messages": messages, "deliveredCount": deliveryCount, "actionCount": actionCount}, deliveryCount)
+	result := contract.ActionSuccessResult("", toolName, map[string]any{"messages": messages, "deliveredCount": deliveryCount, "actionCount": actionCount}, deliveryCount)
+	result.ActionCount = actionCount
+	return result
 }
 
 func commandExecutionFailure(toolName string, execution commandgateway.Execution, allowsSilentAction bool) (contract.Result, bool) {
+	state := contract.EffectNotCommitted
+	if execution.EffectsCommitted || (execution.Action != nil && execution.Action.Count > 0) || (execution.Delivery != nil && execution.Delivery.Count > 0) {
+		state = contract.EffectPartial
+	}
+	failure := func(code, message string, effect contract.EffectState) (contract.Result, bool) {
+		if len(execution.Messages) > 0 {
+			message += "; output already delivered: " + strings.Join(execution.Messages, "\n")
+		}
+		result := contract.ActionErrorResult("", toolName, code, message, effect)
+		result.EffectsCommitted = execution.EffectsCommitted || state == contract.EffectPartial
+		if execution.Action != nil {
+			result.ActionCount = execution.Action.Count
+		}
+		if execution.Delivery != nil {
+			result.DeliveryCount = execution.Delivery.Count
+		}
+		return result, true
+	}
 	switch execution.Status {
 	case commandgateway.OutcomeUnknown:
-		return contract.ErrorResult("", toolName, "ACTION_OUTCOME_UNKNOWN", "action outcome is unknown"), true
+		return failure("ACTION_OUTCOME_UNKNOWN", "action outcome is unknown; do not repeat it", contract.EffectUnknown)
 	case commandgateway.OutcomeNotFound:
-		return contract.ErrorResult("", toolName, "NOT_FOUND", "requested record was not found"), true
+		return failure("NOT_FOUND", "requested record was not found; inspect the target or choose another available source", state)
 	case commandgateway.OutcomeSucceeded:
 		if !execution.EffectsCommitted || execution.Action == nil || execution.Action.Count <= 0 {
-			return contract.ErrorResult("", toolName, "UNVERIFIED_ACTION_OUTCOME", "command completion was not verified"), true
+			return failure("UNVERIFIED_ACTION_OUTCOME", "command completion was not verified", contract.EffectUnknown)
 		}
 		if !allowsSilentAction && (execution.Delivery == nil || execution.Delivery.Count <= 0) {
-			return contract.ErrorResult("", toolName, "UNVERIFIED_ROOM_DELIVERY", "command output delivery was not verified"), true
+			return failure("UNVERIFIED_ROOM_DELIVERY", "command executed but output delivery was not verified", contract.EffectCommitted)
 		}
 		return contract.Result{}, false
+	case commandgateway.OutcomeRejected:
+		return failure("COMMAND_REJECTED", "command was rejected; correct its arguments or choose another tool", state)
 	default:
-		return contract.ErrorResult("", toolName, "COMMAND_REJECTED", "command was rejected"), true
+		return failure("ACTION_OUTCOME_UNKNOWN", "command returned no verified outcome; do not repeat it", contract.EffectUnknown)
 	}
 }
 

@@ -31,6 +31,13 @@ type Config struct {
 	ContextReserveTokens       int
 }
 
+func (a *Assembler) NoReplyMarker() string {
+	if a != nil && a.system != nil {
+		return a.system.config.NoReplyMarker
+	}
+	return "NO_REPLY"
+}
+
 // RequestKind identifies the trusted classification metadata carried in the system prompt.
 type RequestKind string
 
@@ -79,7 +86,10 @@ func (p *SystemPrompt) Render(inv runtime.Invocation, _ string, _ string, kind R
 		"canPermanentlyBan": ctx.HasCapability(runtime.PermanentBan),
 		"canAdminister":     ctx.HasCapability(runtime.AdminCommands),
 	}
-	runtimeMeta := map[string]any{"invocationMode": string(inv.Mode()), "requestKind": string(kind), "room": ctx.Room(), "whisper": ctx.Whisper(), "caller": caller}
+	runtimeMeta := map[string]any{"invocationMode": string(inv.Mode()), "requestKind": string(kind), "room": ctx.Room(), "whisper": ctx.Whisper(), "caller": caller, "noReplyMarker": p.config.NoReplyMarker}
+	if target := ctx.ModerationTarget(); target != "" {
+		runtimeMeta["moderationTarget"] = target
+	}
 	meta, err := json.Marshal(runtimeMeta)
 	if err != nil {
 		return "", err
@@ -230,10 +240,9 @@ func messageWireFormat(messages []Message) []map[string]any {
 		if calls := message.ToolCalls(); len(calls) > 0 {
 			toolCalls := make([]map[string]any, len(calls))
 			for callIndex, call := range calls {
-				arguments, _ := json.Marshal(call.Arguments())
 				toolCalls[callIndex] = map[string]any{
 					"id": call.ID(), "type": "function",
-					"function": map[string]any{"name": call.Name(), "arguments": string(arguments)},
+					"function": map[string]any{"name": call.Name(), "arguments": call.RawArguments()},
 				}
 			}
 			item["tool_calls"] = toolCalls
@@ -327,7 +336,7 @@ func (a *Assembler) AssembleWithHistoricalEvidence(ctx context.Context, inv runt
 // ProjectTurn reapplies this assembler's configured limits to an evolving
 // request transcript. newestRequest is the immutable contextualized request
 // produced during initial assembly.
-func (a *Assembler) ProjectTurn(messages []Message, tools []any, observations *ObservationStore, newestRequest Message) (Projection, error) {
+func (a *Assembler) ProjectTurn(messages []Message, tools []any, observations *ObservationStore, newestRequest Message, requiredRuntime ...Message) (Projection, error) {
 	if a == nil || a.system == nil {
 		return Projection{}, errors.New("assembler is not initialized")
 	}
@@ -354,10 +363,11 @@ func (a *Assembler) ProjectTurn(messages []Message, tools []any, observations *O
 		return Projection{}, errors.New("turn projection transcript lost newest request")
 	}
 	return ProjectTurn(messages, tools, observations, ContextInput{
-		RequiredPrefix: []Message{policy},
-		RequiredSuffix: []Message{newestRequest},
-		MaxTokens:      a.maxContextTokens(),
-		ReserveTokens:  a.config.ContextReserveTokens,
+		RequiredPrefix:  []Message{policy},
+		RequiredSuffix:  []Message{newestRequest},
+		RequiredRuntime: requiredRuntime,
+		MaxTokens:       a.maxContextTokens(),
+		ReserveTokens:   a.config.ContextReserveTokens,
 	})
 }
 

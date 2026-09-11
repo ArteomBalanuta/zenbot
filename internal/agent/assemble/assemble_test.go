@@ -204,8 +204,8 @@ func TestSystemPromptCarriesTrustedModeratorAuthority(t *testing.T) {
 		`"capabilities":["MODERATION_COMMANDS"]`,
 		`"canModerate":true`,
 		`"canPermanentlyBan":false`,
-		"Every tool included in the current provider manifest is already authorized for this caller",
-		"caller.canModerate is true",
+		"They have already been filtered for this caller",
+		"Only trusted runtime metadata and current tool availability describe permissions",
 	} {
 		if !strings.Contains(system, expected) {
 			t.Fatalf("system prompt omits trusted moderator authority %q: %s", expected, system)
@@ -263,7 +263,7 @@ func TestSystemPromptAllowsDirectRegularAnswersWithoutQuoteOnlyPersona(t *testin
 			t.Fatalf("system prompt still contains quote-only restriction %q", forbidden)
 		}
 	}
-	if !strings.Contains(system, "answer ordinary questions directly") {
+	if !strings.Contains(system, "ordinary conversation and explanations can be answered directly") {
 		t.Fatal("system prompt does not establish regular question answering")
 	}
 }
@@ -282,7 +282,7 @@ func TestSystemPromptRequiresTerseOptionRepliesToContinuePriorExchange(t *testin
 		t.Fatal(err)
 	}
 	system := strings.ToLower(request.Messages()[0].Content())
-	for _, required := range []string{"bare number", "immediately preceding assistant", "without asking for clarification"} {
+	for _, required := range []string{"short approval or numbered selection", "recent matching proposal"} {
 		if !strings.Contains(system, required) {
 			t.Fatalf("system prompt does not require option follow-up resolution %q", required)
 		}
@@ -304,7 +304,7 @@ func TestSystemPromptUsesProductionCommandToolNames(t *testing.T) {
 			t.Fatalf("system prompt requires absent compatibility tool: %q", stale)
 		}
 	}
-	for _, required := range []string{"saturn_<canonical>", "saturn_weather", "saturn_time"} {
+	for _, required := range []string{"current provider tool definitions", "saturn_weather", "saturn_time"} {
 		if !strings.Contains(system, required) {
 			t.Fatalf("system prompt omits production command contract %q", required)
 		}

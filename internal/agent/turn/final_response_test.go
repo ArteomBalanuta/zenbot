@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"zenbot/internal/agent/llm"
-	"zenbot/internal/agent/tool/contract"
 )
 
 func TestFinalResponseValidatorRejectsInvalidTerminalResponses(t *testing.T) {
@@ -18,8 +17,6 @@ func TestFinalResponseValidatorRejectsInvalidTerminalResponses(t *testing.T) {
 		{name: "truncated", response: llm.NewLlmResponse("partial", nil, "length")},
 		{name: "still calling tools", response: llm.NewLlmResponse(nil, []llm.LlmToolCall{llm.NewLlmToolCall("1", "lookup", map[string]any{})}, "tool_calls")},
 		{name: "textual native tool call", response: llm.NewLlmResponse(`<|tool_call>call:run_command{arguments:<|\"|>lounge<|\"|>,command:<|\"|>room_users<|\"|>}<tool_call|>`, nil, "stop")},
-		{name: "repeats prior answer", response: llm.NewLlmResponse("same", nil, "stop"), input: FinalResponseInput{PriorAssistant: "same"}},
-		{name: "missing required evidence", response: llm.NewLlmResponse("answer", nil, "stop"), input: FinalResponseInput{RequiredTool: "history"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -30,9 +27,7 @@ func TestFinalResponseValidatorRejectsInvalidTerminalResponses(t *testing.T) {
 		})
 	}
 	if err := validator.Validate(FinalResponseInput{
-		Response:     llm.NewLlmResponse("fresh answer", nil, "stop"),
-		RequiredTool: "history",
-		Results:      []contract.Result{contract.SuccessResult("1", "history", map[string]any{"count": 1})},
+		Response: llm.NewLlmResponse("fresh answer", nil, "stop"),
 	}); err != nil {
 		t.Fatalf("valid final response rejected: %v", err)
 	}

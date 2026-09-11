@@ -2,8 +2,10 @@ package live
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/assemble"
 	"zenbot/internal/agent/llm"
@@ -100,6 +102,29 @@ type Runner struct {
 	Memory              *turn.TurnMemory
 }
 
+// IncompleteTurnError retains request-local execution evidence when producing
+// the final answer fails. Its text never renders result bodies as user output.
+type IncompleteTurnError struct {
+	RequestID        string
+	Completion       Completion
+	Cause            error
+	PersistenceError error
+}
+
+func (failure *IncompleteTurnError) Error() string {
+	if failure.PersistenceError != nil {
+		return failure.Cause.Error() + "; interrupted execution record could not be retained"
+	}
+	return failure.Cause.Error()
+}
+
+func (failure *IncompleteTurnError) Unwrap() []error {
+	if failure.PersistenceError != nil {
+		return []error{failure.Cause, failure.PersistenceError}
+	}
+	return []error{failure.Cause}
+}
+
 func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return runtime.Result{}, err
@@ -134,11 +159,13 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 		"recent_context_bytes", len(recent),
 	)
 	var response llm.LlmResponse
+	var completion Completion
 	var evidence []turn.PersistableEvidence
 	suppressReply := false
 	var meta FinalizationContext
 	if r.ToolLoop != nil {
-		completion, loopErr := r.ToolLoop.CompleteWithEvidenceAndHistorical(ctx, inv, memory, recent, historical)
+		var loopErr error
+		completion, loopErr = r.ToolLoop.CompleteWithEvidenceAndHistorical(ctx, inv, memory, recent, historical)
 		response, err, evidence, suppressReply = completion.Response, loopErr, completion.Evidence(), completion.SuppressReply
 		meta = FinalizationContext{CandidateKind: completion.CandidateKind, ToolAttempted: completion.ToolAttempted}
 	} else {
@@ -150,7 +177,7 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 		response, err = r.Client.Complete(observability.WithStage(ctx, "llm.direct"), prepared.LlmRequest())
 	}
 	if err != nil {
-		return runtime.Result{}, fmt.Errorf("complete agent request: %w", err)
+		return runtime.Result{}, r.incompleteTurn(ctx, inv, completion, fmt.Errorf("complete agent request: %w", err))
 	}
 	if suppressReply {
 		observability.Info(ctx, "agent.response.suppressed", "tool_attempted", meta.ToolAttempted)
@@ -165,10 +192,46 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 	content, reply, err := finalizeWithContext(r.Finalizer, inv, response.Content(), meta)
 	if err != nil {
 		observability.Error(ctx, "agent.response.finalization_failed", err)
-		return runtime.Result{}, fmt.Errorf("finalize agent response: %w", err)
+		return runtime.Result{}, r.incompleteTurn(ctx, inv, completion, fmt.Errorf("finalize agent response: %w", err))
 	}
 	observability.Info(ctx, "agent.response.finalized", "reply", reply, "output_chars", len([]rune(content)), "evidence_count", len(evidence))
 	return runtime.NewResultWithEvidence(inv.RequestID(), content, reply, evidence), nil
+}
+
+func (r Runner) incompleteTurn(ctx context.Context, inv runtime.Invocation, completion Completion, cause error) error {
+	receipts := completion.Observations.Index(0)
+	if len(receipts) == 0 {
+		return cause
+	}
+	failure := &IncompleteTurnError{RequestID: inv.RequestID(), Completion: completion, Cause: cause}
+	if r.Memory == nil {
+		return failure
+	}
+	// Durable interruption records contain receipts only. Original argument and
+	// result bodies remain in the request-local store, under the original IDs.
+	for index := range receipts {
+		receipts[index].ArgumentsTruncated = false
+	}
+	payload, err := json.Marshal(struct {
+		RequestID string                        `json:"requestId"`
+		Status    string                        `json:"status"`
+		Results   []assemble.ObservationReceipt `json:"results"`
+	}{RequestID: inv.RequestID(), Status: "interrupted", Results: receipts})
+	if err == nil && len(payload) > 32000 {
+		err = fmt.Errorf("interrupted execution record exceeds memory budget")
+	}
+	if err == nil {
+		// Cancellation stops tool work, but must not erase an already committed
+		// or uncertain effect. Allow one bounded metadata persistence attempt.
+		memoryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		err = r.Memory.AppendTurnContext(memoryCtx, apiContext(inv), inv.Prompt(), turn.InterruptedToolTurnPrefix+string(payload), completion.Evidence(), inv.RequestID())
+		cancel()
+	}
+	if err != nil {
+		failure.PersistenceError = err
+		observability.Error(ctx, "agent.interrupted_execution.persistence_failed", err)
+	}
+	return failure
 }
 func (r Runner) loadMemory(ctx context.Context, inv runtime.Invocation) ([]llm.LlmMessage, error) {
 	if r.Memory == nil {

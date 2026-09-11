@@ -17,6 +17,10 @@ var ErrInvalidEvidence = errors.New("invalid tool evidence")
 var ErrMemoryLoad = errors.New("Agent memory load failed")
 var ErrMemoryPersistence = errors.New("Agent memory persistence failed")
 
+// InterruptedToolTurnPrefix marks a factual execution record retained when no
+// final assistant answer could be delivered. It is context, not prior speech.
+const InterruptedToolTurnPrefix = "INTERRUPTED_TOOL_TURN_UNTRUSTED_DATA="
+
 type EvidenceEntry struct{ Tool, Content string }
 type PersistableEvidence struct{ Tool, Content string }
 
@@ -31,9 +35,11 @@ const maxDurableEvidenceBytes = 32000
 
 var durableEvidenceSchemas = map[string]json.RawMessage{
 	"user_message_history": contract.SchemaObject(map[string]json.RawMessage{
-		"rows":          json.RawMessage(`{"type":"array"}`),
-		"returnedCount": json.RawMessage(`{"type":"integer"}`),
-	}, []string{"rows", "returnedCount"}, false),
+		"rows":            json.RawMessage(`{"type":"array"}`),
+		"returnedCount":   json.RawMessage(`{"type":"integer"}`),
+		"oldestCreatedOn": json.RawMessage(`{"oneOf":[{"type":"integer"},{"type":"null"}]}`),
+		"newestCreatedOn": json.RawMessage(`{"oneOf":[{"type":"integer"},{"type":"null"}]}`),
+	}, []string{"rows", "returnedCount", "oldestCreatedOn", "newestCreatedOn"}, false),
 	"room_users": contract.SchemaObject(map[string]json.RawMessage{
 		"room":          json.RawMessage(`{"type":"string"}`),
 		"users":         json.RawMessage(`{"type":"array","items":{"type":"string"}}`),
@@ -175,6 +181,9 @@ func (m TurnMemory) LoadContext(parent context.Context, ctx api.Context, _ strin
 				out = out[:len(out)-1]
 			}
 			continue
+		}
+		if msg.Role() == "assistant" && strings.HasPrefix(msg.Content(), InterruptedToolTurnPrefix) {
+			msg = llm.NewLlmMessage("user", msg.Content(), nil, "")
 		}
 		out = append(out, msg)
 	}

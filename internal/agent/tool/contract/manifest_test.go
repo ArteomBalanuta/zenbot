@@ -113,3 +113,32 @@ func TestManifestJSONRoundTripPreservesContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderDefinitionPreservesPurposePrerequisitesAndDelivery(t *testing.T) {
+	entry := ManifestEntry{
+		Name: "saturn_ping", Description: "Measure TCP latency to hack.chat:80.",
+		Routing:    RoutingMetadata{UseWhen: []string{"Use when the caller asks to ping the bot."}, Examples: []Example{{Prompt: "Ping the bot", Arguments: json.RawMessage(`{}`)}}},
+		WhenNotUse: []string{"The target is fixed; no host argument is accepted."},
+		Effect:     Action, ResultMode: RoomDelivery,
+		RequiredSuccessfulTools: []string{"database_schema"},
+	}
+	definition := entry.ProviderDefinition()
+	for _, required := range []string{entry.Description, entry.Routing.UseWhen[0], entry.WhenNotUse[0], "database_schema", "delivers", "room", "Example: Ping the bot", "{}"} {
+		if !strings.Contains(definition.Description, required) {
+			t.Fatalf("provider omitted useful contract %q: %s", required, definition.Description)
+		}
+	}
+	for _, abbreviation := range []string{"I=", "L=", "P=", "Args="} {
+		if strings.Contains(definition.Description, abbreviation) {
+			t.Fatalf("provider requires interpreting metadata notation %q: %s", abbreviation, definition.Description)
+		}
+	}
+}
+
+func TestProviderDefinitionExplainsSilentActionOutcome(t *testing.T) {
+	entry := ManifestEntry{Name: "saturn_kick", Description: "Kick one active nickname.", Effect: Action, ResultMode: ModelData}
+	definition := entry.ProviderDefinition()
+	if !strings.Contains(definition.Description, "action outcome") || !strings.Contains(definition.Description, "room message") {
+		t.Fatalf("silent action contract is not explained: %s", definition.Description)
+	}
+}

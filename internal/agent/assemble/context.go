@@ -38,9 +38,12 @@ type ContextInput struct {
 	Optional       []ContextUnit
 	RequiredSuffix []Message
 	OptionalTail   []ContextUnit
-	MaxTokens      int
-	ReserveTokens  int
-	ManifestTokens int
+	// RequiredRuntime carries current-round control state supplied by the
+	// caller, independently from untrusted message text and optional history.
+	RequiredRuntime []Message
+	MaxTokens       int
+	ReserveTokens   int
+	ManifestTokens  int
 }
 
 type ContextBudgeter struct{}
@@ -55,7 +58,8 @@ func (ContextBudgeter) Project(input ContextInput) (Projection, error) {
 	budgetChars := (input.MaxTokens - input.ReserveTokens - input.ManifestTokens) * 4
 	prefix := copyMessages(input.RequiredPrefix)
 	suffix := copyMessages(input.RequiredSuffix)
-	requiredChars := serialized(prefix) + serialized(suffix) + requestEnvelopeChars
+	runtimeMessages := copyMessages(input.RequiredRuntime)
+	requiredChars := serialized(prefix) + serialized(suffix) + serialized(runtimeMessages) + requestEnvelopeChars
 	if requiredChars > budgetChars {
 		return Projection{}, fmt.Errorf("required agent context exceeds token budget")
 	}
@@ -99,6 +103,7 @@ func (ContextBudgeter) Project(input ContextInput) (Projection, error) {
 			messages = append(messages, copyMessages(unit.Messages)...)
 		}
 	}
+	messages = append(messages, runtimeMessages...)
 	chars := serialized(messages) + requestEnvelopeChars
 	removed := len(allOptional) - len(selected)
 	return Projection{
@@ -118,11 +123,68 @@ func (ContextBudgeter) Project(input ContextInput) (Projection, error) {
 // assistant tool calls and their observations remain atomic optional units.
 func ProjectTurn(messages []Message, tools []any, observations *ObservationStore, input ContextInput) (Projection, error) {
 	input.ManifestTokens = manifestTokenCost(tools)
-	sanitized := projectedObservationMessages(messages, observations)
+	// Runtime state is identified by the caller's exact message, never by a
+	// control-looking prefix that could also occur in user or tool data.
+	runtimeIndices := matchRequiredFromEnd(messages, input.RequiredRuntime)
+	transcript := make([]Message, 0, len(messages))
+	for index, message := range messages {
+		if _, runtime := runtimeIndices[index]; !runtime {
+			transcript = append(transcript, message)
+		}
+	}
+	sanitized := projectedObservationMessages(transcript, observations)
 	before, after := splitTurnContext(sanitized, input.RequiredPrefix, input.RequiredSuffix)
 	input.Optional = append(input.Optional, before...)
 	input.OptionalTail = append(input.OptionalTail, after...)
-	return (ContextBudgeter{}).Project(input)
+	if len(observations.Index(0)) == 0 {
+		return (ContextBudgeter{}).Project(input)
+	}
+	// Reserve a compact factual index independently of the optional transcript.
+	// Shrink argument previews before sacrificing any result identity or receipt.
+	available := (input.MaxTokens-input.ReserveTokens-input.ManifestTokens)*4 - serialized(input.RequiredPrefix) - serialized(input.RequiredSuffix) - serialized(input.RequiredRuntime) - requestEnvelopeChars
+	omittedMaximum := len(input.Optional) + len(input.OptionalTail)
+	var indexMessage Message
+	var receipts []ObservationReceipt
+	for argumentBytes := 512; ; argumentBytes /= 2 {
+		receipts = observations.Index(argumentBytes)
+		indexMessage = resultIndexMessage(receipts, omittedMaximum)
+		if serialized([]Message{indexMessage}) <= available {
+			break
+		}
+		if argumentBytes == 0 {
+			return Projection{}, fmt.Errorf("required tool result receipts exceed token budget")
+		}
+	}
+	input.RequiredSuffix = append(append([]Message(nil), input.RequiredSuffix...), indexMessage)
+	projection, err := (ContextBudgeter{}).Project(input)
+	if err != nil {
+		return Projection{}, err
+	}
+	// The reservation used the largest possible omission count. Replacing it
+	// with the exact count can only reduce its serialized cost.
+	actualIndex := resultIndexMessage(receipts, projection.RemovedUnits)
+	for index, message := range projection.Messages {
+		if messageFingerprint(message) == messageFingerprint(indexMessage) {
+			projection.Messages[index] = actualIndex
+			break
+		}
+	}
+	projection.SerializedChars = serialized(projection.Messages) + requestEnvelopeChars
+	projection.EstimatedTokens = (projection.SerializedChars + 3) / 4
+	projection.Fingerprint = fingerprint(projection.Messages)
+	return projection, nil
+}
+
+const resultIndexPrefix = "CURRENT_TURN_RESULTS_UNTRUSTED_DATA="
+
+type resultIndexPayload struct {
+	Results             []ObservationReceipt `json:"results"`
+	OmittedContextUnits int                  `json:"omittedContextUnits"`
+}
+
+func resultIndexMessage(results []ObservationReceipt, omitted int) Message {
+	payload, _ := json.Marshal(resultIndexPayload{Results: results, OmittedContextUnits: omitted})
+	return llm.NewLlmMessage("user", resultIndexPrefix+string(payload), nil, "")
 }
 
 func manifestTokenCost(tools []any) int {
@@ -303,5 +365,9 @@ func copyMessages(source []Message) []Message {
 }
 
 func llmMessageCopy(message Message) Message {
-	return llm.NewLlmMessage(message.Role(), message.Content(), message.ToolCalls(), message.ToolCallID())
+	var content any
+	if message.ContentNullable() != nil {
+		content = message.Content()
+	}
+	return llm.NewLlmMessage(message.Role(), content, message.ToolCalls(), message.ToolCallID())
 }

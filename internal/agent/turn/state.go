@@ -3,7 +3,6 @@ package turn
 import (
 	"errors"
 	"time"
-	"zenbot/internal/agent/tool/contract"
 )
 
 type ExecutionLimits struct {
@@ -23,16 +22,12 @@ func NewEvidence(attempted bool, attemptedCount, successfulCount, failedCount in
 }
 
 type State struct {
-	limits                                              ExecutionLimits
-	steps, reserved, attempted, succeeded, failed       int
-	tools                                               bool
-	commandCorrection, unverified                       bool
-	successfulCommands, failedCommands, successfulTools map[string]struct{}
-	results                                             []contract.Result
+	limits                                        ExecutionLimits
+	steps, reserved, attempted, succeeded, failed int
 }
 
 func NewState(l ExecutionLimits) *State {
-	return &State{limits: l, tools: true, successfulCommands: map[string]struct{}{}, failedCommands: map[string]struct{}{}, successfulTools: map[string]struct{}{}}
+	return &State{limits: l}
 }
 func (s *State) AdvanceStep() bool {
 	if s.steps >= s.limits.MaxSteps {
@@ -55,8 +50,7 @@ func (s *State) ReserveToolCalls(n int) bool {
 	s.reserved += n
 	return true
 }
-func (s *State) DisableTools()      { s.tools = false }
-func (s *State) ToolsEnabled() bool { return s.tools }
+func (s *State) RemainingToolCalls() int { return s.limits.MaxToolCalls - s.reserved }
 func (s *State) MarkToolAttempted(n int) error {
 	if n < 0 {
 		return errors.New("tool attempt count must not be negative")
@@ -81,37 +75,3 @@ func (s *State) RecordToolFailure() error {
 func (s *State) Evidence() Evidence {
 	return Evidence{s.attempted > 0, s.attempted, s.succeeded, s.failed}
 }
-func (s *State) RecordSuccessfulCommand(v string) bool {
-	_, ok := s.successfulCommands[v]
-	s.successfulCommands[v] = struct{}{}
-	return !ok
-}
-func (s *State) RecordFailedCommand(v string) bool {
-	_, ok := s.failedCommands[v]
-	s.failedCommands[v] = struct{}{}
-	return !ok
-}
-func (s *State) RecordSuccessfulTool(v string) bool {
-	_, ok := s.successfulTools[v]
-	s.successfulTools[v] = struct{}{}
-	return !ok
-}
-func (s *State) HasSuccessfulTool(v string) bool    { _, ok := s.successfulTools[v]; return ok }
-func (s *State) HasSuccessfulCommand(v string) bool { _, ok := s.successfulCommands[v]; return ok }
-func (s *State) HasAnySuccessfulCommand() bool      { return len(s.successfulCommands) > 0 }
-func (s *State) SuccessfulCommands() []string       { return keys(s.successfulCommands) }
-func (s *State) FailedCommands() []string           { return keys(s.failedCommands) }
-func (s *State) SuccessfulTools() []string          { return keys(s.successfulTools) }
-func keys(m map[string]struct{}) []string {
-	r := make([]string, 0, len(m))
-	for k := range m {
-		r = append(r, k)
-	}
-	return r
-}
-func (s *State) CommandCorrectionUsed() bool   { return s.commandCorrection }
-func (s *State) MarkCommandCorrectionUsed()    { s.commandCorrection = true }
-func (s *State) ClearCommandCorrection()       { s.commandCorrection = false }
-func (s *State) UnverifiedActionChecked() bool { return s.unverified }
-func (s *State) MarkUnverifiedActionChecked()  { s.unverified = true }
-func (s *State) ResetUnverifiedActionCheck()   { s.unverified = false }

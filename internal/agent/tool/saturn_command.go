@@ -71,41 +71,38 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 
 func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args json.RawMessage) (contract.Result, error) {
 	if err := ctx.Err(); err != nil {
-		return contract.Result{}, err
+		return contract.ActionErrorResult("", t.Name(), "TOOL_BATCH_CANCELLED", "command was cancelled before execution", contract.EffectNotStarted), nil
 	}
 	definition, ok := commandcatalog.AgentEntry(t.Definition.Canonical)
 	if !ok {
-		return contract.ErrorResult("", t.Name(), "UNKNOWN_TOOL", "Saturn command is unavailable"), nil
+		return contract.ActionErrorResult("", t.Name(), "UNKNOWN_TOOL", "Saturn command is unavailable", contract.EffectNotStarted), nil
 	}
 	if !agentCommandAuthorized(caller, definition) {
-		return contract.ErrorResult("", t.Name(), "TOOL_NOT_AUTHORIZED", "Caller is not allowed to execute this Saturn command"), nil
+		return contract.ActionErrorResult("", t.Name(), "TOOL_NOT_AUTHORIZED", "Caller is not allowed to execute this Saturn command", contract.EffectNotStarted), nil
 	}
 	if t.Gateway == nil {
-		return contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "command gateway is unavailable"), nil
+		return contract.ActionErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "command gateway is unavailable", contract.EffectNotStarted), nil
 	}
 	descriptor, err := t.Descriptor(caller)
 	if err != nil {
-		return contract.Result{}, err
+		return contract.ActionErrorResult("", t.Name(), "INVALID_TOOL_CONTRACT", "invalid command contract", contract.EffectNotStarted), nil
 	}
 	if err := contract.ValidateArguments(descriptor.Parameters(), args); err != nil {
-		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error()), nil
+		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error(), contract.EffectNotStarted), nil
 	}
 	arguments, err := definition.Agent.Arguments.Encode(args)
 	if err != nil {
-		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error()), nil
+		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error(), contract.EffectNotStarted), nil
 	}
 	if definition.Canonical == "list" && strings.EqualFold(strings.TrimSpace(arguments), strings.TrimSpace(caller.Room())) {
-		return contract.ErrorResult("", t.Name(), "INVALID_ARGUMENTS", "saturn_list requires a room other than the caller's current room; use room_users for current-room presence"), nil
+		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", "saturn_list requires a room other than the caller's current room; use room_users for current-room presence", contract.EffectNotStarted), nil
 	}
 	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(definition.Canonical) && !sameModerationTarget(firstArgument(arguments), *target) {
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author"), nil
+		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author", contract.EffectNotStarted), nil
 	}
 	execution, err := t.Gateway.Execute(ctx, caller, definition.Canonical, arguments)
-	if err != nil {
-		if ctx.Err() != nil {
-			return contract.Result{}, ctx.Err()
-		}
-		return contract.ErrorResult("", t.Name(), "COMMAND_REJECTED", "Saturn command could not run"), nil
+	if err != nil && execution.Status != commandgateway.OutcomeRejected && execution.Status != commandgateway.OutcomeNotFound {
+		execution.Status = commandgateway.OutcomeUnknown
 	}
 	if failure, rejected := commandExecutionFailure(t.Name(), execution, definition.Canonical == "kick"); rejected {
 		return failure, nil

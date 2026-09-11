@@ -234,6 +234,10 @@ func requestPayload(c Config, r llm.LlmRequest) (map[string]any, error) {
 	if p == nil {
 		p = map[string]any{}
 	}
+	// These fields belong to this model round, never to reusable provider options.
+	for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "response_format"} {
+		delete(p, field)
+	}
 	p["messages"] = messageJSON(r.Messages())
 	p["stream"] = false
 	thinkingOptions := map[string]any{}
@@ -274,8 +278,7 @@ func messageJSON(ms []llm.LlmMessage) []map[string]any {
 		if ts := m.ToolCalls(); len(ts) > 0 {
 			calls := make([]map[string]any, len(ts))
 			for j, t := range ts {
-				ab, _ := json.Marshal(t.Arguments())
-				calls[j] = map[string]any{"id": t.ID(), "type": "function", "function": map[string]any{"name": t.Name(), "arguments": string(ab)}}
+				calls[j] = map[string]any{"id": t.ID(), "type": "function", "function": map[string]any{"name": t.Name(), "arguments": t.RawArguments()}}
 			}
 			x["tool_calls"] = calls
 		}
@@ -324,18 +327,15 @@ func decodeResponse(data []byte) (llm.LlmResponse, error) {
 	}
 	calls := make([]llm.LlmToolCall, len(ch.Message.ToolCalls))
 	for i, t := range ch.Message.ToolCalls {
-		var args map[string]any
-		if len(t.Function.Arguments) > 0 {
-			argumentData := t.Function.Arguments
-			var encoded string
-			if json.Unmarshal(argumentData, &encoded) == nil {
-				argumentData = json.RawMessage(encoded)
-			}
-			if json.Unmarshal(argumentData, &args) != nil {
-				return llm.LlmResponse{}, &llm.LlmError{Code: "malformed_response", Err: errors.New("invalid tool arguments")}
-			}
+		argumentData := string(t.Function.Arguments)
+		var encoded string
+		if json.Unmarshal(t.Function.Arguments, &encoded) == nil {
+			argumentData = encoded
 		}
-		calls[i] = llm.NewLlmToolCall(t.ID, t.Function.Name, args)
+		// The executor validates each call independently and returns useful
+		// INVALID_ARGUMENTS feedback. Preserve malformed strings and integer
+		// precision so correction sees exactly what the provider produced.
+		calls[i] = llm.NewLlmToolCall(t.ID, t.Function.Name, argumentData)
 	}
 	diagnostics := map[string]any{}
 	if err := json.Unmarshal(data, &diagnostics); err == nil {

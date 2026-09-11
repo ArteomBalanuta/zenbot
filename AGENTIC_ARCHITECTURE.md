@@ -1,114 +1,76 @@
 # Zenbot Agentic Architecture
 
-## Purpose
+## Responsibility And Request Path
 
-Zenbot's agent layer adapts Saturn's Vaelen behavior to Go without giving the model direct access to transport, persistence, or moderation internals. The model proposes text and typed tool calls. Zenbot owns identity, capabilities, schemas, ordering, deadlines, command authorization, room delivery, and durable memory.
+Zenbot's agent layer adapts Saturn's Vaelen behavior to Go without giving the model direct access to transport, persistence, or moderation internals. The model interprets the request, selects and orders tools, evaluates conditions, reacts to observations, and decides when to answer. Zenbot enforces identities, capabilities, schemas, execution safety, resource bounds, delivery receipts, and persistence.
 
-The production composition root is `cmd/zenbot/main.go`. Agent implementation lives under `internal/agent`, command execution remains under `internal/command`, and H2-backed context and memory remain under `internal/repository/h2`.
+There is one iterative model/tool loop. There is no semantic completion judge, preliminary planner, intent-routing phase machine, or runtime-generated task checklist. A valid final model response completes the loop; the runtime checks its structure and delivery rules, not whether its reasoning satisfied every requested step.
 
-## Active Request Path
+The production composition root is `cmd/zenbot/main.go`. Agent implementation lives under `internal/agent`, command execution under `internal/command`, and H2-backed context and memory under `internal/repository/h2`.
 
 ```mermaid
 flowchart TD
-    A[Hack.Chat event] --> B[Message listener chain]
-    B --> C{Direct *l command?}
-    B --> D{Exact bot mention?}
-    B --> E{Moderation candidate?}
-    B --> F{Ambient sample eligible?}
-    C -->|yes| G[DirectSubmissionAdapter]
-    D -->|yes| H[RoomParticipation]
-    E -->|yes and enabled| H
-    F -->|yes and enabled| H
-    G --> I[InvocationFactory]
-    H --> I
-    I --> J[Immutable invocation and trusted capabilities]
-    J --> K[Runtime admission and memory-key lock]
-    K --> L[Runner]
-    L --> M[Load durable memory]
-    M --> MA{Raw memory exceeds threshold?}
-    MA -->|yes| MB[Summarize oldest complete turns and persist coverage cursor]
-    MA -->|no| N[Load historical tool evidence]
-    MB --> N
-    N --> O[Load recent public room context]
-    O --> P[Semantic context budget and assembler]
-    P --> Q[OpenAI-compatible completion]
-    Q --> R{Tool calls present?}
-    R -->|no| RA[SemanticCompletionGate]
-    RA --> RB{Request fully satisfied?}
-    RB -->|no, budget remains| RC[Append evaluator feedback]
-    RC --> Q
-    RB -->|no, bound exhausted| RD[Fail closed]
-    RB -->|yes| S[OutputFinalizer]
-    R -->|yes| T[TurnEngine PLAN and GATE]
-    T --> U[Validate identity, manifest, capability, schema, budget and HITL]
-    U --> V[Execute dependency-aware stages]
-    V --> W[OBSERVE: store full results by call ID]
-    W --> WP[Project bounded JSON observations and re-budget complete transcript]
-    WP --> WA{Recovery decision}
-    WA -->|retry| Q
-    WA -->|degrade or bounds reached| WB[Tool-free terminal synthesis]
-    WB --> RA
-    S --> X{Visible reply?}
-    X -->|yes| Y[Runtime sink sends room or whisper message]
-    X -->|no| Z[Silent completion]
-    Y --> AA[Persist conversation and reusable evidence]
+    A[Hack.Chat event] --> B[Listener and participation admission]
+    B --> C[DirectSubmissionAdapter or RoomParticipation]
+    C --> D[Immutable invocation and trusted capabilities]
+    D --> E[Runtime admission and memory-key lock]
+    E --> F[Runner: load memory, historical evidence, public context]
+    F --> G[Budgeted context and caller-visible tools]
+    G --> H[Model response]
+    H --> I{Native tool calls?}
+    I -->|yes| J[Validate and execute model-selected batch]
+    J --> K[Retain full results; append bounded observations]
+    K --> L[Project context, required index and current status]
+    L --> H
+    I -->|no| M[Structural validation and OutputFinalizer]
+    M --> N[Visible delivery or verified tool-owned silence]
+    N --> O[Persist conversation and eligible evidence]
+    H -->|continuation failure after tools| P[Retain interruption receipts and valid evidence]
 ```
 
-## Components
+### Ingress And Isolation
 
-### Ingress And Invocation
-
-- `internal/agent/live/direct_submission.go` adapts `*l` into the shared runtime.
-- `internal/agent/live/participation.go` adapts exact mentions, optional ambient samples, and semantic moderation candidates.
-- `internal/agent/participation/invocation.go` derives capabilities only from the trusted room snapshot. User prompt text cannot grant a capability.
-- `cmd/zenbot/main.go` builds the snapshot from the current master, configured admins, and persisted moderator/admin roles.
-
-Invocation modes are:
+- `live/direct_submission.go` adapts `*l` into the same process-owned runtime as mentions, ambient turns, and moderation. The legacy synchronous `DirectInvoker` is not the production command route.
+- `live/participation.go` admits exact mentions, optional ambient samples, and moderation candidates.
+- `participation/invocation.go` derives capabilities from the trusted room snapshot, never from prompt text. Production supplies the current master, configured admins, and persisted moderator/admin roles.
 
 | Mode | Source | Reply requirement | Capability notes |
-|---|---|---:|---|
+|---|---|---|---|
 | `DIRECT` | `*l <prompt>` | Required | Creator may receive admin and permanent-ban tools |
 | `MENTION` | Exact public `@bot` mention | Required | Trusted admins/moderators may receive moderation tools |
 | `AMBIENT` | Configured public sample | Optional | Privileged action capabilities are withheld |
-| `MODERATION` | Semantic candidate | Silent | Only target-bound moderation actions are eligible |
+| `MODERATION` | Moderation candidate | Silent | Moderation actions are bound to the reviewed target |
 
-### Runtime And State Isolation
+`runtime/runtime.go` provides bounded admission, whole-request deadlines, cancellation, ambient coalescing, and per-memory-key ordering. Reference-counted keyed locks are reclaimed after requests. Public turns share `<room>|public`; whispers use trip, then hash, then nick in a private namespace. Different rooms never share memory.
 
-`internal/agent/runtime/runtime.go` provides bounded admission, whole-request deadlines, cancellation, and per-memory-key ordering. Its reference-counted keyed locks are reclaimed after each request. Each invocation creates a fresh turn state, tool execution ledger, and full-result observation store. Tool counts, failures, duplicate keys and call IDs, successful prerequisites, observations, and provider transcripts never cross request boundaries.
+Each invocation creates a fresh execution ledger, observation store, retrieval tool, and provider transcript. Tool attempts, failure budgets, successful prerequisites, duplicate protection, and unknown-action blocking are request-local. Persisted historical receipts are not live retrieval handles or a cross-request idempotency guarantee.
 
-Public turns use `<room>|public` as the memory namespace, so users in one room can continue a shared conversation. Whispers use trip, then hash, then nick identity in a private namespace. Different rooms never share memory.
+## Single Model/Tool Loop
 
-The runtime invokes `AfterDelivery` only after a visible response is successfully sent. The semantic completion gate returns an explicit `SEND` or `SUPPRESS` disposition: it suppresses only a candidate that would duplicate an already complete `ROOM_DELIVERY`, while calculations and requested combined summaries remain visible. The controller rejects suppression unless request-local evidence contains verified room delivery, no tool failure, and no silent action awaiting confirmation. Command-backed turns still produce one memory artifact after tool success.
+`live/tool_loop.go` owns composition and initial assembly. `live/turn_engine.go` runs the iteration; `live/registry_loop.go` appends matching protocol messages. The loop:
 
-### Prompt Assembly
+1. Builds a checked, caller-filtered manifest and adds request-local `read_tool_result`. Whisper requests expose no tools.
+2. Assembles the newest request with policy and bounded context, then requests an OpenAI-compatible completion with eligible tool definitions.
+3. Accepts a structurally valid response without tool calls as the model's final answer. No second model evaluates semantic completion.
+4. Checks nonblank call IDs/names and IDs unique within the batch and across the turn. Malformed or truncated protocol executes no calls from that response.
+5. Reserves the batch's call budget and validates manifest access, trusted capabilities, argument schema, prerequisites, and ledger state before execution. Invalid arguments become useful coded observations.
+6. Runs compatible declared-safe reads concurrently. Actions and undeclared resource access are barriers, executed in provider order. Results return in original call order.
+7. Stores original arguments and full results by call ID, then appends one assistant `tool_calls` message and its matching bounded tool observations.
+8. Gives observations back to the same model with the still-available tools. The model may correct arguments, satisfy prerequisites, retry an eligible read, choose another tool, continue unrelated work, or finish with a limitation.
+9. Reprojects context before each follow-up. Current resource status and the compact result index are required context, even when older call/result pairs are pruned.
+10. At the round or call bound, makes a tool-free terminal synthesis request with current evidence. A single structural repair allowance covers invalid final content or protocol; it is not a semantic retry budget. Tool calls during terminal synthesis are rejected, never executed.
 
-`internal/agent/assemble/assemble.go` and `internal/agent/assemble/context.go` combine:
+Independent calls may be batched. Dependent or conditional work belongs in a later model round after its input is known. The executor does not infer dependencies or evaluate natural-language conditions. If an ordered action fails, later actions in that same batch are explicitly `ACTION_NOT_EXECUTED`, linked to the failed call; read-only work can still proceed. The model chooses the next supported step from these observations.
 
-- the extracted prompt resources under `resources/agent`
-- immutable invocation metadata and current user prompt
-- bounded durable conversation memory
-- recent public room context from H2
-- reusable historical tool evidence
-- the capability-filtered provider tool manifest
+### Execution Ledger And Cancellation
 
-The same context projector runs before the initial worker request, every tool follow-up, semantic correction, terminal synthesis, and final reflection. It operates on complete semantic units and never slices serialized JSON. It supports a configured ceiling up to 1,000,000 estimated tokens, accounts for the live tool manifest, reserves output/policy capacity, deduplicates repeated source fingerprints, and retains newer high-priority units first. Assistant tool calls and all matching tool observations are one atomic unit. Trusted policy and the exact newest request are mandatory; assembly fails before provider I/O if they cannot fit. `MaxPromptChars` is independently enforced by Unicode code point at intake.
+The ledger bounds attempts and invoked failures separately. Argument validation does not spend the execution-failure budget. It retains successful prerequisites, rejects reused IDs and unsafe duplicate executions, and links duplicate/skipped results to the original call through `relatedCallId`. A known failed read or known uncommitted action can be tried again when its contract and budgets allow; committed or uncertain actions must not be replayed as a recovery shortcut.
 
-Durable summaries, memory, historical evidence, and room rows are separate untrusted user-role context; none are interpolated into the system role. The execution model interprets the exact newest request directly, while the deterministic controller validates schemas, capabilities, budgets, call identity, action policy, and typed outcomes. A separate semantic completion gate evaluates proposed final prose against that request and the request-local result ledger.
+Effect state is explicit: `NOT_STARTED`, `NOT_COMMITTED`, `COMMITTED`, `PARTIAL`, or `UNKNOWN`. `effectsCommitted`, `actionCount`, and `deliveryCount` preserve positive receipts, including on error. An error is not proof that no effects occurred. Once an action has unknown outcome, further actions are blocked for that invocation while read-only tools remain available to investigate. Reads do not automatically lift that block.
 
-Named-user profile/history requests require fresh `user_message_history` evidence. That tool reads up to 500 latest `PUBLIC` rows across rooms by default, or one specified room, with timestamps, nick, trip, hash, channel, and text.
+Cancellation is cooperative, not process preemption. Reads can return on deadline while their handler finishes in the background; implementations still need to honor context. Actions execute synchronously so the executor does not return while its in-process action is still running. An action or transport that ignores context can exceed the nominal deadline. Missing verified terminal action state becomes `ACTION_OUTCOME_UNKNOWN`; the runtime must not invent rollback or retry it with changed arguments.
 
-### Provider
-
-`internal/agent/llm/openai/client.go` calls `<agent.endpoint>/v1/chat/completions`. It sends the optional model, completion-token bound, contextual tools, and `chat_template_kwargs.enable_thinking`. The configured operation timeout covers retries and retry backoff. Only transient transport/status failures are retried.
-
-Provider accounting is schema-open optional metadata. Integer usage counters are
-retained through the stable `Usage()` API, while nested details and unfamiliar
-value shapes are ignored. Provider additions therefore cannot invalidate an
-otherwise usable completion.
-
-Tool manifests remain present on every correction round. This is required for the model to repair invalid arguments or choose a fallback tool after receiving an error observation.
-
-## Tool Contracts
+## Tool Contracts And Provider Boundary
 
 All tools implement `internal/agent/tool.Tool`:
 
@@ -120,167 +82,133 @@ type Tool interface {
 }
 ```
 
-A descriptor defines the stable name, unique primary intent, label, capability description, negative guidance, strict JSON parameter schema, result schema, maximum model-visible result bytes, access, effect, result mode, idempotency, timeout, prerequisites, resource reads/writes, and optional semantic `RoutingMetadata`. Routing metadata contains aliases, targets, positive selection guidance, and schema-valid request/argument examples. Construction recursively validates every registered descriptor, including typed `const` values and exactly-one `oneOf` branches, and rejects unsupported schema keywords or malformed examples before the live loop is accepted.
+Descriptors define stable name, unique primary intent, purpose and selection guidance, parameter/result schemas, model-visible result byte limit, access, effect, result mode, idempotency, timeout, prerequisites, and resource reads/writes. Optional routing metadata contains aliases, targets, guidance, and schema-valid examples. Construction validates descriptors and examples before the loop is accepted.
 
-`Registry.Manifest` is the checked boundary between registration and provider assembly. It returns a deterministic, versioned, caller-capability-filtered manifest, rejects duplicate caller-visible primary intents, hides executor-only fallbacks, and propagates descriptor errors instead of silently dropping a tool. The complete JSON manifest retains every local contract field. `ManifestEntry.ProviderDefinition` projects only the routing-critical intent/label summary and parameter schema into the OpenAI-compatible function shape. Provider declarations set `strict: true`; local recursive schema validation and encoder parity tests remain authoritative. The full creator-visible provider tool payload is kept at or below 32 KiB.
+`Registry.Manifest` returns a deterministic versioned caller-visible inventory, rejects colliding primary intents, hides internal fallbacks, and propagates invalid descriptors. The full local manifest retains the execution contract. Its provider projection includes concise purpose, use/avoid guidance, an example, prerequisites, parameters, and delivery semantics. The 64-tool creator-visible base manifest is regression-tested at 32 KiB or less; the complete 65-tool invocation also includes `read_tool_result` and was measured at 33,534 bytes. Context budgeting uses the complete live manifest.
 
-Complete typed results stay in the request-local `ObservationStore`, keyed by the provider call ID. The provider transcript receives a bounded view:
+Parameters are simple named JSON objects; optional fields keep true omission semantics. `strict` is enabled only when `SupportsStrictParameters` confirms the schema supports it unchanged. Optional schemas use non-strict provider mode. Local validation remains authoritative in both cases and reports missing, extra, malformed, or incorrectly typed fields. Production command contracts do not require the model to navigate a root union or author a generic command string.
+
+`llm/openai/client.go` calls `<agent.endpoint>/v1/chat/completions`, including model, completion-token limit, contextual tools, and `chat_template_kwargs.enable_thinking`. Its operation timeout includes retries and backoff; only transient transport/status failures are retried. Optional usage metadata is schema-open: integer counters survive while unfamiliar nested shapes are ignored.
+
+Original tool argument JSON is preserved from the provider through `LlmToolCall.RawArguments()`, execution, and assistant transcript serialization. Invalid JSON or a non-object payload is not silently replaced with `{}` before validation. Provider requests preserve assistant/tool pairing and null assistant content for call-only messages. Provider calls receive the caller's context for cancellation.
+
+## Results, Retrieval, And Context Budgets
+
+The request-local `ObservationStore` retains the full typed result and original argument JSON under the original provider call ID. The transcript receives bounded structured JSON, not JSON double-encoded inside a summary string:
 
 ```json
 {
   "callId": "call_123",
   "tool": "database_query",
   "status": "success",
-  "summary": "{\"head\":[...],\"tail\":[...]}",
+  "data": {"rows": [{"name": "example"}], "returnedCount": 200},
+  "effectsCommitted": false,
+  "deliveryCount": 0,
   "returnedCount": 200,
-  "truncated": true,
-  "continuationId": "opaque-request-local-id"
+  "truncated": true
 }
 ```
 
-Arrays and row objects retain original counts plus deterministic bounded head/tail samples; ordinary objects retain lexical fields that fit; strings are truncated by rune. The complete envelope is marshalled after selection, never byte-sliced. A malformed success becomes an `INVALID_TOOL_RESULT` error view. Stable tool errors remain concise semantic instructions; repository errors and stack traces are not copied into observations.
+Errors expose `code` and `message` alongside identity and effect/delivery metadata. Arrays and row objects retain deterministic head/tail samples and original counts. Ordinary objects retain fields that fit, including small fields after an oversized field; truncation and omitted-field metadata report loss. Strings are bounded by Unicode rune. Complete envelopes are marshalled after selection, never byte-sliced into invalid JSON. Invalid successful payloads become `INVALID_TOOL_RESULT` observations while originals remain retained. Backend diagnostics and stack traces are not substituted for useful tool errors.
 
-Expected command validation or authorization failures become coded observations. Read-only work may return promptly on cancellation. Action work runs synchronously: the executor does not return while its in-process action is still running. If cancellation occurs without a verified typed terminal result, the outcome is `ACTION_OUTCOME_UNKNOWN`; recovery disables tools and proceeds to one uncertainty-aware terminal synthesis without any exact or modified action retry.
+`read_tool_result` retrieves retained evidence without rerunning its original tool:
 
-### Production Tool Inventory
+| Field | Meaning |
+|---|---|
+| `callId` | Required original call ID from this invocation |
+| `field` | `content` (default: original result JSON/error text) or `arguments` |
+| `offset` | Unicode rune offset, default `0` |
+| `limit` | Requested runes, `1..6000`, default `6000` |
 
-| Tool family | Effect | Parallel eligibility | Access |
-|---|---|---:|---|
-| `user_message_history` | Read-only model data | Yes | Public invocation |
-| `room_users` | Current-room presence | Yes | Public invocation |
-| `database_query` | Fixed read-only query | Yes | Public invocation |
-| `database_schema` | Read-only schema | Yes | `DYNAMIC_SQL` |
-| `database_sql` | Bounded read-only SQL after schema | Sequential prerequisite chain | `DYNAMIC_SQL` |
-| `saturn_<command>` | One concrete Saturn command | Never | Command-specific capability |
+Each page contains the original receipt, `content`, `nextOffset`, `totalRunes`, and `done`. The complete page payload is capped at 7,000 bytes, shrinking the character count for UTF-8 or escaping. Follow the actual `nextOffset` and concatenate content until `done`; a string chunk need not be standalone JSON. Retrieval shares the total call budget, with a per-tool cap equal to that budget. Large data can still exceed available calls: the model must state what was read and what remains unavailable, not infer omitted values or imply unbounded access.
 
-`room_users` accepts no room selector and is authoritative only for the caller's current room. Presence in another room routes exclusively through `saturn_list`, which rejects the current room before gateway execution.
+`assemble/assemble.go` and `assemble/context.go` combine extracted prompt resources, invocation metadata, the newest prompt, durable memory, recent public room context, historical evidence, and live tool definitions. Context is budgeted before the initial request and every follow-up, repair, and terminal synthesis.
 
-The complete command mapping is in [COMMAND_TOOL_INVENTORY.md](COMMAND_TOOL_INVENTORY.md).
+The projector estimates tokens, accounts for the live manifest, reserves output/policy capacity, deduplicates source fingerprints, and retains newer high-priority units. Assistant calls and matching tool results form an atomic optional unit. Trusted policy, the exact newest request, and `ContextInput.RequiredRuntime` are mandatory. Current `TOOL_LOOP_STATUS` is supplied through required runtime context and remains last; it reports remaining model rounds/calls, tool availability, terminal state, and any unknown-action block.
 
-## Tool Loop And State Machine
+`CURRENT_TURN_RESULTS_UNTRUSTED_DATA` is a required compact index of original call IDs, tool names, bounded argument previews, statuses, codes, effect states, and receipts. It reports omitted context units and truncation. Argument previews shrink before irreducible required metadata is rejected; full result bodies are not duplicated in the index. Earlier calls remain discoverable through multiple rounds and pruning, and retained content or arguments can be paged by ID. If required state cannot fit, assembly fails before provider I/O instead of silently losing it.
 
-The active generalized loop is coordinated by `internal/agent/live/turn_engine.go`. `internal/agent/live/tool_loop.go` owns initial assembly, while `internal/agent/live/registry_loop.go` adapts protocol messages and delegates generalized execution. No keyword or regular-expression intent router chooses tools. The provider uses the standard OpenAI tool protocol: it may return candidate content or one or more structured calls from the caller-filtered manifest. `SemanticCompletionGate` independently evaluates every zero-tool candidate against the newest request, recent conversational context, caller-visible tool capabilities, and current-turn observations. The closed phases are `ASSEMBLE -> MODEL -> PLAN -> GATE -> EXECUTE -> OBSERVE`, followed by another model cycle or `REFLECT -> FINALIZE -> COMPLETE`. `PAUSED` and `FAILED` remain explicit bounded branches.
+The context ceiling supports up to 1,000,000 estimated tokens. `MaxPromptChars` is independently enforced by Unicode code point at intake. Summaries, stored conversation, historical evidence, room rows, tool outputs, and interruption records are untrusted context, not system instructions or proof of authority. The index records execution facts; it does not derive semantic obligations or a task plan.
 
-1. The registry computes a checked manifest for the current trusted context, hides unauthorized and internal-fallback tools, rejects primary-intent collisions, and orders entries by stable tool name.
-2. The manifest is compactly projected and the assembler sends one provider request with all eligible definitions using `tool_choice: auto`.
-3. A response with no calls is only a candidate final answer. A separate constrained evaluator must return a structured `FINAL` decision before delivery. `CONTINUE` feedback is appended to the transcript and the same authorized manifest remains available to the worker model. This evaluator is semantic and runs for every candidate; it does not use keyword intent heuristics.
-4. Every returned call must have a nonblank ID and registered name. IDs must be unique both within a batch and across the entire turn, so correction cannot overwrite an earlier observation mapping.
-5. The executor validates capability prerequisites and the strict argument schema before invoking code.
-6. The request-local ledger rejects duplicate call-and-argument keys, per-tool overuse, missing successful prerequisites, and tools disabled after repeated failures.
-7. Consecutive independent calls may execute concurrently only when every descriptor is read-only, idempotent, prerequisite-free, and resource-compatible.
-8. Any action, command, dependency, or resource conflict creates an ordering barrier and executes sequentially in provider order.
-9. Results are restored to source order, retained in the full request-local store, projected under the descriptor's byte ceiling, and appended as one assistant `tool_calls` message followed by matching bounded JSON observations.
-10. `RecoveryPolicy` keeps the authorized manifest only for correctable failures such as invalid arguments, unknown tools, execution failures, and read timeouts. Disabled tools and unknown action outcomes switch immediately to tool-free degradation; `ACTION_OUTCOME_UNKNOWN` is never retried.
-11. Reaching the tool-round bound reserves one independent tool-free terminal synthesis call, so the newest observations are never discarded. Its candidate must still pass semantic completion; an unsatisfied candidate at the bound fails closed.
-12. The semantic evaluator itself receives only a compact conversation projection, compact caller-visible capability descriptions, and bounded observations bound to the exact canonical tool arguments, effect, result mode, committed-effect flag, and delivery receipt that produced them. It must call `submit_completion_assessment` with `FINAL` or `CONTINUE` plus `SEND` or `SUPPRESS`; it cannot execute Saturn tools.
-13. Empty, truncated, tool-calling, or repeated final content receives at most one tool-free structural repair call before failing closed. A second truncated initial response fails immediately after its compact retry.
-14. Stateful calls pass through `InterruptHook`. The default allows existing behavior; deny becomes an `ACTION_DENIED` observation and pause returns a typed checkpoint before side effects. `TurnEngine.ResumeAction` verifies the resume token and re-runs current registry, schema, and capability checks. Approved actions execute synchronously.
+### Production Tools
 
-The relevant bounds are:
-
-| Setting | Enforced by | Meaning |
+| Tool family | Effect | Access / scope |
 |---|---|---|
-| `maxCompletionTokens` | provider client | Maximum tokens generated by one provider call; keep it close to the useful reply size |
-| `maxOutputChars` | output finalizer | Maximum characters delivered to chat after generation |
-| `maxSteps` | turn state | Maximum worker-model iterations; each candidate may add one constrained semantic evaluation |
-| `maxToolCallsPerTurn` | turn state | Aggregate calls reserved by one request |
-| `maxCallsPerTool` | execution ledger | Distinct calls to one tool |
-| `maxToolFailures` | execution ledger | Failures before that tool is disabled for the request |
-| `toolTimeoutMillis` | executor | Default when a descriptor has no timeout |
-| descriptor timeout | executor | Per-tool override |
-| descriptor model-result bytes | observation projector | Maximum complete JSON observation view for one result |
+| `user_message_history` | Read-only model data | Latest public messages for a named user, across rooms or one specified room |
+| `room_users` | Read-only model data | Current room only; no room argument |
+| `database_query` | Fixed read-only query | Public invocation |
+| `database_schema` | Read-only schema | `DYNAMIC_SQL` |
+| `database_sql` | Bounded read-only SQL | `DYNAMIC_SQL`; successful schema prerequisite |
+| `read_tool_result` | Read-only retained evidence | This invocation's original results and arguments |
+| `saturn_<command>` | Action | Command-specific trusted capability |
+
+Current remote-room presence routes through `saturn_list`, which rejects the current room before gateway execution. `user_message_history` reads up to 500 latest `PUBLIC` rows by default, with timestamps, nick, trip, hash, channel, and text. Current facts require live evidence; historical prose is not a current presence or history result.
 
 ## Command Execution
 
-Command identity and aliases have one source in `internal/command/catalog/catalog.go`. The same `catalog.Entry` also owns `AgentToolSpec`: actionability or a hidden reason, label, description, category, access, targets, use/avoid guidance, examples, argument strategy, moderation targeting, and compatibility flags. `internal/command/registry.go` materializes chat handlers from that catalog, while production composition creates one `saturn_<canonical>` adapter for each of the 59 actionable entries. The five non-actionable entries are `l`, `mine`, `whiskey`, `ws`, and `wsa`.
+`internal/command/catalog/catalog.go` is the single source for identity, aliases, role, actionability, access, targets, selection guidance, examples, argument grammar, and moderation targeting. Chat registration derives handlers from it. Production exposes one `saturn_<canonical>` adapter for each of 59 actionable commands; `l`, `mine`, `whiskey`, `ws`, and `wsa` are non-actionable. See [COMMAND_TOOL_INVENTORY.md](COMMAND_TOOL_INVENTORY.md).
 
-`AgentArgumentContract` exposes an immutable JSON schema and an encoder. Empty, positional, boolean-state, comma-list, shadow-ban, auto-move, and notes strategies translate strict structured fields into the existing command tail. The agent-facing kick contract is the flat, single-field `{"nick":"..."}` shape; the richer manual chat grammar is not exposed to the model. The adapter validates the descriptor schema and strategy cross-field rules before invoking the gateway; no model-authored raw command string crosses this boundary.
+`AgentArgumentContract` exposes an immutable schema and encoder. Named fields translate into the existing command tail inside the trusted adapter, with a 4,000-byte bound and local cross-field validation. Kick uses the flat `{"nick":"..."}` contract; manual `-m`/`-c` grammar is not exposed to the model.
 
-`internal/command/agent_gateway.go` reconstructs a normal Saturn command message using the current prefix and trusted caller identity. It resolves the current master for every invocation, applies command/capability authorization, binds autonomous moderation to its reviewed author, captures command output, and records the command audit result. Agent success requires a typed `commandgateway.Execution`: legacy status alone is insufficient. Stateful commands must report committed effects and a positive action receipt; room-delivery tools must additionally report a positive delivery receipt. Silent moderation actions such as kick therefore remain verifiable without pretending that they emitted a room message, and missing targets remain typed failures rather than successful empty prose.
+`command/agent_gateway.go` reconstructs a normal Saturn command message using the current prefix and trusted caller identity. It resolves the current master per invocation, applies command/capability authorization, binds autonomous moderation to its reviewed author, captures output, and records the command audit result. Success requires typed `commandgateway.Execution` receipts, not legacy status alone. Room-delivery actions need verified delivery; silent actions such as kick need an action receipt. Errors preserve partial deliveries/actions so recovery cannot erase work already done.
 
-The model cannot directly send websocket payloads, write the database, change its role, or select an arbitrary command outside the contextual manifest.
+The model cannot directly send websocket payloads, write the database, change its role, or choose an arbitrary command outside its contextual manifest.
 
-## Memory And Evidence
+## Memory, Interruption, And Delivery
 
-`internal/agent/turn/memory.go` and `internal/agent/live/memory.go` adapt H2 repositories into bounded memory. Conversation rows are loaded by memory key, TTL, and turn count. Public and whisper contexts remain separate.
+`turn/memory.go` and `live/memory.go` adapt H2 repositories into bounded memory by memory key, TTL, and turn count. Public and whisper contexts remain separate. When history exceeds `memoryRawTurns`, `ModelConversationSummarizer` submits complete oldest user/assistant pairs to a tool-free summarization call. Raw text is untrusted user-role input. H2 stores the summary, source fingerprint, and covered row ID in `agent_memory_summary`; later loads prepend that summary to the uncovered tail. Raw `agent_memory` rows remain authoritative until TTL cleanup.
 
-When loaded history exceeds `memoryRawTurns`, `ModelConversationSummarizer` sends complete oldest user/assistant pairs to a tool-free summarization request. Raw text remains in an untrusted user-role payload. H2 stores the resulting summary, source fingerprint, and covered row ID in `agent_memory_summary`; subsequent loads exclude covered rows and prepend the summary to the raw tail. Raw `agent_memory` rows remain authoritative until TTL cleanup.
+Production Runner persists conversation, assistant outcome, and eligible tool evidence through one `AppendAgentTurn` transaction; a failed evidence insert rolls back the whole turn. Reusable evidence is restricted to successful model-data results whose durable schema validates. Public message history includes its real timestamp/count fields. Room-delivery command outputs and unknown actions are not promoted to reusable read evidence or replayed as fresh facts.
 
-Conversation, assistant outcome, and reusable tool evidence are committed through one `AppendAgentTurn` transaction. A failed evidence insert rolls back the whole turn, preventing half-written conversational state.
-
-Reusable tool evidence is persisted only for successful eligible model-data tools. Command room-delivery results, unknown action outcomes, and unverified deliveries are never persisted as completed work or replayed as fresh facts. The LLM-facing contract requires live `user_message_history`, current-room `room_users`, or remote-room `saturn_list` evidence instead of treating old prose as current evidence; selection remains LLM-backed rather than keyword-routed.
+If later provider, context projection, or finalizer work fails after tools ran, `IncompleteTurnError` retains the partial `Completion` and original request-local observation store. Runner and legacy DirectInvoker return an error without inventing a successful final answer. They attempt one bounded persistence of a compact `INTERRUPTED_TOOL_TURN_UNTRUSTED_DATA` receipt record plus valid read evidence. The record preserves call/tool identity, status, effect state and counts, not raw action arguments or result bodies. On load it is user-role context explicitly marked as interrupted, not prior assistant prose claiming success. Cancellation permits a separate one-second metadata persistence attempt; persistence failure is logged and included in the typed error. This is a recovery record, not automatic resumption or cross-turn duplicate prevention.
 
 Recent room context and user-history queries read only `PUBLIC` messages. New whispers are stored as `WHISPER`; schema upgrades classify legacy null visibility as `PUBLIC` for Saturn compatibility.
 
-## Output And Failures
+The model decides whether another room reply is needed. It may return the configured no-reply marker when verified room deliveries already answer the request, or on a mode permitting silence. For reply-required turns the controller rejects suppression without a verified delivered result, after an unknown action, or when a committed silent action needs confirmation. This receipt check does not semantically prove compound-task completion. Requested calculations, comparisons, and summaries depend on the model following the prompt.
 
-`internal/agent/live/runner.go` sends provider content through `OutputFinalizer` before delivery. It:
+`OutputFinalizer` normalizes formatting, preserves natural answers, rejects empty required replies and leaked internal evidence/protocol, removes a no-reply marker from otherwise valid text, and enforces a Unicode output bound. Runtime sends visible replies through the room/whisper sink. `AfterDelivery` runs after a successful visible send or verified tool-owned delivery, so a suppressed duplicate reply can still have a memory artifact. Reply-required failures use the configured failure sink.
 
-- normalizes response formatting
-- preserves ordinary provider answers instead of coercing them into a quotation or fixed template
-- rejects empty required replies
-- strips the no-reply marker from otherwise valid text
-- rejects leaked internal tool evidence
-- applies the configured Unicode output bound
-- supports intentional silence for non-required ambient/moderation turns
+## Limits And Model Quality
 
-Reply-required runtime failures use the configured failure sink. Tool failures do not crash the runtime; they become coded observations unless the enclosing context was cancelled.
+| Setting | Meaning |
+|---|---|
+| `requestTimeoutMillis` | Whole-request context deadline; cooperative cancellation caveat applies |
+| `maxCompletionTokens` | Provider generation limit per call |
+| `maxOutputChars` | Delivered reply's Unicode character limit |
+| `maxSteps` | Model/tool round budget, with bounded terminal synthesis and structural repair |
+| `maxToolCallsPerTurn` | Total reserved calls, including result retrieval |
+| `maxCallsPerTool` | Per-tool attempts; retained-result reads use the total call bound |
+| `maxToolFailures` | Invoked failures before disabling a tool for the request |
+| `toolTimeoutMillis` | Default tool deadline when a descriptor has no override |
+| Descriptor result bytes | Maximum complete provider-visible observation envelope |
+| `maxContextTokens`, `contextReserveTokens` | Estimated input ceiling and reserved capacity |
 
-## Operational Observability
+Runtime tests establish structural protocol, receipt, isolation, and budget guarantees. They do not establish universal semantic reliability. Conditional actions, complete multi-part answers, argument selection, and appropriate silence depend on the configured model's reasoning. Live-provider evaluation exposed conditional-task failures with thinking disabled. Thinking is now enabled in the tracked examples and local configuration based on the evaluation, but improved runs do not prove those failures are solved: a later reasoning-enabled full run also failed a compound case. Use the opt-in side-effect-free provider evaluation to test model/configuration changes before relying on them for consequential tasks. See the [provider evaluation record](docs/evals/2026-09-11-tool-loop-provider.md) for results and limitations, and the [teardown/rebuild report](docs/2026-09-11-tool-loop-teardown-and-rebuild.md) for the design changes and verification scope.
 
-Every production invocation carries its request ID through structured `slog`
-events. The same `request_id`, `mode`, `room`, and `nick` fields connect runtime,
-context, provider, tool-loop, delivery, and persistence activity. Logs record
-counts, stage names, finish reasons, error codes, HTTP status, and durations;
-they do not record prompts, API keys, tool arguments/results, database rows, or
-conversation contents.
+## Operations And Configuration
 
-The primary lifecycle events are:
+Structured `slog` events connect runtime, context, provider, tools, delivery, and persistence through `request_id`, `mode`, `room`, and `nick`. They record counts, finish reasons, error codes, HTTP status, and durations, not prompts, API keys, raw arguments/results, database rows, or conversation bodies.
 
-- `agent.request.started`, `agent.request.completed`, and `agent.request.failed`
-- `agent.context.loaded` and `agent.context.load_failed`
-- `agent.request.assembled`, `agent.loop.started`, `agent.loop.cycle`,
-  `agent.loop.completed`, and `agent.loop.failed`
-- `agent.completion_gate.started` and `agent.completion_gate.completed`, including the structured decision and observation count without logging prompt contents
-- `agent.llm.request.started`, `agent.llm.attempt.retrying`,
-  `agent.llm.request.completed`, and `agent.llm.request.failed`. Invalid JSON
-  also emits `agent.llm.response.malformed` with the parser offset, response
-  size, media type, and SHA-256 fingerprint, never the response body.
-- `agent.tool.batch_started`, `agent.tool.started`, `agent.tool.completed`, and
-  `agent.tool.batch_completed`
-- `agent.correction.started`, with `stage` distinguishing semantic-completion,
-  command, tool-follow-up, and synthesis calls
-- `agent.response.finalized`, `agent.response.finalization_failed`,
-  `agent.delivery.completed`, and persistence failure events
+Primary events include `agent.request.started/completed/failed`, `agent.context.loaded/load_failed`, `agent.loop.cycle/completed/failed`, `agent.llm.request.started/completed/failed`, `agent.llm.attempt.retrying`, `agent.tool.started/completed`, `agent.response.finalized/finalization_failed/suppressed`, `agent.delivery.completed/failed`, and persistence failures. Invalid provider JSON emits `agent.llm.response.malformed` with parser offset, size, media type, and SHA-256 fingerprint, never the response body. Interrupted-state persistence has its own `agent.interrupted_execution.persistence_failed` event. There is no completion-gate lifecycle in the active loop.
 
-For Docker deployments, follow all events with `docker logs -f zenbot`. Filter
-for one turn by its `request_id`, or filter `agent.` to inspect only agentic
-activity. A generic room failure now always has a matching
-`agent.request.failed` event containing the wrapped server-side cause.
+For Docker, use `docker logs -f zenbot` and filter by request ID or `agent.`. Reply failures have server-side request/delivery failure events with their wrapped cause.
 
-## Configuration
+`internal/config/agent_config.go` accepts native Zenbot and Saturn TOML/environment names; environment values override TOML. See [config.example.toml](config.example.toml) and [.env.example](.env.example). The creator trip must be supplied explicitly when the agent is enabled; it is not compiled in or published in tracked examples. Local `config.toml`, `.env`, and database files are ignored and excluded from Docker contexts; `make run` mounts the selected config.
 
-`internal/config/agent_config.go` accepts both native Zenbot names and Saturn TOML/environment names. Environment values take precedence over TOML. See [config.example.toml](config.example.toml) and [.env.example](.env.example) for the complete surface.
-
-The creator trip must be supplied explicitly when the agent is enabled. It is
-retained in the ignored production configuration and is not compiled into the
-binary or published in the tracked examples.
-
-The local real `config.toml`, `.env`, and database files are intentionally ignored and excluded from Docker build contexts. `make run` mounts the chosen config rather than baking environment-specific values into the image.
-
-The main hardening controls are `requestTimeoutMillis`, `maxSteps`, `maxToolCallsPerTurn`, `maxCallsPerTool`, `maxToolFailures`, `toolTimeoutMillis`, `maxContextTokens`, `contextReserveTokens`, `memoryTurns`, `memoryRawTurns`, and `memorySummaryMaxChars`. The tracked examples document matching `SATURN_AGENT_*` environment aliases. `memoryRawTurns` must not exceed `memoryTurns`; HITL remains default-allow unless composition supplies another `InterruptHook`.
+Memory controls include `memoryTurns`, `memoryRawTurns`, and `memorySummaryMaxChars`; `memoryRawTurns` must not exceed `memoryTurns`. Resource limits do not prove semantic task completeness. There is no active interrupt/resume hook or phase-machine configuration.
 
 ## Verification Map
 
-- `internal/agent/live/turn_engine_test.go`: semantic completion, closed loop recovery, reflection, terminal synthesis, interruption, and authorization revalidation on resume
-- `internal/agent/live/semantic_completion_gate_test.go`: constrained evaluator protocol and malformed-decision rejection
-- `internal/agent/live/registry_loop_test.go`: end-to-end semantic correction, multi-tool ordering, parallel read fan-out, per-tool/failure limits, cross-round call-ID uniqueness, and every-request context budgeting
-- `internal/agent/assemble/observations_test.go`: request-local full-result retention and deterministic bounded JSON projections
-- `internal/agent/tool/execution/execution_test.go`: validation, authorization, cancellation, default/descriptor timeouts, ledger behavior
-- `internal/agent/tool/*_test.go`: schemas and individual tool contracts
-- `internal/command/catalog/agent_contract_test.go`: exhaustive actionability,
-  metadata, schema-example, defensive-copy, and typed encoder coverage
-- `internal/agent/runtime/*_test.go`: admission, cancellation, memory-key ordering, ambient coalescing
-- `internal/agent/turn/*_test.go`: phases, recovery, evidence, memory compaction, and policy state
-- `cmd/zenbot/live_agent_test.go`: production composition, contextual command visibility, moderator/admin role propagation
-- `internal/repository/h2/agent_*_test.go`: atomic turns, persisted summaries, context, schema, SQL, and 500-message history
+- `live/turn_engine_test.go`, `live/registry_loop_test.go`: single-loop recovery, mixed batches, source order, unknown-action reads, call identity, terminal bounds, and provider context budgets.
+- `tool/execution/*_test.go`: admission, schemas, prerequisites, duplicate policy, skipped actions, receipts, cancellation, timeouts, and read concurrency.
+- `assemble/context_test.go`, `assemble/observations_test.go`: atomic pruning, required status/index, bounded structured data, omissions, and retained originals.
+- `live/observation_tool_test.go`: Unicode/escaped paging, original arguments, bounded pages, and original receipts without action replay.
+- `live/runner_test.go`, `live/direct_test.go`: interrupted continuation/finalization retention, cancellation persistence, and no fabricated successful delivery.
+- `llm/openai/client_test.go`, `tool/contract/*_test.go`: raw argument serialization, cancellation, schema validation, optional strict mode, and provider wire compatibility.
+- `turn/*_test.go`, `live/memory*_test.go`: durable evidence, real history result shape, compaction, and bounded memory.
+- `runtime/*_test.go`: admission, cancellation, memory-key ordering, ambient coalescing, delivery, and persistence ordering.
+- `internal/command/catalog/agent_contract_test.go`, `internal/command/production_registry_parity_test.go`: catalog/handler parity and typed encoders.
+- `cmd/zenbot/live_agent_test.go`: production composition, visibility, and trusted role propagation; `cmd/zenbot/provider_eval_test.go`: opt-in real-provider semantic evaluation with safe tool doubles.
+- `internal/repository/h2/agent_*_test.go`: atomic turns, summaries, context, schema, SQL, and public history.
+
+Abbreviated paths above are relative to `internal/agent` unless another root is shown.

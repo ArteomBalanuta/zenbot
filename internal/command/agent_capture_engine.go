@@ -273,7 +273,8 @@ func (e *agentCaptureEngine) UpdatePrefix(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return controller.UpdatePrefix(prefix)
+	previous, err := controller.UpdatePrefix(prefix)
+	return previous, e.recordAction(err)
 }
 
 func (e *agentCaptureEngine) AutoMoveSnapshot() common.AutoMoveSnapshot {
@@ -289,7 +290,8 @@ func (e *agentCaptureEngine) ConfigureAutoMove(source, destination string) (comm
 	if err != nil {
 		return common.AutoMoveSnapshot{}, err
 	}
-	return controller.ConfigureAutoMove(source, destination)
+	state, err := controller.ConfigureAutoMove(source, destination)
+	return state, e.recordAction(err)
 }
 
 func (e *agentCaptureEngine) EnableAutoMove(ctx context.Context) (common.AutoMoveSnapshot, error) {
@@ -297,7 +299,8 @@ func (e *agentCaptureEngine) EnableAutoMove(ctx context.Context) (common.AutoMov
 	if err != nil {
 		return common.AutoMoveSnapshot{}, err
 	}
-	return controller.EnableAutoMove(ctx)
+	state, err := controller.EnableAutoMove(ctx)
+	return state, e.recordAction(err)
 }
 
 func (e *agentCaptureEngine) DisableAutoMove(ctx context.Context) (common.AutoMoveSnapshot, error) {
@@ -305,7 +308,8 @@ func (e *agentCaptureEngine) DisableAutoMove(ctx context.Context) (common.AutoMo
 	if err != nil {
 		return common.AutoMoveSnapshot{}, err
 	}
-	return controller.DisableAutoMove(ctx)
+	state, err := controller.DisableAutoMove(ctx)
+	return state, e.recordAction(err)
 }
 
 func (e *agentCaptureEngine) MoveFromServingRoom(ctx context.Context, source string, target common.NickTarget, destination common.Channel) (bool, error) {
@@ -313,7 +317,11 @@ func (e *agentCaptureEngine) MoveFromServingRoom(ctx context.Context, source str
 	if err != nil {
 		return false, err
 	}
-	return mover.MoveFromServingRoom(ctx, source, target, destination)
+	moved, err := mover.MoveFromServingRoom(ctx, source, target, destination)
+	if moved && err == nil {
+		e.recordAction(nil)
+	}
+	return moved, err
 }
 
 func (e *agentCaptureEngine) AddReplica(ctx context.Context, channel string) error {
@@ -321,7 +329,7 @@ func (e *agentCaptureEngine) AddReplica(ctx context.Context, channel string) err
 	if err != nil {
 		return err
 	}
-	return controller.AddReplica(ctx, channel)
+	return e.recordAction(controller.AddReplica(ctx, channel))
 }
 
 func (e *agentCaptureEngine) RemoveReplica(ctx context.Context, channel string) error {
@@ -329,7 +337,7 @@ func (e *agentCaptureEngine) RemoveReplica(ctx context.Context, channel string) 
 	if err != nil {
 		return err
 	}
-	return controller.RemoveReplica(ctx, channel)
+	return e.recordAction(controller.RemoveReplica(ctx, channel))
 }
 
 func (e *agentCaptureEngine) ReplicaChannels() []string {

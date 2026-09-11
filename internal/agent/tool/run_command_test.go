@@ -107,12 +107,34 @@ func TestRunCommandNormalizesCallsGatewayOnceAndRejectsFailure(t *testing.T) {
 	}
 }
 
-func TestRunCommandTurnsGatewayRejectionIntoCorrectableObservation(t *testing.T) {
+func TestRunCommandDoesNotTreatUntypedGatewayErrorAsKnownRejection(t *testing.T) {
 	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
 	gateway := &runCommandGatewayStub{err: errors.New("command validation failed")}
 	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"ping"}`))
-	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 1 {
+	if err != nil || !result.IsError || result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || result.EffectState != contract.EffectUnknown || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
+	}
+}
+
+func TestRunCommandPreservesPartialGatewayReceiptsOnFailure(t *testing.T) {
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	for _, status := range []commandgateway.OutcomeStatus{commandgateway.OutcomeRejected, commandgateway.OutcomeUnknown} {
+		executed := verifiedCommandExecution("first output delivered")
+		executed.Status = status
+		gateway := &runCommandGatewayStub{result: executed}
+		result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"ping"}`))
+		if err != nil || !result.IsError || !result.EffectsCommitted || result.DeliveryCount != 1 || result.VerifiedRoomDelivery() {
+			t.Fatalf("status=%s result=%#v err=%v", status, result, err)
+		}
+	}
+}
+
+func TestRunCommandPreservesCommittedReceiptAlongsideGatewayError(t *testing.T) {
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	gateway := &runCommandGatewayStub{result: verifiedCommandExecution("delivered"), err: errors.New("connection interrupted")}
+	result, err := (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, json.RawMessage(`{"command":"ping"}`))
+	if err != nil || result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || !result.EffectsCommitted || result.DeliveryCount != 1 {
+		t.Fatalf("result=%#v err=%v", result, err)
 	}
 }
 

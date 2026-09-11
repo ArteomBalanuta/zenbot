@@ -136,12 +136,12 @@ func TestSaturnModerationCommandCannotRetargetReviewedAuthor(t *testing.T) {
 	}
 }
 
-func TestSaturnCommandTurnsGatewayRejectionIntoCorrectableObservation(t *testing.T) {
+func TestSaturnCommandDoesNotTreatUntypedGatewayErrorAsKnownRejection(t *testing.T) {
 	gateway := &runCommandGatewayStub{err: errors.New("command validation failed")}
 	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
 	tool := agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "weather"), Gateway: gateway}
 	result, err := tool.Execute(context.Background(), caller, json.RawMessage(`{"location":"Chisinau"}`))
-	if err != nil || !result.IsError || result.ErrorCode != "COMMAND_REJECTED" || gateway.calls != 1 {
+	if err != nil || !result.IsError || result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || result.EffectState != contract.EffectUnknown || gateway.calls != 1 {
 		t.Fatalf("result=%#v err=%v calls=%d", result, err, gateway.calls)
 	}
 }

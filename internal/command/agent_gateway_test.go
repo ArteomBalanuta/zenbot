@@ -73,9 +73,9 @@ func TestAgentCommandGatewayRejectsUnauthorizedUnknownAndSendFailure(t *testing.
 		wantStatus    commandgateway.OutcomeStatus
 		wantError     bool
 	}{
-		{"unknown", "totally_unknown", true, nil, "", true},
-		{"denied", "captcha", false, nil, "", true},
-		{"send", "ping", true, errors.New("send failed"), commandgateway.OutcomeRejected, false},
+		{"unknown", "totally_unknown", true, nil, commandgateway.OutcomeRejected, true},
+		{"denied", "captcha", false, nil, commandgateway.OutcomeRejected, true},
+		{"send", "ping", true, errors.New("send failed"), commandgateway.OutcomeUnknown, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}}, authorized: tc.authorized, sendErr: tc.sendErr}
@@ -110,6 +110,58 @@ func TestAgentCommandGatewayPreservesTypedModerationOperationsForSyntheticCaller
 	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "captcha", "on")
 	if err != nil || result.Status != commandgateway.OutcomeSucceeded || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 || len(e.raws) != 1 || e.raws[0] != `{"cmd":"enablecaptcha"}` || len(result.Messages) != 1 {
 		t.Fatalf("result=%#v raws=%#v messages=%#v err=%v", result, e.raws, result.Messages, err)
+	}
+}
+
+func TestAgentCommandGatewayRetainsDeliveredExplanationOnRejectedCommand(t *testing.T) {
+	e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{}}}
+	caller, _ := api.NewContextWithCapabilities("room", "moderator", "trip", "", false, []string{}, []api.Capability{api.ModerationCommands})
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "captcha", "invalid")
+	if err != nil || result.Status != commandgateway.OutcomeRejected || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 || len(result.Messages) != 1 {
+		t.Fatalf("rejected command lost its delivered explanation: result=%#v err=%v", result, err)
+	}
+	if len(e.raws) != 0 {
+		t.Fatalf("rejected captcha changed room state: %#v", e.raws)
+	}
+}
+
+type panicAuditGatewayEngine struct{ *gatewayEngine }
+
+func (*panicAuditGatewayEngine) LogCommand(context.Context, model.CommandAuditRecord) (int64, error) {
+	panic("audit unavailable")
+}
+
+type prefixReceiptEngine struct {
+	*gatewayEngine
+	prefix string
+}
+
+func (e *prefixReceiptEngine) UpdatePrefix(next string) (string, error) {
+	previous := e.prefix
+	e.prefix = next
+	return previous, nil
+}
+
+func TestAgentCommandGatewayRetainsPrefixMutationWhenReplyFails(t *testing.T) {
+	e := &prefixReceiptEngine{gatewayEngine: &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{}}, sendErr: errors.New("delivery failed")}, prefix: "!"}
+	caller, _ := api.NewContextWithCapabilities("room", "admin", "trip", "", false, []string{}, []api.Capability{api.AdminCommands})
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "prefix", "$prefix")
+	if err != nil || e.prefix != "$prefix" || !result.EffectsCommitted || result.Action == nil || result.Action.Count != 1 || result.Delivery != nil {
+		t.Fatalf("prefix mutation lost its receipt after failed reply: prefix=%q result=%#v err=%v", e.prefix, result, err)
+	}
+}
+
+func TestAgentCommandGatewayRetainsDeliveryWhenLaterCodePanics(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("gateway panic discarded committed delivery: %v", recovered)
+		}
+	}()
+	e := &panicAuditGatewayEngine{gatewayEngine: &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}}, authorized: true}}
+	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
+	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "ping", "")
+	if err != nil || result.Status != commandgateway.OutcomeUnknown || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 {
+		t.Fatalf("panic outcome lost its receipt: result=%#v err=%v", result, err)
 	}
 }
 
@@ -265,7 +317,7 @@ func TestAgentCommandGatewayReturnsSnapshotFailureInsteadOfEarlySuccess(t *testi
 
 	select {
 	case outcome := <-completed:
-		if outcome.err != nil || outcome.result.Status != commandgateway.OutcomeRejected || outcome.result.EffectsCommitted || outcome.result.Delivery != nil {
+		if outcome.err != nil || outcome.result.Status != commandgateway.OutcomeUnknown || outcome.result.EffectsCommitted || outcome.result.Delivery != nil {
 			t.Fatalf("outcome=%#v", outcome)
 		}
 	case <-time.After(time.Second):

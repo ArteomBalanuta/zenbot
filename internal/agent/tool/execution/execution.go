@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"zenbot/internal/agent/api"
@@ -24,6 +23,7 @@ type Call struct {
 func FromLLM(c llm.LlmToolCall) Call {
 	return Call{c.ID(), c.Name(), json.RawMessage(c.RawArguments())}
 }
+
 func Key(c Call) string { return c.Name + ":" + string(contract.CanonicalJSON(c.Arguments)) }
 
 func ValidateBatchIdentity(calls []Call) error {
@@ -44,97 +44,84 @@ func ValidateBatchIdentity(calls []Call) error {
 	return nil
 }
 
-type Ledger struct {
-	mu          sync.Mutex
-	seen        map[string]bool
-	counts      map[string]int
-	failures    map[string]int
-	successful  map[string]bool
-	limits      map[string]int
-	maxFailures int
-}
-
-func NewLedger(limits map[string]int, maxFailures int) *Ledger {
-	ownedLimits := make(map[string]int, len(limits))
-	for name, limit := range limits {
-		ownedLimits[name] = limit
-	}
-	return &Ledger{seen: map[string]bool{}, counts: map[string]int{}, failures: map[string]int{}, successful: map[string]bool{}, limits: ownedLimits, maxFailures: maxFailures}
-}
-func (l *Ledger) Reserve(k, n string) string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.seen[k] {
-		if lim := l.limits[n]; lim <= 0 || l.counts[n] < lim {
-			l.counts[n]++
-		}
-		return "DUPLICATE_TOOL_CALL"
-	}
-	if lim := l.limits[n]; lim > 0 && l.counts[n] >= lim {
-		return "TOOL_CALL_LIMIT_REACHED"
-	}
-	if l.failures[n] >= l.maxFailures && l.maxFailures > 0 {
-		return "TOOL_DISABLED"
-	}
-	l.seen[k] = true
-	l.counts[n]++
-	return ""
-}
-func (l *Ledger) Failure(n string) { l.mu.Lock(); l.failures[n]++; l.mu.Unlock() }
-func (l *Ledger) Success(n string) { l.mu.Lock(); l.successful[n] = true; l.mu.Unlock() }
-func (l *Ledger) Missing(prerequisites []string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, prerequisite := range prerequisites {
-		if !l.successful[prerequisite] {
-			return true
-		}
-	}
-	return false
-}
-func (l *Ledger) Available(name string) bool {
-	if l == nil {
-		return true
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if limit := l.limits[name]; limit > 0 && l.counts[name] >= limit {
-		return false
-	}
-	return l.maxFailures <= 0 || l.failures[name] < l.maxFailures
-}
-
-type Cancellation struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func NewCancellation(parent context.Context, deadline time.Time) Cancellation {
-	ctx, c := context.WithCancel(parent)
-	if !deadline.IsZero() {
-		var x context.CancelFunc
-		ctx, x = context.WithDeadline(ctx, deadline)
-		old := c
-		c = func() { x(); old() }
-	}
-	return Cancellation{ctx, c}
-}
-func (c Cancellation) Context() context.Context { return c.ctx }
-func (c Cancellation) Cancel()                  { c.cancel() }
-
 type Executor struct {
-	Registry       *tool.Registry
-	Ledger         *Ledger
+	Registry *tool.Registry
+	Ledger   *Ledger
+	// Exposed is the invocation's provider manifest. Nil uses registry policy;
+	// an empty nonnil map permits no model calls.
+	Exposed        map[string]bool
 	DefaultTimeout time.Duration
 }
 
+type preparedCall struct {
+	call       Call
+	tool       tool.Tool
+	descriptor contract.Descriptor
+	rejection  *contract.Result
+	admitted   bool
+}
+
+func notStarted(c Call, code, message string) contract.Result {
+	return contract.ActionErrorResult(c.ID, c.Name, code, message, contract.EffectNotStarted)
+}
+
+// prepare admits calls in source order before workers start. Validation
+// failures consume attempts, but not execution failure budgets.
+func (e *Executor) prepare(agent api.Context, c Call) preparedCall {
+	p := preparedCall{call: c}
+	reject := func(code, message string) preparedCall {
+		r := notStarted(c, code, message)
+		p.rejection = &r
+		return p
+	}
+	if err := ValidateBatchIdentity([]Call{c}); err != nil {
+		return reject("INVALID_TOOL_PROTOCOL", err.Error())
+	}
+	if e == nil || e.Registry == nil {
+		return reject("UNKNOWN_TOOL", "unknown tool; choose an available tool")
+	}
+	if !e.Registry.Allowed(c.Name) {
+		return reject("TOOL_NOT_ALLOWED", "tool is not allowed; choose an available tool")
+	}
+	registered, ok := e.Registry.Lookup(c.Name)
+	if !ok {
+		return reject("UNKNOWN_TOOL", "unknown tool; choose an available tool")
+	}
+	d, err := registered.Descriptor(agent)
+	if err != nil {
+		return reject("INVALID_TOOL_CONTRACT", "invalid tool contract; choose another tool")
+	}
+	p.tool, p.descriptor = registered, d
+	if e.Exposed != nil && !e.Exposed[c.Name] {
+		return reject("TOOL_NOT_ALLOWED", "tool is not in the current invocation's manifest; choose an available tool or explain the limitation")
+	}
+	if d.InternalFallback() {
+		return reject("TOOL_NOT_ALLOWED", "tool is not model-callable")
+	}
+	for _, capability := range d.RequiredCapabilities() {
+		if !agent.HasCapability(api.Capability(capability)) {
+			return reject("TOOL_NOT_AUTHORIZED", "tool is not authorized")
+		}
+	}
+	if e.Ledger != nil {
+		if code := e.Ledger.admit(c); code != "" {
+			return reject(code, "tool attempt was rejected by the request budget or call identity; use another available tool")
+		}
+		p.admitted = true
+	}
+	if err := contract.ValidateArguments(d.Parameters(), c.Arguments); err != nil {
+		return reject("INVALID_ARGUMENTS", err.Error())
+	}
+	return p
+}
+
 var errNilResult = errors.New("nil tool result")
+var errToolPanic = errors.New("tool execution panicked")
 
 func invokeDirect(t tool.Tool, ctx context.Context, agent api.Context, args json.RawMessage) (result contract.Result, err error) {
 	defer func() {
 		if recover() != nil {
-			result = contract.ErrorResult("", t.Name(), "TOOL_EXECUTION_FAILED", "tool execution failed")
-			err = nil
+			err = errToolPanic
 		}
 	}()
 	result, err = t.Execute(ctx, agent, args)
@@ -162,73 +149,46 @@ func invokeRead(t tool.Tool, ctx context.Context, agent api.Context, args json.R
 	}
 }
 
-func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (result contract.Result) {
+func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) contract.Result {
+	return e.executePrepared(ctx, agent, e.prepare(agent, c))
+}
+
+func (e *Executor) executePrepared(ctx context.Context, agent api.Context, p preparedCall) (result contract.Result) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	started := time.Now()
+	c, d := p.call, p.descriptor
+	started, invoked := time.Now(), false
 	observability.Info(ctx, "agent.tool.started", "tool", c.Name, "tool_call_id", c.ID)
 	defer func() {
+		result.CallID, result.ToolName = c.ID, c.Name
+		if e != nil && e.Ledger != nil && p.admitted {
+			e.Ledger.finish(c, d, result, invoked)
+		}
 		status := "success"
 		if result.IsError {
 			status = "error"
 		}
-		observability.Info(ctx, "agent.tool.completed",
-			"tool", c.Name,
-			"tool_call_id", c.ID,
-			"status", status,
-			"error_code", result.ErrorCode,
-			"duration_ms", time.Since(started).Milliseconds(),
-		)
+		observability.Info(ctx, "agent.tool.completed", "tool", c.Name, "tool_call_id", c.ID,
+			"status", status, "error_code", result.ErrorCode, "duration_ms", time.Since(started).Milliseconds())
 	}()
-	defer func() {
-		result.CallID = c.ID
-		result.ToolName = c.Name
-	}()
-	if ctx.Err() != nil {
+	if p.rejection != nil {
+		return *p.rejection
+	}
+	if err := ctx.Err(); err != nil {
 		code := "TOOL_BATCH_CANCELLED"
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) {
 			code = "TOOL_BATCH_DEADLINE"
 		}
-		return contract.ErrorResult(c.ID, c.Name, code, "tool batch execution cancelled")
-	}
-	if e.Registry == nil {
-		return contract.ErrorResult(c.ID, c.Name, "UNKNOWN_TOOL", "unknown tool")
-	}
-	if !e.Registry.Allowed(c.Name) {
-		return contract.ErrorResult(c.ID, c.Name, "TOOL_NOT_ALLOWED", "tool is not allowed")
-	}
-	t, ok := e.Registry.Lookup(c.Name)
-	if !ok {
-		return contract.ErrorResult(c.ID, c.Name, "UNKNOWN_TOOL", "unknown tool")
-	}
-	d, err := t.Descriptor(agent)
-	if err != nil {
-		return contract.ErrorResult(c.ID, c.Name, "INVALID_TOOL_CONTRACT", "invalid tool contract")
-	}
-	if d.InternalFallback() {
-		return contract.ErrorResult(c.ID, c.Name, "TOOL_NOT_ALLOWED", "tool is not model-callable")
-	}
-	for _, cap := range d.RequiredCapabilities() {
-		if !agent.HasCapability(api.Capability(cap)) {
-			return contract.ErrorResult(c.ID, c.Name, "TOOL_NOT_AUTHORIZED", "tool is not authorized")
-		}
+		return notStarted(c, code, "tool batch execution cancelled before this call started")
 	}
 	if e.Ledger != nil {
-		if code := e.Ledger.Reserve(Key(c), c.Name); code != "" {
-			e.Ledger.Failure(c.Name)
-			return contract.ErrorResult(c.ID, c.Name, code, "tool call rejected")
+		if missing := e.Ledger.missing(d.RequiredSuccessfulTools()); len(missing) > 0 {
+			return notStarted(c, "MISSING_PREREQUISITE", "required tools must succeed first: "+strings.Join(missing, ", ")+"; then retry this call")
 		}
-	}
-	if err := contract.ValidateArguments(d.Parameters(), c.Arguments); err != nil {
-		if e.Ledger != nil {
-			e.Ledger.Failure(c.Name)
+		if rejection := e.Ledger.start(c, d); rejection != nil {
+			return *rejection
 		}
-		return contract.ErrorResult(c.ID, c.Name, "INVALID_ARGUMENTS", err.Error())
-	}
-	if e.Ledger != nil && e.Ledger.Missing(d.RequiredSuccessfulTools()) {
-		e.Ledger.Failure(c.Name)
-		return contract.ErrorResult(c.ID, c.Name, "MISSING_PREREQUISITE", "required tool must succeed first")
 	}
 	timeout := d.Timeout()
 	if timeout <= 0 {
@@ -239,115 +199,76 @@ func (e *Executor) Execute(ctx context.Context, agent api.Context, c Call) (resu
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
+	invoked = true
 	var r contract.Result
+	var err error
 	if d.Effect() == contract.Action {
-		r, err = invokeDirect(t, ctx, agent, c.Arguments)
+		// Actions stop before returning; tool implementations own cooperative
+		// deadlines so cancellation cannot leave an unobserved background effect.
+		r, err = invokeDirect(p.tool, ctx, agent, c.Arguments)
 	} else {
-		r, err = invokeRead(t, ctx, agent, c.Arguments)
+		r, err = invokeRead(p.tool, ctx, agent, c.Arguments)
 	}
-	if r.IsError {
-		if e.Ledger != nil {
-			e.Ledger.Failure(c.Name)
+	if d.Effect() == contract.Action {
+		r = normalizeActionResult(r, err)
+		if r.IsError {
+			return r
 		}
-		return contract.ErrorResult(c.ID, c.Name, r.ErrorCode, r.Content)
-	}
-	if err != nil {
-		if e.Ledger != nil {
-			e.Ledger.Failure(c.Name)
-		}
-		if d.Effect() == contract.Action && ctx.Err() != nil {
-			return contract.ErrorResult(c.ID, c.Name, "ACTION_OUTCOME_UNKNOWN", "action outcome is unknown after cancellation")
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			return contract.ErrorResult(c.ID, c.Name, "TOOL_TIMEOUT", "tool timed out")
+	} else if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return r.WithError("TOOL_TIMEOUT", "tool timed out; a later attempt may retry")
 		}
 		if ctx.Err() != nil {
-			return contract.ErrorResult(c.ID, c.Name, "TOOL_BATCH_CANCELLED", "tool execution cancelled")
+			return r.WithError("TOOL_BATCH_CANCELLED", "tool execution cancelled")
 		}
-		return contract.ErrorResult(c.ID, c.Name, "TOOL_EXECUTION_FAILED", "tool execution failed")
+		return r.WithError("TOOL_EXECUTION_FAILED", "tool execution failed; a later attempt may retry")
+	} else if r.IsError {
+		return r.WithError(r.ErrorCode, r.Content)
 	}
 	if err := contract.ValidateResult(d.ResultSchema(), []byte(r.Content)); err != nil {
-		if e.Ledger != nil {
-			e.Ledger.Failure(c.Name)
-		}
-		return contract.ErrorResult(c.ID, c.Name, "INVALID_TOOL_RESULT", "tool result failed validation")
-	}
-	if d.Effect() == contract.Action && !r.EffectsCommitted {
-		if e.Ledger != nil {
-			e.Ledger.Failure(c.Name)
-		}
-		return contract.ErrorResult(c.ID, c.Name, "UNVERIFIED_ACTION_OUTCOME", "action completion was not verified")
+		return r.WithError("INVALID_TOOL_RESULT", "tool result failed validation")
 	}
 	if d.ResultMode() == contract.RoomDelivery && !r.VerifiedRoomDelivery() {
-		if e.Ledger != nil {
-			e.Ledger.Failure(c.Name)
-		}
-		return contract.ErrorResult(c.ID, c.Name, "UNVERIFIED_ROOM_DELIVERY", "room delivery was not verified")
-	}
-	if e.Ledger != nil {
-		e.Ledger.Success(c.Name)
+		return r.WithError("UNVERIFIED_ROOM_DELIVERY", "room delivery was not verified; inspect the effect receipt before taking further action")
 	}
 	return r
 }
-func Safe(d contract.Descriptor) bool {
-	return d.IsReadOnly() && d.Idempotent() && len(d.RequiredSuccessfulTools()) == 0 && len(d.ResourceWrites()) == 0 && len(d.ResourceReads()) > 0
-}
-func Conflict(a, b contract.Descriptor) bool {
-	if len(a.ResourceReads()) == 0 || len(b.ResourceReads()) == 0 {
-		return true
-	}
-	for _, x := range a.ResourceWrites() {
-		for _, y := range append(b.ResourceReads(), b.ResourceWrites()...) {
-			if x == y {
-				return true
+
+func normalizeActionResult(r contract.Result, err error) contract.Result {
+	// Positive receipts outrank an omitted state. Explicit UNKNOWN remains
+	// unknown even when some effects were observed.
+	if r.EffectsCommitted || r.ActionCount > 0 || r.DeliveryCount > 0 {
+		r.EffectsCommitted = true
+		if r.EffectState != contract.EffectUnknown {
+			if r.IsError || err != nil || r.EffectState == contract.EffectPartial {
+				r.EffectState = contract.EffectPartial
+			} else {
+				r.EffectState = contract.EffectCommitted
 			}
 		}
 	}
-	for _, x := range b.ResourceWrites() {
-		for _, y := range append(a.ResourceReads(), a.ResourceWrites()...) {
-			if x == y {
-				return true
-			}
+	if r.EffectState == contract.EffectUnknown || (r.EffectState == "" && !r.EffectsCommitted) {
+		r.EffectState = contract.EffectUnknown
+		message := "action outcome is unknown; actions are blocked for this turn. Read-only tools remain available to inspect its outcome"
+		if r.ErrorCode != "" && r.ErrorCode != "ACTION_OUTCOME_UNKNOWN" {
+			message += "; reported error: " + r.ErrorCode
 		}
-	}
-	return false
-}
-func ExecuteAll(ctx context.Context, e *Executor, agent api.Context, calls []Call) []contract.Result {
-	out := make([]contract.Result, len(calls))
-	if len(calls) == 0 {
-		return out
-	}
-	if e == nil || e.Registry == nil {
-		for index, call := range calls {
-			out[index] = contract.ErrorResult(call.ID, call.Name, "UNKNOWN_TOOL", "unknown tool")
+		if r.Content != "" {
+			message += "; " + r.Content
 		}
-		return out
+		return r.WithError("ACTION_OUTCOME_UNKNOWN", message)
 	}
-	stages, err := (BatchPlanner{Registry: e.Registry}).Plan(agent, calls)
 	if err != nil {
-		for index, call := range calls {
-			out[index] = contract.ErrorResult(call.ID, call.Name, "INVALID_TOOL_PROTOCOL", err.Error())
-		}
-		return out
+		return r.WithError("TOOL_EXECUTION_FAILED", "action failed; consult effect state and receipts before choosing the next call")
 	}
-	cursor := 0
-	for _, stage := range stages {
-		if !stage.Parallel {
-			out[cursor] = e.Execute(ctx, agent, stage.Calls[0])
-			cursor++
-			continue
-		}
-		var wg sync.WaitGroup
-		for offset, call := range stage.Calls {
-			index := cursor + offset
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				out[index] = e.Execute(ctx, agent, call)
-			}()
-		}
-		wg.Wait()
-		cursor += len(stage.Calls)
+	if r.IsError {
+		return r.WithError(r.ErrorCode, r.Content)
 	}
-	return out
+	if r.EffectState == contract.EffectPartial {
+		return r.WithError("PARTIAL_ACTION_OUTCOME", "the action completed only partially; "+r.Content)
+	}
+	if !r.EffectsCommitted {
+		return r.WithError("UNVERIFIED_ACTION_OUTCOME", "action completion was not verified")
+	}
+	return r
 }

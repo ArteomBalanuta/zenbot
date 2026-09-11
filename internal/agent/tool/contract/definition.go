@@ -135,11 +135,25 @@ func (d Definition) JSON() json.RawMessage {
 	return b
 }
 
+// EffectState records an action's effects independently from output validity.
+type EffectState string
+
+const (
+	EffectNotStarted   EffectState = "NOT_STARTED"
+	EffectNotCommitted EffectState = "NOT_COMMITTED"
+	EffectCommitted    EffectState = "COMMITTED"
+	EffectPartial      EffectState = "PARTIAL"
+	EffectUnknown      EffectState = "UNKNOWN"
+)
+
 type Result struct {
 	CallID, ToolName, Content, ErrorCode string
 	IsError                              bool
 	EffectsCommitted                     bool
 	DeliveryCount                        int
+	ActionCount                          int
+	EffectState                          EffectState
+	RelatedCallID                        string
 }
 
 func SuccessResult(call, tool string, value any) Result {
@@ -152,11 +166,13 @@ func SuccessResult(call, tool string, value any) Result {
 func ActionSuccessResult(call, tool string, value any, deliveryCount int) Result {
 	result := SuccessResult(call, tool, value)
 	result.EffectsCommitted = true
+	result.ActionCount = 1
 	result.DeliveryCount = deliveryCount
+	result.EffectState = EffectCommitted
 	return result
 }
 func (r Result) VerifiedRoomDelivery() bool {
-	return !r.IsError && r.EffectsCommitted && r.DeliveryCount > 0
+	return !r.IsError && r.EffectsCommitted && r.DeliveryCount > 0 && (r.EffectState == "" || r.EffectState == EffectCommitted)
 }
 func ErrorResult(call, tool, code, msg string) Result {
 	if code == "" {
@@ -164,6 +180,24 @@ func ErrorResult(call, tool, code, msg string) Result {
 	}
 	return Result{CallID: call, ToolName: tool, Content: msg, ErrorCode: code, IsError: true}
 }
+
+// ActionErrorResult declares whether a failed action produced effects.
+func ActionErrorResult(call, tool, code, msg string, state EffectState) Result {
+	result := ErrorResult(call, tool, code, msg)
+	result.EffectState = state
+	result.EffectsCommitted = state == EffectCommitted || state == EffectPartial
+	return result
+}
+
+// WithError retains effect receipts when an executed result fails validation.
+func (r Result) WithError(code, message string) Result {
+	if code == "" {
+		code = "TOOL_EXECUTION_FAILED"
+	}
+	r.IsError, r.ErrorCode, r.Content = true, code, message
+	return r
+}
+
 func (r Result) Envelope() json.RawMessage {
 	if r.IsError {
 		return ErrorEnvelope(r.ErrorCode, r.Content)

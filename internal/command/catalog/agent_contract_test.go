@@ -104,8 +104,8 @@ func TestConditionalAgentSchemaEncoderParity(t *testing.T) {
 			raw := json.RawMessage(tc.input)
 			schemaErr := agentcontract.ValidateArguments(tc.contract.Schema(), raw)
 			if !tc.valid {
-				if schemaErr == nil {
-					t.Fatalf("schema accepted encoder-invalid arguments %s", raw)
+				if _, err := tc.contract.Encode(raw); err == nil {
+					t.Fatalf("encoder accepted invalid arguments %s", raw)
 				}
 				return
 			}
@@ -117,6 +117,18 @@ func TestConditionalAgentSchemaEncoderParity(t *testing.T) {
 				t.Fatalf("encoded=%q err=%v, want %q", encoded, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestEveryAgentCommandExposesRootObjectParameters(t *testing.T) {
+	for _, definition := range AgentEntries() {
+		var schema struct {
+			Type       string                     `json:"type"`
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(definition.Agent.Arguments.Schema(), &schema); err != nil || schema.Type != "object" || schema.Properties == nil {
+			t.Errorf("%s must expose a plain root object: %s (error %v)", definition.Canonical, definition.Agent.Arguments.Schema(), err)
+		}
 	}
 }
 

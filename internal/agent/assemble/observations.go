@@ -1,8 +1,6 @@
 package assemble
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"sort"
@@ -12,17 +10,24 @@ import (
 	"zenbot/internal/agent/tool/contract"
 )
 
-// ObservationView is the bounded, provider-visible representation of one tool
-// result. Summary is text rather than RawMessage so untrusted result data can
-// never escape the surrounding JSON envelope.
+// ObservationView is a bounded projection. Data stays structured and is always
+// marshaled inside the envelope. Use read_tool_result(callId, ...) for omitted data.
 type ObservationView struct {
-	CallID         string `json:"callId"`
-	Tool           string `json:"tool"`
-	Status         string `json:"status"`
-	Summary        string `json:"summary"`
-	ReturnedCount  int    `json:"returnedCount"`
-	Truncated      bool   `json:"truncated"`
-	ContinuationID string `json:"continuationId,omitempty"`
+	CallID            string               `json:"callId"`
+	Tool              string               `json:"tool"`
+	Status            string               `json:"status"`
+	Data              json.RawMessage      `json:"data,omitempty"`
+	Code              string               `json:"code,omitempty"`
+	RelatedCallID     string               `json:"relatedCallId,omitempty"`
+	Message           string               `json:"message,omitempty"`
+	EffectsCommitted  bool                 `json:"effectsCommitted"`
+	EffectState       contract.EffectState `json:"effectState,omitempty"`
+	DeliveryCount     int                  `json:"deliveryCount"`
+	ActionCount       int                  `json:"actionCount,omitempty"`
+	ReturnedCount     int                  `json:"returnedCount,omitempty"`
+	Truncated         bool                 `json:"truncated"`
+	OmittedFields     []string             `json:"omittedFields,omitempty"`
+	OmittedFieldCount int                  `json:"omittedFieldCount,omitempty"`
 }
 
 func (view ObservationView) JSON() json.RawMessage {
@@ -30,13 +35,94 @@ func (view ObservationView) JSON() json.RawMessage {
 	return encoded
 }
 
-// ObservationStore owns complete request-local results. Only ObservationView
-// values are suitable for insertion into a provider transcript.
+// ObservationStore owns complete request-local evidence independently of its
+// disposable provider views and the projected transcript.
 type ObservationStore struct {
 	mu      sync.RWMutex
 	results map[string]contract.Result
 	views   map[string]ObservationView
+	calls   map[string]observationCall
 	order   []string
+}
+
+type observationCall struct {
+	tool      string
+	arguments json.RawMessage
+}
+
+// ObservationReceipt contains execution facts and a retrieval identity, never
+// a model-generated interpretation of what the user still needs.
+type ObservationReceipt struct {
+	CallID             string               `json:"callId"`
+	Tool               string               `json:"tool"`
+	Arguments          json.RawMessage      `json:"arguments,omitempty"`
+	ArgumentsTruncated bool                 `json:"argumentsTruncated,omitempty"`
+	Status             string               `json:"status"`
+	Code               string               `json:"code,omitempty"`
+	RelatedCallID      string               `json:"relatedCallId,omitempty"`
+	EffectsCommitted   bool                 `json:"effectsCommitted"`
+	EffectState        contract.EffectState `json:"effectState,omitempty"`
+	DeliveryCount      int                  `json:"deliveryCount"`
+	ActionCount        int                  `json:"actionCount,omitempty"`
+}
+
+func (store *ObservationStore) RecordCall(callID, toolName string, arguments json.RawMessage) {
+	if store == nil {
+		return
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.calls == nil {
+		store.calls = make(map[string]observationCall)
+	}
+	store.calls[callID] = observationCall{tool: toolName, arguments: append(json.RawMessage(nil), arguments...)}
+}
+
+func (store *ObservationStore) CallArguments(callID string) (json.RawMessage, bool) {
+	if store == nil {
+		return nil, false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	call, found := store.calls[callID]
+	return append(json.RawMessage(nil), call.arguments...), found
+}
+
+// Index preserves every result receipt while bounding argument previews. Full
+// result payloads are omitted so they do not duplicate the tool transcript.
+func (store *ObservationStore) Index(maxArgumentBytes int) []ObservationReceipt {
+	if store == nil {
+		return nil
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	index := make([]ObservationReceipt, 0, len(store.order))
+	for _, callID := range store.order {
+		view, call := store.views[callID], store.calls[callID]
+		receipt := ObservationReceipt{CallID: callID, Tool: view.Tool, Status: view.Status, Code: view.Code, RelatedCallID: view.RelatedCallID, EffectsCommitted: view.EffectsCommitted, EffectState: view.EffectState, DeliveryCount: view.DeliveryCount, ActionCount: view.ActionCount}
+		if receipt.Tool == "" {
+			receipt.Tool = call.tool
+		}
+		if len(call.arguments) > 0 {
+			if maxArgumentBytes <= 0 {
+				receipt.ArgumentsTruncated = true
+			} else if len(call.arguments) <= maxArgumentBytes && json.Valid(call.arguments) {
+				receipt.Arguments = append(json.RawMessage(nil), call.arguments...)
+			} else {
+				preview := []rune(string(call.arguments))
+				if len(preview) > maxArgumentBytes {
+					preview = preview[:maxArgumentBytes]
+				}
+				for len(preview) > 0 && len(string(preview)) > maxArgumentBytes {
+					preview = preview[:len(preview)-1]
+				}
+				receipt.Arguments, _ = json.Marshal(string(preview))
+				receipt.ArgumentsTruncated = len(string(preview)) < len(call.arguments)
+			}
+		}
+		index = append(index, receipt)
+	}
+	return index
 }
 
 func NewObservationStore() *ObservationStore {
@@ -44,11 +130,12 @@ func NewObservationStore() *ObservationStore {
 }
 
 func (store *ObservationStore) Store(result contract.Result, maxBytes int) ObservationView {
-	if store == nil {
-		store = NewObservationStore()
-	}
 	view := projectObservation(result, maxBytes)
+	if store == nil {
+		return view
+	}
 	store.mu.Lock()
+	defer store.mu.Unlock()
 	if store.results == nil {
 		store.results = make(map[string]contract.Result)
 	}
@@ -59,8 +146,7 @@ func (store *ObservationStore) Store(result contract.Result, maxBytes int) Obser
 		store.order = append(store.order, result.CallID)
 	}
 	store.results[result.CallID] = result
-	store.views[result.CallID] = view
-	store.mu.Unlock()
+	store.views[result.CallID] = cloneObservationView(view)
 	return view
 }
 
@@ -81,7 +167,7 @@ func (store *ObservationStore) View(callID string) (ObservationView, bool) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	view, found := store.views[callID]
-	return view, found
+	return cloneObservationView(view), found
 }
 
 func (store *ObservationStore) Views() []ObservationView {
@@ -92,28 +178,69 @@ func (store *ObservationStore) Views() []ObservationView {
 	defer store.mu.RUnlock()
 	views := make([]ObservationView, 0, len(store.order))
 	for _, callID := range store.order {
-		views = append(views, store.views[callID])
+		views = append(views, cloneObservationView(store.views[callID]))
 	}
 	return views
 }
 
+func cloneObservationView(view ObservationView) ObservationView {
+	view.Data = append(json.RawMessage(nil), view.Data...)
+	view.OmittedFields = append([]string(nil), view.OmittedFields...)
+	return view
+}
+
 func projectObservation(result contract.Result, maxBytes int) ObservationView {
 	if maxBytes <= 0 {
-		maxBytes = 8192
+		maxBytes = contract.DefaultMaxModelResultBytes
 	}
-	view := ObservationView{CallID: result.CallID, Tool: result.ToolName, Status: "success"}
+	view := ObservationView{CallID: result.CallID, Tool: result.ToolName, Status: "success", RelatedCallID: result.RelatedCallID, EffectsCommitted: result.EffectsCommitted, EffectState: result.EffectState, DeliveryCount: result.DeliveryCount, ActionCount: result.ActionCount}
 	if result.IsError {
-		view.Status = "error"
-		view.Summary = strings.TrimSpace(result.ErrorCode + ": " + result.Content)
-		return fitObservationText(view, maxBytes)
+		view.Status, view.Code, view.Message = "error", result.ErrorCode, result.Content
+		return fitObservationMessage(view, maxBytes)
 	}
 	value, valid := decodeObservationJSON(result.Content)
 	if !valid {
-		view.Status = "error"
-		view.Summary = "INVALID_TOOL_RESULT: tool result was not valid JSON"
-		return fitObservationText(view, maxBytes)
+		view.Status, view.Code, view.Message = "error", "INVALID_TOOL_RESULT", "Tool result was not valid JSON."
+		return fitObservationMessage(view, maxBytes)
 	}
-	return fitObservationValue(view, value, maxBytes)
+	view.ReturnedCount = observationCount(value)
+	view.Data, _ = json.Marshal(value)
+	if len(view.JSON()) <= maxBytes {
+		return view
+	}
+	view.Truncated = true
+	switch typed := value.(type) {
+	case []any:
+		view = fitObservationSamples(view, typed, nil, maxBytes)
+	case map[string]any:
+		if rows, ok := typed["rows"].([]any); ok {
+			fields := make(map[string]any, len(typed)-1)
+			for key, item := range typed {
+				if key != "rows" {
+					fields[key] = item
+				}
+			}
+			view = fitObservationSamples(view, rows, fields, maxBytes)
+		} else {
+			view = fitObservationObject(view, typed, maxBytes)
+		}
+	case string:
+		runes := []rune(typed)
+		low, high := 0, len(runes)
+		for low < high {
+			mid := (low + high + 1) / 2
+			view.Data, _ = json.Marshal(string(runes[:mid]))
+			if len(view.JSON()) <= maxBytes {
+				low = mid
+			} else {
+				high = mid - 1
+			}
+		}
+		view.Data, _ = json.Marshal(string(runes[:low]))
+	default:
+		view.Data = nil
+	}
+	return view
 }
 
 func decodeObservationJSON(content string) (any, bool) {
@@ -130,75 +257,51 @@ func decodeObservationJSON(content string) (any, bool) {
 	return value, true
 }
 
-func fitObservationValue(view ObservationView, value any, maxBytes int) ObservationView {
-	complete, _ := json.Marshal(value)
-	view.Summary = string(complete)
-	if len(view.JSON()) <= maxBytes {
-		return view
-	}
-	view.Truncated = true
-	view.ContinuationID = observationContinuationID(view.CallID)
-	switch typed := value.(type) {
+func observationCount(value any) int {
+	switch value := value.(type) {
 	case []any:
-		view.ReturnedCount = len(typed)
-		return fitObservationSamples(view, typed, nil, maxBytes)
+		return len(value)
 	case map[string]any:
-		if rows, ok := typed["rows"].([]any); ok {
-			view.ReturnedCount = len(rows)
-			fields := make(map[string]any, len(typed)-1)
-			for key, item := range typed {
-				if key != "rows" {
-					fields[key] = item
-				}
+		if count, ok := value["returnedCount"].(json.Number); ok {
+			if parsed, err := count.Int64(); err == nil && parsed >= 0 && parsed <= int64(^uint(0)>>1) {
+				return int(parsed)
 			}
-			return fitObservationSamples(view, rows, fields, maxBytes)
 		}
-		return fitObservationObject(view, typed, maxBytes)
-	case string:
-		return fitObservationTextValue(view, typed, maxBytes)
-	default:
-		return fitObservationText(view, maxBytes)
+		if rows, ok := value["rows"].([]any); ok {
+			return len(rows)
+		}
 	}
+	return 0
 }
 
 func fitObservationSamples(view ObservationView, rows []any, fields map[string]any, maxBytes int) ObservationView {
-	headCount, tailCount := minInt(4, len(rows)), minInt(4, len(rows))
+	headCount, tailCount := min(4, len(rows)), min(4, len(rows))
 	if headCount+tailCount > len(rows) {
 		tailCount = len(rows) - headCount
 	}
 	for {
-		summary := make(map[string]any, len(fields)+2)
-		keys := make([]string, 0, len(fields))
-		for key := range fields {
-			keys = append(keys, key)
+		sample := make(map[string]any, len(fields)+2)
+		for key, value := range fields {
+			sample[key] = value
 		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			summary[key] = fields[key]
-		}
-		summary["head"] = append([]any(nil), rows[:headCount]...)
-		summary["tail"] = append([]any(nil), rows[len(rows)-tailCount:]...)
-		encoded, _ := json.Marshal(summary)
-		view.Summary = string(encoded)
+		sample["head"], sample["tail"] = rows[:headCount], rows[len(rows)-tailCount:]
+		view.Data, _ = json.Marshal(sample)
 		if len(view.JSON()) <= maxBytes {
 			return view
 		}
 		if headCount > 1 || tailCount > 1 {
 			if headCount >= tailCount && headCount > 1 {
 				headCount--
-			} else if tailCount > 1 {
+			} else {
 				tailCount--
 			}
 			continue
 		}
-		if len(fields) > 0 {
-			delete(fields, keys[len(keys)-1])
-			continue
-		}
-		return fitObservationText(view, maxBytes)
+		return fitObservationObject(view, sample, maxBytes)
 	}
 }
 
+// An oversized field must not prevent later, smaller facts from being retained.
 func fitObservationObject(view ObservationView, object map[string]any, maxBytes int) ObservationView {
 	keys := make([]string, 0, len(object))
 	for key := range object {
@@ -206,71 +309,51 @@ func fitObservationObject(view ObservationView, object map[string]any, maxBytes 
 	}
 	sort.Strings(keys)
 	selected := make(map[string]any, len(keys))
+	view.Data = nil
 	for _, key := range keys {
 		selected[key] = object[key]
-		encoded, _ := json.Marshal(selected)
-		view.Summary = string(encoded)
+		view.Data, _ = json.Marshal(selected)
 		if len(view.JSON()) > maxBytes {
 			delete(selected, key)
-			break
+			view.OmittedFields = append(view.OmittedFields, key)
 		}
 	}
-	for len(selected) > 0 {
-		encoded, _ := json.Marshal(selected)
-		view.Summary = string(encoded)
-		if len(view.JSON()) <= maxBytes {
-			return view
-		}
-		for index := len(keys) - 1; index >= 0; index-- {
-			if _, found := selected[keys[index]]; found {
-				delete(selected, keys[index])
-				break
+	view.OmittedFieldCount = len(view.OmittedFields)
+	view.Data, _ = json.Marshal(selected)
+	if len(view.JSON()) > maxBytes {
+		view.OmittedFields = nil
+	}
+	for len(view.JSON()) > maxBytes && len(selected) > 0 {
+		largest, size := "", -1
+		for key, value := range selected {
+			encoded, _ := json.Marshal(value)
+			if len(encoded) > size || (len(encoded) == size && key > largest) {
+				largest, size = key, len(encoded)
 			}
 		}
+		delete(selected, largest)
+		view.OmittedFieldCount++
+		view.Data, _ = json.Marshal(selected)
 	}
-	return fitObservationText(view, maxBytes)
+	return view
 }
 
-func fitObservationTextValue(view ObservationView, value string, maxBytes int) ObservationView {
-	runes := []rune(value)
+func fitObservationMessage(view ObservationView, maxBytes int) ObservationView {
+	if len(view.JSON()) <= maxBytes {
+		return view
+	}
+	view.Truncated = true
+	runes := []rune(view.Message)
 	low, high := 0, len(runes)
 	for low < high {
 		mid := (low + high + 1) / 2
-		view.Summary = string(runes[:mid])
+		view.Message = string(runes[:mid])
 		if len(view.JSON()) <= maxBytes {
 			low = mid
 		} else {
 			high = mid - 1
 		}
 	}
-	view.Summary = string(runes[:low])
-	return fitObservationText(view, maxBytes)
-}
-
-func fitObservationText(view ObservationView, maxBytes int) ObservationView {
-	if len(view.JSON()) <= maxBytes {
-		return view
-	}
-	view.Truncated = true
-	if view.ContinuationID == "" {
-		view.ContinuationID = observationContinuationID(view.CallID)
-	}
-	runes := []rune(view.Summary)
-	for len(runes) > 0 && len(view.JSON()) > maxBytes {
-		runes = runes[:len(runes)-1]
-		view.Summary = string(runes)
-	}
+	view.Message = string(runes[:low])
 	return view
-}
-
-func observationContinuationID(callID string) string {
-	digest := sha256.Sum256([]byte(callID))
-	return hex.EncodeToString(digest[:8])
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
 }

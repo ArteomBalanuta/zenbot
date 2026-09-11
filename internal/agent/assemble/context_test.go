@@ -2,6 +2,7 @@ package assemble
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -31,6 +32,65 @@ func TestContextBudgeterKeepsCompleteUnitsAndValidJSON(t *testing.T) {
 	}
 	if !json.Valid([]byte(recent)) {
 		t.Fatal("test fixture is not valid JSON")
+	}
+}
+
+func TestThreeRoundsKeepOriginalRequestAndReceiptsWhenResultsArePruned(t *testing.T) {
+	store := NewObservationStore()
+	policy := llm.NewLlmMessage("system", "policy", nil, "")
+	newest := llm.NewLlmMessage("user", "Look up Alice, notify her, then check the weather and combine the outcomes.", nil, "")
+	messages := []Message{policy, newest}
+	for round, name := range []string{"lookup", "notify", "weather"} {
+		id := fmt.Sprintf("call-%d", round)
+		args := json.RawMessage(`{"target":"alice"}`)
+		store.RecordCall(id, name, args)
+		result := contract.SuccessResult(id, name, map[string]any{"value": strings.Repeat(name, 500)})
+		if name == "notify" {
+			result.EffectsCommitted, result.DeliveryCount = true, 1
+		}
+		view := store.Store(result, 2400)
+		messages = append(messages, llm.NewLlmMessage("assistant", nil, []llm.LlmToolCall{llm.NewLlmToolCall(id, name, string(args))}, ""), llm.NewLlmMessage("tool", string(view.JSON()), nil, id))
+	}
+	projection, err := ProjectTurn(messages, nil, store, ContextInput{RequiredPrefix: []Message{policy}, RequiredSuffix: []Message{newest}, MaxTokens: 350})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !projection.Pruned || projection.SerializedChars > projection.BudgetChars {
+		t.Fatalf("projection did not honor the forced budget: %#v", projection)
+	}
+	var index struct {
+		Results []struct {
+			CallID, Tool, Status string
+			Arguments            json.RawMessage
+			EffectsCommitted     bool
+			DeliveryCount        int
+		}
+		OmittedContextUnits int
+	}
+	foundRequest, foundIndex := false, false
+	for _, message := range projection.Messages {
+		if message.Content() == newest.Content() {
+			foundRequest = true
+		}
+		if strings.HasPrefix(message.Content(), "CURRENT_TURN_RESULTS_UNTRUSTED_DATA=") {
+			foundIndex = true
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(message.Content(), "CURRENT_TURN_RESULTS_UNTRUSTED_DATA=")), &index); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !foundRequest || !foundIndex || len(index.Results) != 3 || index.OmittedContextUnits == 0 {
+		t.Fatalf("request or execution evidence was lost: %#v", projection.Messages)
+	}
+	if index.Results[0].CallID != "call-0" || index.Results[0].Tool != "lookup" || string(index.Results[0].Arguments) != `{"target":"alice"}` {
+		t.Fatalf("early call identity or target was lost: %#v", index)
+	}
+	if !index.Results[1].EffectsCommitted || index.Results[1].DeliveryCount != 1 {
+		t.Fatalf("committed action receipt was lost: %#v", index.Results[1])
+	}
+	full, found := store.Full("call-0")
+	if !found || !strings.Contains(full.Content, strings.Repeat("lookup", 500)) {
+		t.Fatal("pruned original result is no longer retrievable")
 	}
 }
 
@@ -115,16 +175,16 @@ func TestProjectTurnPreservesNewestRequestAndAtomicBoundedObservation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !projection.Pruned || len(projection.Messages) != 4 {
+	if !projection.Pruned || len(projection.Messages) != 5 {
 		t.Fatalf("projection did not drop only old context: %#v", projection)
 	}
 	if projection.Messages[1].Content() != objective {
 		t.Fatalf("required newest request missing: %#v", projection.Messages)
 	}
-	if len(projection.Messages[2].ToolCalls()) != 1 || projection.Messages[3].ToolCallID() != "call-1" || !json.Valid([]byte(projection.Messages[3].Content())) {
+	if len(projection.Messages[3].ToolCalls()) != 1 || projection.Messages[4].ToolCallID() != "call-1" || !json.Valid([]byte(projection.Messages[4].Content())) {
 		t.Fatalf("tool protocol was split or observation invalid: %#v", projection.Messages)
 	}
-	if len(projection.Messages[3].Content()) > 300 || projection.Messages[3].Content() == string(result.Envelope()) {
+	if len(projection.Messages[4].Content()) > 300 || projection.Messages[4].Content() == string(result.Envelope()) {
 		t.Fatal("full observation leaked into projected transcript")
 	}
 }
@@ -143,5 +203,61 @@ func TestSplitTurnContextAnchorsNewestDuplicateAtLastOccurrence(t *testing.T) {
 	}, []Message{policy}, []Message{request})
 	if len(before) != 2 || len(after) != 1 || len(after[0].Messages) != 2 {
 		t.Fatalf("duplicate newest request anchored incorrectly: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestRequiredResultIndexShrinksArgumentsBeforeLosingUncertainReceipt(t *testing.T) {
+	store := NewObservationStore()
+	arguments := json.RawMessage(`{"body":"` + strings.Repeat("payload", 500) + `"}`)
+	store.RecordCall("uncertain", "notify", arguments)
+	result := contract.ActionErrorResult("uncertain", "notify", "ACTION_OUTCOME_UNKNOWN", "Connection ended after submission.", contract.EffectUnknown)
+	store.Store(result, 512)
+	policy := llm.NewLlmMessage("system", "policy", nil, "")
+	request := llm.NewLlmMessage("user", "Notify Alice and report the outcome.", nil, "")
+	projection, err := ProjectTurn([]Message{policy, request}, nil, store, ContextInput{RequiredPrefix: []Message{policy}, RequiredSuffix: []Message{request}, MaxTokens: 180})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.SerializedChars > projection.BudgetChars {
+		t.Fatalf("receipt index exceeded context: %#v", projection)
+	}
+	var payload resultIndexPayload
+	for _, message := range projection.Messages {
+		if strings.HasPrefix(message.Content(), resultIndexPrefix) {
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(message.Content(), resultIndexPrefix)), &payload); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(payload.Results) != 1 || payload.Results[0].CallID != "uncertain" || payload.Results[0].EffectState != contract.EffectUnknown || !payload.Results[0].ArgumentsTruncated {
+		t.Fatalf("argument preview displaced an uncertain action receipt: %#v", payload)
+	}
+	retained, found := store.CallArguments("uncertain")
+	if !found || string(retained) != string(arguments) {
+		t.Fatal("shrinking preview destroyed original arguments")
+	}
+}
+
+func TestCurrentRuntimeStatusSurvivesPruningAndRemainsLast(t *testing.T) {
+	policy := llm.NewLlmMessage("system", "policy", nil, "")
+	request := llm.NewLlmMessage("user", "Finish the original request.", nil, "")
+	status := llm.NewLlmMessage("user", `TOOL_LOOP_STATUS={"terminal":true,"remainingToolCalls":0}`, nil, "")
+	store := NewObservationStore()
+	store.Store(contract.ActionSuccessResult("sent", "notify", map[string]any{"value": strings.Repeat("x", 2000)}, 1), 512)
+	messages := []Message{policy, request,
+		llm.NewLlmMessage("assistant", nil, []llm.LlmToolCall{llm.NewLlmToolCall("sent", "notify", map[string]any{})}, ""),
+		llm.NewLlmMessage("tool", string(store.Views()[0].JSON()), nil, "sent"), status}
+	projection, err := ProjectTurn(messages, nil, store, ContextInput{RequiredPrefix: []Message{policy}, RequiredSuffix: []Message{request}, RequiredRuntime: []Message{status}, MaxTokens: 225})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, message := range projection.Messages {
+		if message.Content() == status.Content() {
+			count++
+		}
+	}
+	if count != 1 || projection.Messages[len(projection.Messages)-1].Content() != status.Content() || !projection.Pruned || projection.SerializedChars > projection.BudgetChars {
+		t.Fatalf("current runtime control was removed, duplicated, reordered or overflowed: %#v", projection)
 	}
 }

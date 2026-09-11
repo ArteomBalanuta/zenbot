@@ -237,33 +237,25 @@ func (entry ManifestEntry) Definition() Definition {
 // ProviderDefinition keeps the model-facing contract compact while preserving
 // the complete inspectable metadata in ManifestEntry.
 func (entry ManifestEntry) ProviderDefinition() Definition {
-	// Access is already caller-filtered and aliases are not callable function
-	// names, so neither belongs in the scarce provider-facing description.
-	header := []string{"I=" + entry.PrimaryIntent, "L=" + entry.Label}
-	if len(entry.Routing.Targets) > 0 {
-		header = append(header, "Targets="+strings.Join(entry.Routing.Targets, ","))
-	}
-	parts := []string{strings.Join(header, ";")}
-	if len(entry.Routing.UseWhen) == 0 {
-		parts = append(parts, entry.Description)
-	}
-	if len(entry.Routing.UseWhen) > 0 {
-		parts = append(parts, "Use: "+strings.Join(entry.Routing.UseWhen, " "))
-	}
-	if len(entry.WhenNotUse) > 0 {
-		parts = append(parts, "Avoid: "+strings.Join(entry.WhenNotUse, " "))
-	}
+	parts := []string{entry.Description}
+	parts = append(parts, entry.Routing.UseWhen...)
+	parts = append(parts, entry.WhenNotUse...)
 	if len(entry.Routing.Examples) > 0 {
-		parts = append(parts, "Args="+string(CanonicalJSON(entry.Routing.Examples[0].Arguments)))
+		example := entry.Routing.Examples[0]
+		parts = append(parts, "Example: "+example.Prompt+" => "+string(CanonicalJSON(example.Arguments))+".")
 	}
-	policy := string(entry.Effect) + "/" + string(entry.ResultMode)
-	if entry.Idempotent {
-		policy += "/IDEMPOTENT"
-	} else {
-		policy += "/SEQUENTIAL"
+	if len(entry.RequiredSuccessfulTools) > 0 {
+		parts = append(parts, "First call "+strings.Join(entry.RequiredSuccessfulTools, ", ")+" successfully.")
 	}
-	parts = append(parts, "P="+policy)
-	return Definition{Name: entry.Name, Description: strings.Join(parts, ";"), Parameters: clone(entry.Parameters)}
+	switch {
+	case entry.ResultMode == RoomDelivery:
+		parts = append(parts, "Executes and delivers output to the room.")
+	case entry.Effect == Action:
+		parts = append(parts, "Returns the action outcome without a separate room message.")
+	default:
+		parts = append(parts, "Read-only; returns data.")
+	}
+	return Definition{Name: entry.Name, Description: strings.Join(parts, " "), Parameters: clone(entry.Parameters)}
 }
 
 func (manifest Manifest) Definitions() []Definition {

@@ -9,7 +9,7 @@ import (
 	"zenbot/internal/agent/tool/contract"
 )
 
-func TestExecutorRejectsInvalidDuplicateLimitNilAndPanic(t *testing.T) {
+func TestExecutorRejectsInvalidArgumentsLimitNilAndPanic(t *testing.T) {
 	c := ctx(t)
 	mk := func(name string, fn func(context.Context) (contract.Result, error)) *fake {
 		return &fake{name: name, d: desc(t, name, contract.ReadOnly, []string{"r"}, nil, true, 0, nil), fn: fn}
@@ -33,11 +33,8 @@ func TestExecutorRejectsInvalidDuplicateLimitNilAndPanic(t *testing.T) {
 	if r := e.Execute(context.Background(), c, Call{"3", "invalid", json.RawMessage(`{"x":1}`)}); r.ErrorCode != "INVALID_ARGUMENTS" {
 		t.Fatalf("args=%s", r.ErrorCode)
 	}
-	if r := e.Execute(context.Background(), c, Call{"4", "nil", json.RawMessage(`{}`)}); r.ErrorCode != "DUPLICATE_TOOL_CALL" {
-		t.Fatalf("duplicate=%s", r.ErrorCode)
-	}
-	if Conflict(desc(t, "a", contract.ReadOnly, []string{"r"}, nil, true, 0, nil), desc(t, "b", contract.ReadOnly, []string{"r"}, nil, true, 0, nil)) {
-		t.Fatal("readers of same resource may run together")
+	if r := e.Execute(context.Background(), c, Call{"4", "nil", json.RawMessage(`{}`)}); r.ErrorCode != "TOOL_CALL_LIMIT_REACHED" {
+		t.Fatalf("limit=%s", r.ErrorCode)
 	}
 }
 
@@ -115,7 +112,7 @@ func TestExecutorChargesInvalidArgumentsAgainstPerToolCallBudget(t *testing.T) {
 	}
 }
 
-func TestExecutorChargesDuplicateCallsAgainstPerToolCallBudget(t *testing.T) {
+func TestExecutorChargesReadRefreshAgainstPerToolCallBudget(t *testing.T) {
 	c := ctx(t)
 	read := &fake{name: "read", d: desc(t, "read", contract.ReadOnly, []string{"r"}, nil, true, 0, nil), fn: func(context.Context) (contract.Result, error) {
 		return contract.Result{ToolName: "read", Content: `"ok"`}, nil
@@ -126,18 +123,18 @@ func TestExecutorChargesDuplicateCallsAgainstPerToolCallBudget(t *testing.T) {
 	if got := executor.Execute(context.Background(), c, Call{"first", read.Name(), json.RawMessage(`{}`)}); got.IsError {
 		t.Fatalf("first result=%#v", got)
 	}
-	if got := executor.Execute(context.Background(), c, Call{"duplicate", read.Name(), json.RawMessage(`{}`)}); got.ErrorCode != "DUPLICATE_TOOL_CALL" {
-		t.Fatalf("duplicate result=%#v", got)
+	if got := executor.Execute(context.Background(), c, Call{"refresh", read.Name(), json.RawMessage(`{}`)}); got.IsError {
+		t.Fatalf("refresh result=%#v", got)
 	}
-	if read.calls.Load() != 1 {
-		t.Fatalf("tool executions=%d, want 1", read.calls.Load())
+	if read.calls.Load() != 2 {
+		t.Fatalf("tool executions=%d, want 2", read.calls.Load())
 	}
 	if ledger.Available(read.Name()) {
-		t.Fatal("duplicate model attempt did not consume the per-tool call budget")
+		t.Fatal("read refresh did not consume the per-tool call budget")
 	}
 }
 
-func TestExecutorChargesMissingPrerequisitesAgainstFailureBudget(t *testing.T) {
+func TestExecutorKeepsPrerequisiteRejectionRecoverable(t *testing.T) {
 	c := ctx(t)
 	d, err := contract.NewDescriptor("dependent", "dependent", "description", "test", contract.AccessUser, contract.ReadOnly, contract.ModelData, contract.SchemaObject(nil, nil, false), nil, []string{"pre"}, true, 0, contract.SchemaString(), []string{"r"}, nil, []string{"never"})
 	if err != nil {
@@ -155,8 +152,8 @@ func TestExecutorChargesMissingPrerequisitesAgainstFailureBudget(t *testing.T) {
 	if dependent.calls.Load() != 0 {
 		t.Fatalf("tool executions=%d, want 0", dependent.calls.Load())
 	}
-	if ledger.Available(dependent.Name()) {
-		t.Fatal("missing prerequisite did not consume the failure budget")
+	if !ledger.Available(dependent.Name()) {
+		t.Fatal("missing prerequisite consumed an execution failure budget")
 	}
 }
 
@@ -169,7 +166,7 @@ func TestExecutorRejectsUnverifiedActionOutcome(t *testing.T) {
 	executor := &Executor{Registry: tool.NewRegistry([]tool.Tool{action}, []string{action.Name()}), Ledger: ledger}
 
 	got := executor.Execute(context.Background(), c, Call{"call", action.Name(), json.RawMessage(`{}`)})
-	if got.ErrorCode != "UNVERIFIED_ACTION_OUTCOME" {
+	if got.ErrorCode != "ACTION_OUTCOME_UNKNOWN" {
 		t.Fatalf("result=%#v", got)
 	}
 	if ledger.Available(action.Name()) {

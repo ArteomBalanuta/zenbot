@@ -27,7 +27,9 @@ type ActionReceipt struct {
 }
 
 type Execution struct {
-	Status           OutcomeStatus
+	Status OutcomeStatus
+	// EffectsCommitted records observed effects even when Status is rejected
+	// or unknown. It is not evidence that the whole requested command succeeded.
 	EffectsCommitted bool
 	Action           *ActionReceipt
 	Messages         []string

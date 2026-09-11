@@ -194,17 +194,17 @@ func TestOneOfValidationRequiresExactlyOneMatchingBranch(t *testing.T) {
 		{"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","const":"exact"},"target":{"type":"string"}},"required":["mode","target"]},
 		{"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","const":"multiple"},"targets":{"type":"array","items":{"type":"string"},"minItems":1}},"required":["mode","targets"]}
 	]}`)
-	if err := ValidateSchema(schema, true); err != nil {
+	if err := ValidateSchema(schema, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateArguments(schema, json.RawMessage(`{"mode":"exact","target":"alice"}`)); err != nil {
+	if err := ValidateResult(schema, json.RawMessage(`{"mode":"exact","target":"alice"}`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, arguments := range []string{
 		`{"mode":"contains","target":"alice"}`,
 		`{"mode":"exact","target":"alice","targets":["alice"]}`,
 	} {
-		if err := ValidateArguments(schema, json.RawMessage(arguments)); err == nil {
+		if err := ValidateResult(schema, json.RawMessage(arguments)); err == nil {
 			t.Fatalf("arguments %s did not match exactly one branch", arguments)
 		}
 	}

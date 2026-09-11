@@ -22,6 +22,12 @@ func TestDatabaseQueryConditionalBranchesRequireOnlyRelevantSelectors(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	var root struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(descriptor.Parameters(), &root); err != nil || root.Type != "object" {
+		t.Fatalf("database query must expose a plain root object: %s", descriptor.Parameters())
+	}
 	tests := []struct {
 		name  string
 		input string
@@ -31,9 +37,11 @@ func TestDatabaseQueryConditionalBranchesRequireOnlyRelevantSelectors(t *testing
 		{name: "message count rejects limit", input: `{"query":"message_count","limit":1}`},
 		{name: "registered count rejects room", input: `{"query":"registered_user_count","room":"programming"}`},
 		{name: "requester history with limit", input: `{"query":"recent_messages_for_requester","limit":10}`, valid: true},
+		{name: "requester history rejects room", input: `{"query":"recent_messages_for_requester","room":"lounge"}`},
 		{name: "requester history rejects trip override", input: `{"query":"recent_messages_for_requester","trip":"other"}`},
 		{name: "room history", input: `{"query":"recent_messages_for_room","room":"lounge","limit":10}`, valid: true},
 		{name: "room history requires room", input: `{"query":"recent_messages_for_room","limit":10}`},
+		{name: "room history requires nonblank room", input: `{"query":"recent_messages_for_room","room":" "}`},
 		{name: "room history rejects nick", input: `{"query":"recent_messages_for_room","room":"lounge","nick":"alice"}`},
 	}
 	for _, tc := range tests {
@@ -50,12 +58,9 @@ func TestDatabaseQueryConditionalBranchesRequireOnlyRelevantSelectors(t *testing
 				}
 				return
 			}
-			if schemaErr == nil {
-				t.Fatal("irrelevant or missing selector was accepted")
-			}
 			before := repository.calls
 			result, err := database.Execute(context.Background(), historyContext(t, "programming"), raw)
-			if err != nil || !result.IsError || result.ErrorCode != "INVALID_ARGUMENTS" || repository.calls != before {
+			if err != nil || !result.IsError || result.ErrorCode != "INVALID_ARGUMENTS" || repository.calls != before || strings.TrimSpace(result.Content) == "" {
 				t.Fatalf("result=%#v err=%v calls=%d/%d", result, err, before, repository.calls)
 			}
 		})

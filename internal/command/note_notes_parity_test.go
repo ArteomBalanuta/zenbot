@@ -52,10 +52,10 @@ func TestNoteAndSaveParityAliasesAndTripBoundary(t *testing.T) {
 	}
 
 	e.chats = nil
-	if got := executeNotesParityCommand(t, e, "note", "", " no trip"); got != model.SUCCESSFUL {
+	if got := executeNotesParityCommand(t, e, "note", "", " no trip"); got != model.FAILED {
 		t.Fatalf("no-trip status=%s", got)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "alice|note successfully saved!|false" {
+	if len(e.chats) != 1 || e.chats[0] != "alice|Set your trip before saving a note.|false" {
 		t.Fatalf("no-trip chats=%q", e.chats)
 	}
 	listed, err = e.bundle.Notes.List("")
