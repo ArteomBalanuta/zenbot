@@ -26,6 +26,34 @@ func verifiedCommandExecution(messages ...string) commandgateway.Execution {
 	}
 }
 
+func TestPublicHistoryAmbiguityPreservesReceiptsAndKnownStatus(t *testing.T) {
+	caller, _ := api.NewContext("room", "caller", "", "", false, nil)
+	for _, native := range []bool{true, false} {
+		for _, status := range []commandgateway.OutcomeStatus{"AMBIGUOUS", commandgateway.OutcomeUnknown} {
+			executed := verifiedCommandExecution("public output")
+			executed.Status = status
+			executed.Action.Count = 2
+			executed.DataObserved = true
+			executed.Data = json.RawMessage(`{"text":"public observation"}`)
+			gateway := &runCommandGatewayStub{result: executed, err: errors.New("ambiguous public history target raw diagnostic")}
+			var result contract.Result
+			var err error
+			if native {
+				result, err = (agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "lastonline"), Gateway: gateway}).Execute(context.Background(), caller, []byte(`{"nick":"target"}`))
+			} else {
+				result, err = (agenttool.RunCommand{Gateway: gateway}).Execute(context.Background(), caller, []byte(`{"command":"lastonline","arguments":"target"}`))
+			}
+			wantCode, wantState := "AMBIGUOUS_TARGET", contract.EffectPartial
+			if status == commandgateway.OutcomeUnknown {
+				wantCode, wantState = "ACTION_OUTCOME_UNKNOWN", contract.EffectUnknown
+			}
+			if err != nil || result.ErrorCode != wantCode || result.EffectState != wantState || !result.EffectsCommitted || result.ActionCount != 2 || result.DeliveryCount != 1 || !strings.Contains(string(result.ObservedData), "public observation") || strings.Contains(string(result.Envelope()), "raw diagnostic") {
+				t.Errorf("native=%v status=%v result=%+v err=%v", native, status, result, err)
+			}
+		}
+	}
+}
+
 type runCommandGatewayStub struct {
 	calls              int
 	command, arguments string

@@ -200,15 +200,15 @@ func TestTextObservationAuditSourceReadInventoryRunsOnceAndRetainsText(t *testin
 	}
 
 	queries := &lastOnlineCommandQueriesStub{record: repository.LastOnlineRecord{
-		Found:          true,
-		LastMessage:    sql.NullString{String: "hello", Valid: true},
-		LastSeenMillis: sql.NullInt64{Int64: 0, Valid: true},
+		Found:             true,
+		LastMessage:       sql.NullString{String: "hello", Valid: true},
+		LastMessageMillis: sql.NullInt64{Int64: 0, Valid: true},
 	}}
 	users := &commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{
 		Queries: queries,
 		Now:     func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) },
 	}}}
-	if got := executeTextObservationSource(t, users, "lastonline", "!lastonline merc", ""); !strings.Contains(got, "Last message: hello") || queries.calls != 1 {
+	if got := executeTextObservationSource(t, users, "lastonline", "!lastonline merc", ""); !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || queries.calls != 1 {
 		t.Fatalf("lastonline observation=%q calls=%d", got, queries.calls)
 	}
 	if got := executeTextObservationSource(t, users, "users", "!users", ""); !strings.Contains(got, "Users:") || queries.registeredCalls != 1 {
@@ -292,9 +292,9 @@ func TestTextObservationAuditCancellationAfterSourceSuccessKeepsTextWithoutDeliv
 	ctx, cancel := context.WithCancel(context.Background())
 	queries := &cancelAfterLastOnlineSuccess{
 		lastOnlineCommandQueriesStub: &lastOnlineCommandQueriesStub{record: repository.LastOnlineRecord{
-			Found:          true,
-			LastMessage:    sql.NullString{String: "completed source fact", Valid: true},
-			LastSeenMillis: sql.NullInt64{Int64: 0, Valid: true},
+			Found:             true,
+			LastMessage:       sql.NullString{String: "completed source fact", Valid: true},
+			LastMessageMillis: sql.NullInt64{Int64: 0, Valid: true},
 		}},
 		cancel: cancel,
 	}

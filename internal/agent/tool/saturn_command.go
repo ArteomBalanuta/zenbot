@@ -127,7 +127,7 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 		(execution.Action == nil || execution.Action.Count == 0) && (execution.Delivery == nil || execution.Delivery.Count == 0) {
 		return contract.ActionErrorResult("", t.Name(), "TOOL_BATCH_CANCELLED", "lifecycle request was cancelled before admission", contract.EffectNotStarted), nil
 	}
-	if err != nil && execution.Status != commandgateway.OutcomeRejected && execution.Status != commandgateway.OutcomeNotFound {
+	if err != nil && execution.Status != commandgateway.OutcomeRejected && execution.Status != commandgateway.OutcomeNotFound && execution.Status != commandgateway.OutcomeAmbiguous {
 		execution.Status = commandgateway.OutcomeUnknown
 	}
 	// Optional source facts must satisfy the closed command result contract on

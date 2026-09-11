@@ -10,25 +10,33 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ErrAmbiguousHistory means the exact nickname and trip match different public
+// observation row sets. Private rows must not contribute to this classification.
+var ErrAmbiguousHistory = errors.New("ambiguous public history")
+
 // RegisteredUser is the persisted trip/nick pair rendered by !users.
 type RegisteredUser struct {
 	Trip string
 	Name string
 }
 
-// LastOnlineRecord is the raw message-history state needed to render Saturn's
-// last-online reply. Invalid fields mean the corresponding query found no row.
+// LastOnlineRecord contains independent persisted public observations across
+// stored rooms. Invalid fields mean the corresponding fact was not observed;
+// neither a message nor a presence event proves current membership or a session.
 type LastOnlineRecord struct {
-	Found          bool
-	LastMessage    sql.NullString
-	LastSeenMillis sql.NullInt64
-	JoinedMillis   sql.NullInt64
+	Found              bool
+	LastMessage        sql.NullString
+	LastMessageMillis  sql.NullInt64
+	LastPresenceEvent  sql.NullString
+	LastPresenceMillis sql.NullInt64
 }
 
 // UserQueryRepository is the deliberately narrow persistence seam for the
 // Saturn users and nicks commands.
 type UserQueryRepository interface {
 	RegisteredUsers(context.Context) ([]RegisteredUser, error)
+	// NicksByTrip returns exact historical names publicly observed with an exact
+	// trip, latest first with a stable exact-name tie-break; it is not ownership.
 	NicksByTrip(context.Context, string) ([]string, error)
 	BasicUserData(context.Context, string, string) (string, error)
 	LastOnline(context.Context, string) (LastOnlineRecord, error)
@@ -40,15 +48,9 @@ type RecentPresenceRepository interface {
 	RecentPresenceNames(context.Context, string, string, int64, int) ([]string, error)
 }
 
-// LastSeen preserves observations rendered by Saturn's last-online command.
-type LastSeen struct {
-	Message  string
-	SeenAt   *int64
-	JoinedAt *int64
-}
-
+// LastSeenRepository keeps the legacy method name with the same public facts.
 type LastSeenRepository interface {
-	LastSeen(context.Context, string) (LastSeen, error)
+	LastSeen(context.Context, string) (LastOnlineRecord, error)
 }
 
 // IdentityRepository is the persistence seam for registration and message

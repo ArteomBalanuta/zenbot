@@ -3,12 +3,13 @@ package h2
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"zenbot/internal/repository"
 )
 
-func TestUserQueriesPreserveSaturnRowsAndTripNormalization(t *testing.T) {
+func TestUserQueriesSeparateRegisteredUsersAndExactObservedTrips(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	for _, statement := range []string{
@@ -35,16 +36,16 @@ func TestUserQueriesPreserveSaturnRowsAndTripNormalization(t *testing.T) {
 	if len(users) != len(wantUsers) || users[0] != wantUsers[0] || users[1] != wantUsers[1] {
 		t.Fatalf("users=%v, want %v", users, wantUsers)
 	}
-	nicks, err := d.NicksByTrip(ctx, "TRIP-A")
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, nick := range nicks {
-		seen[nick] = true
-	}
-	if len(nicks) != 2 || !seen["zeta"] || !seen["alpha"] {
-		t.Fatalf("nicks=%v, want distinct zeta and alpha", nicks)
+	for _, tc := range []struct {
+		trip string
+		want []string
+	}{
+		{"Trip-A", []string{"zeta"}}, {"trip-a", []string{"alpha", "zeta"}}, {"TRIP-A", nil},
+	} {
+		nicks, err := d.NicksByTrip(ctx, tc.trip)
+		if err != nil || !reflect.DeepEqual(nicks, tc.want) {
+			t.Fatalf("trip=%q nicks=%v want=%v err=%v", tc.trip, nicks, tc.want, err)
+		}
 	}
 }
 

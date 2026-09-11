@@ -161,11 +161,11 @@ func TestGroupA_NicksByTripContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := d.NicksByTrip(context.Background(), "TRIP-X")
+	got, err := d.NicksByTrip(context.Background(), "Trip-X")
 	if err != nil {
 		t.Fatalf("%s: %v", constant, err)
 	}
-	if len(got) != 2 {
+	if len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
 		t.Fatalf("distinct nicks=%v", got)
 	}
 	empty, err := d.NicksByTrip(context.Background(), "no-such-trip")

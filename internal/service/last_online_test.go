@@ -32,24 +32,26 @@ func (s *lastOnlineQueriesStub) LastOnline(_ context.Context, target string) (re
 	return s.record, s.err
 }
 
-func TestUserServiceLastOnlineRendersSaturnPayload(t *testing.T) {
-	queries := &lastOnlineQueriesStub{record: repository.LastOnlineRecord{
-		Found:          true,
-		LastMessage:    sql.NullString{String: "quote \" slash \\ newline\n<>&\x01", Valid: true},
-		LastSeenMillis: sql.NullInt64{Int64: 0, Valid: true},
-		JoinedMillis:   sql.NullInt64{Int64: 12 * 60 * 60 * 1000, Valid: true},
-	}}
-	service := UserService{Queries: queries, Now: func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }}
+func (s *lastOnlineQueriesStub) LastSeen(ctx context.Context, target string) (repository.LastOnlineRecord, error) {
+	return s.LastOnline(ctx, target)
+}
 
-	got, err := service.LastOnline(context.Background(), "merc")
-	if err != nil {
-		t.Fatal(err)
+func TestUserServiceLastOnlineRendersIndependentPublicFacts(t *testing.T) {
+	queries := &lastOnlineQueriesStub{record: repository.LastOnlineRecord{
+		Found:              true,
+		LastMessage:        sql.NullString{String: "quote \" slash \\ newline\n<>&\x01", Valid: true},
+		LastMessageMillis:  sql.NullInt64{Int64: 0, Valid: true},
+		LastPresenceMillis: sql.NullInt64{Int64: 12 * 60 * 60 * 1000, Valid: true},
+		LastPresenceEvent:  sql.NullString{String: "LEFT", Valid: true},
+	}}
+	want := `\n Nick|Trip: merc\n Last observed: Thu, 1 Jan 1970 12:00:00 GMT\n Last presence event: LEFT at Thu, 1 Jan 1970 12:00:00 GMT\n Last public message: Thu, 1 Jan 1970 00:00:00 GMT — quote \" slash \\ newline\n<>&\u0001\n`
+	for _, service := range []UserService{{Queries: queries}, {LastSeen: queries}} {
+		got, err := service.LastOnline(context.Background(), "merc")
+		if err != nil || got != want {
+			t.Fatalf("payload=%q want=%q err=%v", got, want, err)
+		}
 	}
-	want := `\n Nick|Trip: merc\n Joined: Thu, 1 Jan 1970 12:00:00 GMT\n Last seen: Thu, 1 Jan 1970 00:00:00 GMT\n Seen active: 1 days, 0 hours, 0 minutes, 0 seconds ago.\n Session duration: 0 days, 12 hours, 0 minutes, 0 seconds \n Last message: quote \" slash \\ newline\n<>&\u0001\n`
-	if got != want {
-		t.Fatalf("payload=%q, want %q", got, want)
-	}
-	if queries.calls != 1 || queries.target != "merc" {
+	if queries.calls != 2 || queries.target != "merc" {
 		t.Fatalf("queries calls=%d target=%q", queries.calls, queries.target)
 	}
 }
@@ -63,17 +65,18 @@ func TestUserServiceLastOnlineReturnsNotFoundForMissingRows(t *testing.T) {
 	}
 }
 
-func TestUserServiceLastOnlineLeavesSessionFieldsDefaultWithoutLastMessage(t *testing.T) {
+func TestUserServiceLastOnlineRendersPresenceWithoutMessage(t *testing.T) {
 	service := UserService{Queries: &lastOnlineQueriesStub{record: repository.LastOnlineRecord{
-		Found:        true,
-		JoinedMillis: sql.NullInt64{Int64: 0, Valid: true},
+		Found:              true,
+		LastPresenceMillis: sql.NullInt64{Int64: 0, Valid: true},
+		LastPresenceEvent:  sql.NullString{String: "JOINED", Valid: true},
 	}}, Now: func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }}
 
 	got, err := service.LastOnline(context.Background(), "join-only")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `\n Nick|Trip: join-only\n Joined:  - \n Last seen:  - \n Seen active:  -  ago.\n Session duration:  -  \n Last message:  - \n`
+	want := `\n Nick|Trip: join-only\n Last observed: Thu, 1 Jan 1970 00:00:00 GMT\n Last presence event: JOINED at Thu, 1 Jan 1970 00:00:00 GMT\n Last public message:  - \n`
 	if got != want {
 		t.Fatalf("payload=%q, want %q", got, want)
 	}

@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -58,12 +59,12 @@ func (r *selectionQueries) LastOnline(context.Context, string) (repository.LastO
 
 type selectionLastSeen struct{ calls int }
 
-func (r *selectionLastSeen) LastSeen(context.Context, string) (repository.LastSeen, error) {
+func (r *selectionLastSeen) LastSeen(context.Context, string) (repository.LastOnlineRecord, error) {
 	if r == nil {
-		return repository.LastSeen{}, errSelectedNilDependency
+		return repository.LastOnlineRecord{}, errSelectedNilDependency
 	}
 	r.calls++
-	return repository.LastSeen{Message: "fallback-message"}, nil
+	return repository.LastOnlineRecord{Found: true, LastMessage: sql.NullString{String: "fallback-message", Valid: true}, LastMessageMillis: sql.NullInt64{Int64: 0, Valid: true}}, nil
 }
 
 func selectionFixture(canonical, mode string, preferredErr error) (*service.UserService, func() int, string, string) {

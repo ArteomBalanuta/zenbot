@@ -103,15 +103,8 @@ func (d *Database) RegisterTripByName(ctx context.Context, name, trip string) er
 	})
 }
 
-func (d *Database) LastSeen(ctx context.Context, target string) (repository.LastSeen, error) {
-	var out repository.LastSeen
-	if err := d.DB.QueryRowContext(ctx, "SELECT message,created_on FROM messages WHERE (name=$1 OR trip=$2) AND visibility='PUBLIC' AND message NOT IN ('LEFT','JOINED') ORDER BY created_on DESC,id DESC LIMIT 1", target, target).Scan(&out.Message, &out.SeenAt); err != nil && err != sql.ErrNoRows {
-		return out, err
-	}
-	if err := d.DB.QueryRowContext(ctx, "SELECT created_on FROM messages WHERE (name=$1 OR trip=$2) AND message='JOINED' ORDER BY created_on DESC,id DESC LIMIT 1", target, target).Scan(&out.JoinedAt); err != nil && err != sql.ErrNoRows {
-		return out, err
-	}
-	return out, nil
+func (d *Database) LastSeen(ctx context.Context, target string) (repository.LastOnlineRecord, error) {
+	return d.LastOnline(ctx, target)
 }
 
 func (d *Database) LastMessages(ctx context.Context, name, trip string, count int) ([]model.Message, error) {

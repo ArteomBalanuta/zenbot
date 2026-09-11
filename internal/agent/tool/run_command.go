@@ -72,7 +72,7 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author", contract.EffectNotStarted), nil
 	}
 	executed, err := t.Gateway.Execute(ctx, caller, name, arguments)
-	if err != nil && executed.Status != commandgateway.OutcomeRejected && executed.Status != commandgateway.OutcomeNotFound {
+	if err != nil && executed.Status != commandgateway.OutcomeRejected && executed.Status != commandgateway.OutcomeNotFound && executed.Status != commandgateway.OutcomeAmbiguous {
 		executed.Status = commandgateway.OutcomeUnknown
 	}
 	definition, _ := commandcatalog.AgentEntryByAlias(name)
@@ -128,6 +128,8 @@ func commandExecutionFailure(toolName string, execution commandgateway.Execution
 		return failure("ACTION_OUTCOME_UNKNOWN", "action outcome is unknown; do not repeat it", contract.EffectUnknown)
 	case commandgateway.OutcomeNotFound:
 		return failure("NOT_FOUND", "requested record was not found; inspect the target or choose another available source", state)
+	case commandgateway.OutcomeAmbiguous:
+		return failure("AMBIGUOUS_TARGET", "public nickname and trip matches identify different observation sets; inspect the exact target or use nicks to resolve a trip's observed names; do not choose an identity arbitrarily", state)
 	case commandgateway.OutcomeSucceeded:
 		if !execution.EffectsCommitted || execution.Action == nil || execution.Action.Count <= 0 {
 			return failure("UNVERIFIED_ACTION_OUTCOME", "command completion was not verified", contract.EffectUnknown)

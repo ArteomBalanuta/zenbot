@@ -143,6 +143,9 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		if errors.Is(err, repository.ErrNotFound) {
 			return CommandExecution{Status: commandgateway.OutcomeNotFound}, nil
 		}
+		if errors.Is(err, repository.ErrAmbiguousHistory) {
+			return CommandExecution{Status: commandgateway.OutcomeAmbiguous}, nil
+		}
 		return CommandExecution{Status: commandgateway.OutcomeUnknown}, nil
 	}
 	if status != model.SUCCESSFUL {

@@ -13,6 +13,7 @@ const (
 	OutcomeSucceeded OutcomeStatus = "SUCCEEDED"
 	OutcomeRejected  OutcomeStatus = "REJECTED"
 	OutcomeNotFound  OutcomeStatus = "NOT_FOUND"
+	OutcomeAmbiguous OutcomeStatus = "AMBIGUOUS"
 	OutcomeUnknown   OutcomeStatus = "UNKNOWN"
 )
 

@@ -43,9 +43,9 @@ func (s *lastOnlineCommandQueriesStub) LastOnline(_ context.Context, target stri
 
 func TestLastOnlineCommandUsesFirstNormalizedArgumentAndWhisper(t *testing.T) {
 	queries := &lastOnlineCommandQueriesStub{record: repository.LastOnlineRecord{
-		Found:          true,
-		LastMessage:    sql.NullString{String: "hello", Valid: true},
-		LastSeenMillis: sql.NullInt64{Int64: 0, Valid: true},
+		Found:             true,
+		LastMessage:       sql.NullString{String: "hello", Valid: true},
+		LastMessageMillis: sql.NullInt64{Int64: 0, Valid: true},
 	}}
 	engine := &commandEngineStub{users: map[string]*model.User{"alice": {Name: "alice"}}, bundle: &service.Bundle{Users: &service.UserService{Queries: queries, Now: func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }}}}
 	definition, ok := commandDefinitionFor("lastseen")
@@ -59,7 +59,7 @@ func TestLastOnlineCommandUsesFirstNormalizedArgumentAndWhisper(t *testing.T) {
 	if queries.calls != 1 || queries.target != "merc" {
 		t.Fatalf("calls=%d target=%q", queries.calls, queries.target)
 	}
-	if len(engine.chats) != 1 || engine.chats[0] != "alice|\\n Nick|Trip: merc\\n Joined:  - \\n Last seen: Thu, 1 Jan 1970 00:00:00 GMT\\n Seen active: 1 days, 0 hours, 0 minutes, 0 seconds ago.\\n Session duration:  -  \\n Last message: hello\\n|true" {
+	if len(engine.chats) != 1 || engine.chats[0] != "alice|\\n Nick|Trip: merc\\n Last observed: Thu, 1 Jan 1970 00:00:00 GMT\\n Last presence event:  - \\n Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello\\n|true" {
 		t.Fatalf("chats=%v", engine.chats)
 	}
 }
@@ -130,7 +130,7 @@ func TestLastOnlineAliasesDispatchAgainstRealH2AndRequireQueries(t *testing.T) {
 			t.Fatal(err)
 		}
 		listener.NewUserChatListener(engine).Notify(string(payload))
-		if len(engine.chats) != 1 || !contains(engine.chats[0], "\\n Nick|Trip: merc\\n") || !contains(engine.chats[0], "Last message: hello") {
+		if len(engine.chats) != 1 || !contains(engine.chats[0], "\\n Nick|Trip: merc\\n") || !contains(engine.chats[0], "Last public message: Thu, 1 Jan 1970 00:00:02 GMT — hello") {
 			t.Fatalf("%s chats=%v", alias, engine.chats)
 		}
 	}

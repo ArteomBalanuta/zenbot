@@ -11,16 +11,36 @@ import (
 )
 
 const (
-	selectRegisteredUsers     = `select distinct t.trip,n.name from trip_names tn inner join names n on tn.name_id=n.id inner join trips t on tn.trip_id=t.id order by n.name desc`
-	selectNicksByTrip         = `SELECT DISTINCT name FROM messages WHERE LOWER(trip)=$1`
+	selectRegisteredUsers = `select distinct t.trip,n.name from trip_names tn inner join names n on tn.name_id=n.id inner join trips t on tn.trip_id=t.id order by n.name desc`
+	selectNicksByTrip     = `SELECT name FROM (
+		SELECT name, created_on FROM messages WHERE trip = $1 AND visibility = 'PUBLIC'
+		UNION ALL
+		SELECT name, created_on FROM user_presence_log WHERE trip = $1 AND LOWER(event_type) IN ('joined', 'left')
+	) observations WHERE name IS NOT NULL AND TRIM(name) <> ''
+	GROUP BY name ORDER BY MAX(created_on) DESC, name ASC`
 	selectBasicUserDataByHash = `select distinct hash,name from messages where hash=$1 limit 30`
 	selectBasicUserDataByTrip = `select distinct hash,name from messages where trip=$1 limit 30`
-	selectLastOnline          = `SELECT message,created_on FROM messages WHERE (name = $1 or trip = $2) and visibility = 'PUBLIC' and (message not in ('LEFT','JOINED')) order by created_on desc limit 1`
-	selectSessionJoined       = `SELECT created_on FROM (
-		SELECT created_on FROM user_presence_log WHERE (name = $1 OR trip = $2) AND LOWER(event_type) = 'joined'
-		UNION ALL
-		SELECT created_on FROM messages WHERE (name = $1 OR trip = $2) AND message = 'JOINED'
-	) session_joins ORDER BY created_on DESC LIMIT 1`
+	// One statement keeps ambiguity detection and both facts on the same read.
+	// Source rank breaks equal timestamps deterministically, not causally; ids
+	// only order rows within the same source table.
+	selectLastOnline = `SELECT message, created_on, event_type, name_match, trip_match, differing FROM (
+		SELECT observations.*,
+			MAX(CASE WHEN name = $1 THEN 1 ELSE 0 END) OVER () AS name_match,
+			MAX(CASE WHEN trip = $1 THEN 1 ELSE 0 END) OVER () AS trip_match,
+			MAX(CASE WHEN name = $1 AND trip = $1 THEN 0 ELSE 1 END) OVER () AS differing,
+			ROW_NUMBER() OVER (
+				PARTITION BY CASE WHEN event_type IS NOT NULL THEN 1 WHEN message IS NOT NULL THEN 0 ELSE 2 END
+				ORDER BY created_on DESC, source_rank DESC, id DESC, event_type DESC
+			) AS fact_rank
+		FROM (
+			SELECT id, name, trip, message, created_on, 0 AS source_rank,
+				CASE WHEN message IN ('JOINED', 'LEFT') THEN message ELSE NULL END AS event_type
+			FROM messages WHERE visibility = 'PUBLIC'
+			UNION ALL
+			SELECT id, name, trip, CAST(NULL AS VARCHAR), created_on, 1 AS source_rank, UPPER(event_type)
+			FROM user_presence_log WHERE LOWER(event_type) IN ('joined', 'left')
+		) observations WHERE name = $1 OR trip = $1
+	) ranked WHERE fact_rank = 1`
 	selectUserTrips           = `SELECT trip FROM trips WHERE type = 'USER';`
 	selectRecentPresenceNames = `SELECT name, MAX(created_on) AS last_seen FROM (
 		SELECT name, created_on FROM user_presence_log
@@ -51,7 +71,7 @@ func (d *Database) RegisteredUsers(ctx context.Context) ([]repository.Registered
 }
 
 func (d *Database) NicksByTrip(ctx context.Context, trip string) ([]string, error) {
-	rows, err := d.DB.QueryContext(ctx, selectNicksByTrip, strings.ToLower(trip))
+	rows, err := d.DB.QueryContext(ctx, selectNicksByTrip, trip)
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +81,9 @@ func (d *Database) NicksByTrip(ctx context.Context, trip string) ([]string, erro
 		var nick string
 		if err := rows.Scan(&nick); err != nil {
 			return nil, err
+		}
+		if strings.TrimSpace(nick) == "" {
+			continue
 		}
 		nicks = append(nicks, nick)
 	}
@@ -111,19 +134,31 @@ func (d *Database) RecentPresenceNames(ctx context.Context, hash, trip string, a
 
 func (d *Database) LastOnline(ctx context.Context, target string) (repository.LastOnlineRecord, error) {
 	var record repository.LastOnlineRecord
-	if err := d.DB.QueryRowContext(ctx, selectLastOnline, target, target).Scan(&record.LastMessage, &record.LastSeenMillis); err == sql.ErrNoRows {
-		return record, nil
-	} else if err != nil {
+	rows, err := d.DB.QueryContext(ctx, selectLastOnline, target)
+	if err != nil {
 		return repository.LastOnlineRecord{}, err
 	}
-	record.Found = true
-	// Saturn looks up the current session only after finding a last-seen row.
-	if !record.LastSeenMillis.Valid {
-		return record, nil
+	defer rows.Close()
+	for rows.Next() {
+		var message, event sql.NullString
+		var timestamp sql.NullInt64
+		var nameMatch, tripMatch, differing int
+		if err := rows.Scan(&message, &timestamp, &event, &nameMatch, &tripMatch, &differing); err != nil {
+			return repository.LastOnlineRecord{}, err
+		}
+		if nameMatch != 0 && tripMatch != 0 && differing != 0 {
+			return repository.LastOnlineRecord{}, fmt.Errorf("%w target %q", repository.ErrAmbiguousHistory, target)
+		}
+		if event.Valid {
+			record.LastPresenceEvent, record.LastPresenceMillis = event, timestamp
+		} else if message.Valid {
+			record.LastMessage, record.LastMessageMillis = message, timestamp
+		}
 	}
-	if err := d.DB.QueryRowContext(ctx, selectSessionJoined, target, target).Scan(&record.JoinedMillis); err != nil && err != sql.ErrNoRows {
+	if err := rows.Err(); err != nil {
 		return repository.LastOnlineRecord{}, err
 	}
+	record.Found = record.LastMessageMillis.Valid || record.LastPresenceMillis.Valid
 	return record, nil
 }
 

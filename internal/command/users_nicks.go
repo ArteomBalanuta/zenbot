@@ -50,7 +50,7 @@ func (c *nicksCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	a := args(c.message)
-	if len(a) == 0 || strings.TrimSpace(a[0]) == "" {
+	if len(a) != 1 || strings.TrimSpace(a[0]) == "" {
 		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"t2n QLnV66"); err != nil {
 			return model.FAILED, err
 		}

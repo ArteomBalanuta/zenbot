@@ -55,40 +55,48 @@ func (s *UserService) LastOnline(ctx context.Context, target string) (string, er
 	if s == nil {
 		return "", fmt.Errorf("last-online persistence unavailable")
 	}
-	if !common.DependencyConfigured(s.Queries) {
-		return s.lastOnlineFromLastSeen(ctx, target)
+	var record repository.LastOnlineRecord
+	var err error
+	switch {
+	case common.DependencyConfigured(s.Queries):
+		record, err = s.Queries.LastOnline(ctx, target)
+	case common.DependencyConfigured(s.LastSeen):
+		record, err = s.LastSeen.LastSeen(ctx, target)
+	default:
+		return "", fmt.Errorf("last-online persistence unavailable")
 	}
-	record, err := s.Queries.LastOnline(ctx, target)
 	if err != nil {
 		return "", err
 	}
 	if !record.Found {
 		return "", repository.ErrNotFound
 	}
-	now := time.Now().UTC()
-	if s.Now != nil {
-		now = s.Now().UTC()
+	lastObserved, presence, message := " - ", " - ", " - "
+	observedMillis := record.LastMessageMillis
+	if record.LastPresenceMillis.Valid && (!observedMillis.Valid || record.LastPresenceMillis.Int64 > observedMillis.Int64) {
+		observedMillis = record.LastPresenceMillis
 	}
-	joined, lastSeen, seenActive, sessionDuration, lastMessage := " - ", " - ", " - ", " - ", " - "
-	if record.LastSeenMillis.Valid {
-		lastSeen, err = util.FormatRFC1123(record.LastSeenMillis.Int64, util.UnitMilliseconds, "UTC")
+	if observedMillis.Valid {
+		lastObserved, err = util.FormatRFC1123(observedMillis.Int64, util.UnitMilliseconds, "UTC")
 		if err != nil {
 			return "", err
 		}
-		seenActive = util.Difference(now, time.UnixMilli(record.LastSeenMillis.Int64).UTC())
 	}
-	if record.LastMessage.Valid {
-		lastMessage = escapeJSON(record.LastMessage.String)
-	}
-	// Saturn only renders session data when its last-seen lookup returned a row.
-	if record.LastSeenMillis.Valid && record.JoinedMillis.Valid {
-		joined, err = util.FormatRFC1123(record.JoinedMillis.Int64, util.UnitMilliseconds, "UTC")
+	if record.LastPresenceMillis.Valid && record.LastPresenceEvent.Valid {
+		stamp, err := util.FormatRFC1123(record.LastPresenceMillis.Int64, util.UnitMilliseconds, "UTC")
 		if err != nil {
 			return "", err
 		}
-		sessionDuration = util.Difference(now, time.UnixMilli(record.JoinedMillis.Int64).UTC())
+		presence = record.LastPresenceEvent.String + " at " + stamp
 	}
-	return fmt.Sprintf("\\n Nick|Trip: %s\\n Joined: %s\\n Last seen: %s\\n Seen active: %s ago.\\n Session duration: %s \\n Last message: %s\\n", target, joined, lastSeen, seenActive, sessionDuration, lastMessage), nil
+	if record.LastMessageMillis.Valid && record.LastMessage.Valid {
+		stamp, err := util.FormatRFC1123(record.LastMessageMillis.Int64, util.UnitMilliseconds, "UTC")
+		if err != nil {
+			return "", err
+		}
+		message = stamp + " — " + escapeJSON(record.LastMessage.String)
+	}
+	return fmt.Sprintf("\\n Nick|Trip: %s\\n Last observed: %s\\n Last presence event: %s\\n Last public message: %s\\n", target, lastObserved, presence, message), nil
 }
 
 func escapeJSON(value string) string {
@@ -195,29 +203,6 @@ func (s *UserService) SeenRecently(ctx context.Context, user *model.User) (strin
 		return "", nil
 	}
 	return fmt.Sprintf("\\n @%s, has been seen as: _%s_ recently. \\n", user.Name, strings.Join(aliases, ", ")), nil
-}
-
-func (s *UserService) lastOnlineFromLastSeen(ctx context.Context, target string) (string, error) {
-	if !common.DependencyConfigured(s.LastSeen) {
-		return "", fmt.Errorf("last-online persistence unavailable")
-	}
-	record, err := s.LastSeen.LastSeen(ctx, target)
-	if err != nil {
-		return "", err
-	}
-	format := func(timestamp *int64) string {
-		if timestamp == nil {
-			return " - "
-		}
-		return time.UnixMilli(*timestamp).In(time.FixedZone("GMT", 0)).Format(time.RFC1123)
-	}
-	message := record.Message
-	if message == "" {
-		message = " - "
-	}
-	message = strings.ReplaceAll(message, `\`, `\\`)
-	message = strings.ReplaceAll(message, `"`, `\"`)
-	return fmt.Sprintf("\\n Nick|Trip: %s\\n Joined: %s\\n Last seen: %s\\n Seen active: -  ago.\\n Session duration: -  \\n Last message: %s\\n", target, format(record.JoinedAt), format(record.SeenAt), message), nil
 }
 
 func (s *UserService) DeleteIdentity(ctx context.Context, nameOrTrip string) (repository.DeleteResult, error) {

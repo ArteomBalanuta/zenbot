@@ -79,7 +79,7 @@ func TestLastMessagesExcludesWhispersAndUsesIDAsTieBreaker(t *testing.T) {
 	}
 }
 
-func TestLastSeenExcludesPresenceAndReturnsLatestMessageAndJoin(t *testing.T) {
+func TestLastSeenExcludesPresenceMessagesAndReturnsIndependentFacts(t *testing.T) {
 	d := openTestDB(t)
 	for _, row := range []struct {
 		message string
@@ -90,7 +90,7 @@ func TestLastSeenExcludesPresenceAndReturnsLatestMessageAndJoin(t *testing.T) {
 		}
 	}
 	seen, err := d.LastSeen(context.Background(), "Merc")
-	if err != nil || seen.SeenAt == nil || seen.JoinedAt == nil || *seen.SeenAt != 40 || *seen.JoinedAt != 50 || seen.Message != "latest" {
+	if err != nil || !seen.Found || !seen.LastMessageMillis.Valid || !seen.LastPresenceMillis.Valid || seen.LastMessageMillis.Int64 != 40 || seen.LastPresenceMillis.Int64 != 50 || !seen.LastMessage.Valid || seen.LastMessage.String != "latest" || !seen.LastPresenceEvent.Valid || seen.LastPresenceEvent.String != "JOINED" {
 		t.Fatalf("seen=%+v err=%v", seen, err)
 	}
 }

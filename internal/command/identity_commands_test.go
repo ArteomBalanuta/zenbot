@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -361,24 +362,23 @@ func TestMessagesCommandUTF8ByteBudgetPreservesExactAndSupplementaryRunes(t *tes
 }
 
 type lastSeenFake struct {
-	record repository.LastSeen
+	record repository.LastOnlineRecord
 }
 
-func (f *lastSeenFake) LastSeen(context.Context, string) (repository.LastSeen, error) {
+func (f *lastSeenFake) LastSeen(context.Context, string) (repository.LastOnlineRecord, error) {
 	return f.record, nil
 }
 
 func TestLastOnlineRendersPersistedLastSeen(t *testing.T) {
 	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}}
 	e := newIdentityEngine(ids, &authFake{})
-	seen, joined := int64(0), int64(0)
-	e.bundle.Users.LastSeen = &lastSeenFake{record: repository.LastSeen{Message: `hello "world"`, SeenAt: &seen, JoinedAt: &joined}}
+	e.bundle.Users.LastSeen = &lastSeenFake{record: repository.LastOnlineRecord{Found: true, LastMessage: sql.NullString{String: `hello "world"`, Valid: true}, LastMessageMillis: sql.NullInt64{Int64: 0, Valid: true}, LastPresenceEvent: sql.NullString{String: "JOINED", Valid: true}, LastPresenceMillis: sql.NullInt64{Int64: 0, Valid: true}}}
 	d, _ := commandDefinitionFor("seen")
 	status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!seen @merc"}).Execute(context.Background())
 	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
-	if got := e.chats[0]; !strings.Contains(got, "Nick|Trip: merc") || !strings.Contains(got, "Last message: hello") || !strings.Contains(got, "world") || !strings.Contains(got, "Last seen: Thu, 01 Jan 1970 00:00:00 GMT") {
+	if got := e.chats[0]; !strings.Contains(got, "Nick|Trip: merc") || !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || !strings.Contains(got, "world") || !strings.Contains(got, "Last observed: Thu, 1 Jan 1970 00:00:00 GMT") {
 		t.Fatalf("unexpected last-online response %q", got)
 	}
 }

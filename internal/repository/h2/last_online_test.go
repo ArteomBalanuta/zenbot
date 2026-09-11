@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLastOnlineSelectsLatestNonPresenceMessageAndJoinedRow(t *testing.T) {
+func TestLastOnlineSelectsIndependentPublicMessageAndPresence(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	for _, statement := range []string{
@@ -24,15 +24,15 @@ func TestLastOnlineSelectsLatestNonPresenceMessageAndJoinedRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !record.Found || !record.LastMessage.Valid || record.LastMessage.String != "latest" || !record.LastSeenMillis.Valid || record.LastSeenMillis.Int64 != 4000 {
-		t.Fatalf("last message=%+v last seen=%+v", record.LastMessage, record.LastSeenMillis)
+	if !record.Found || !record.LastMessage.Valid || record.LastMessage.String != "latest" || !record.LastMessageMillis.Valid || record.LastMessageMillis.Int64 != 4000 {
+		t.Fatalf("last message=%+v last seen=%+v", record.LastMessage, record.LastMessageMillis)
 	}
-	if !record.JoinedMillis.Valid || record.JoinedMillis.Int64 != 5000 {
-		t.Fatalf("joined=%+v", record.JoinedMillis)
+	if !record.LastPresenceMillis.Valid || record.LastPresenceMillis.Int64 != 5000 || !record.LastPresenceEvent.Valid || record.LastPresenceEvent.String != "JOINED" {
+		t.Fatalf("joined=%+v", record.LastPresenceMillis)
 	}
 }
 
-func TestLastOnlineUsesCurrentPresenceTableForSessionJoin(t *testing.T) {
+func TestLastOnlineUsesCurrentPresenceTableForIndependentEvent(t *testing.T) {
 	d := openTestDB(t)
 	if _, err := d.DB.Exec("INSERT INTO messages(trip,name,message,created_on,visibility) VALUES('trip','alice','hello',2000,'PUBLIC')"); err != nil {
 		t.Fatal(err)
@@ -45,12 +45,12 @@ func TestLastOnlineUsesCurrentPresenceTableForSessionJoin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !record.Found || !record.JoinedMillis.Valid || record.JoinedMillis.Int64 != 3000 {
-		t.Fatalf("joined=%+v", record.JoinedMillis)
+	if !record.Found || !record.LastPresenceMillis.Valid || record.LastPresenceMillis.Int64 != 3000 || !record.LastPresenceEvent.Valid || record.LastPresenceEvent.String != "JOINED" {
+		t.Fatalf("joined=%+v", record.LastPresenceMillis)
 	}
 }
 
-func TestLastOnlineMatchesNameOrTripWithSaturnCaseSemantics(t *testing.T) {
+func TestLastOnlineMatchesExactNameOrTripAcrossRepeatedLookups(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	for _, statement := range []string{
@@ -74,7 +74,7 @@ func TestLastOnlineMatchesNameOrTripWithSaturnCaseSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if missing.Found || missing.LastMessage.Valid || missing.LastSeenMillis.Valid || missing.JoinedMillis.Valid {
+	if missing.Found || missing.LastMessage.Valid || missing.LastMessageMillis.Valid || missing.LastPresenceMillis.Valid {
 		t.Fatalf("case-folded unexpectedly: %+v", missing)
 	}
 }
@@ -85,7 +85,7 @@ func TestLastOnlineReturnsEmptyRecordForAbsentTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Found || record.LastMessage.Valid || record.LastSeenMillis.Valid || record.JoinedMillis.Valid {
+	if record.Found || record.LastMessage.Valid || record.LastMessageMillis.Valid || record.LastPresenceMillis.Valid {
 		t.Fatalf("record=%+v", record)
 	}
 }
