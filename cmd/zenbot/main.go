@@ -174,6 +174,25 @@ func resolveAgentCommandEngine(resolve func() common.Engine) func() common.Engin
 	}
 }
 
+func newAgentFailureSink(resolveEngine func() common.Engine) runtime.FailureSink {
+	return runtime.FailureSinkFunc(func(ctx context.Context, inv runtime.Invocation, cause error) {
+		if ctx.Err() != nil {
+			return
+		}
+		observability.Error(ctx, "agent.failure_reply.started", cause)
+		current := resolveEngine()
+		if current == nil {
+			observability.Error(ctx, "agent.failure_reply.failed", fmt.Errorf("current master is not constructed"))
+			return
+		}
+		if _, err := current.SendChatMessage(inv.Context().Nick(), live.FailureReply(cause), inv.Context().Whisper()); err != nil {
+			observability.Error(ctx, "agent.failure_reply.failed", err)
+			return
+		}
+		observability.Info(ctx, "agent.failure_reply.completed")
+	})
+}
+
 func trustedAgentSnapshot(engine common.Engine, creatorTrip string, adminTrips []string) participation.TrustedSnapshot {
 	snapshot := participation.TrustedSnapshot{CreatorTrip: creatorTrip, AdminTrips: append([]string(nil), adminTrips...), Roles: map[string]participation.Role{}}
 	if engine == nil {
@@ -254,22 +273,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 		_, err := current.SendChatMessage(inv.Context().Nick(), "\n"+result.Text(), inv.Context().Whisper())
 		return err
 	})
-	failure := runtime.FailureSinkFunc(func(ctx context.Context, inv runtime.Invocation, cause error) {
-		if ctx.Err() != nil {
-			return
-		}
-		observability.Error(ctx, "agent.failure_reply.started", cause)
-		current := resolveEngine()
-		if current == nil {
-			observability.Error(ctx, "agent.failure_reply.failed", fmt.Errorf("current master is not constructed"))
-			return
-		}
-		if _, err := current.SendChatMessage(inv.Context().Nick(), "failed: the agent could not answer that request.", inv.Context().Whisper()); err != nil {
-			observability.Error(ctx, "agent.failure_reply.failed", err)
-			return
-		}
-		observability.Info(ctx, "agent.failure_reply.completed")
-	})
+	failure := newAgentFailureSink(resolveEngine)
 	finalizer, err := outputFinalizer(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("agent output finalizer: %w", err)
