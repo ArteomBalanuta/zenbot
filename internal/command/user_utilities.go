@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
-	"time"
 	release "zenbot"
 	"zenbot/internal/model"
 )
@@ -94,14 +93,13 @@ func (c *pingUtilityCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	elapsed := time.Duration(0)
-	if b := bundle(c.engine); b != nil && b.Ping != nil {
-		var err error
-		elapsed, err = b.Ping.Ping(ctx)
-		if err != nil {
-			// Saturn logs ping I/O failures and still reports zero latency.
-			elapsed = 0
-		}
+	b := bundle(c.engine)
+	if b == nil || b.Ping == nil {
+		return model.FAILED, fmt.Errorf("ping service unavailable")
+	}
+	elapsed, err := b.Ping.Ping(ctx)
+	if err != nil {
+		return model.FAILED, err
 	}
 	if _, err := c.engine.SendChatMessage(c.message.Name, fmt.Sprintf("response time: %d milliseconds", elapsed.Milliseconds()), false); err != nil {
 		return model.FAILED, err

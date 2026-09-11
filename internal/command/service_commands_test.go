@@ -21,7 +21,8 @@ func TestPingTimeWeatherUseConcreteRegistryCommands(t *testing.T) {
 			c.Close()
 		}
 	}()
-	stub := &commandEngineStub{bundle: &service.Bundle{Ping: &service.PingService{Address: ln.Addr().String()}}}
+	srv := auditUtilityServer(t)
+	stub := &commandEngineStub{bundle: &service.Bundle{Ping: &service.PingService{Address: ln.Addr().String()}, Time: &service.TimeService{HTTP: srv.Client(), GeoURL: srv.URL + "/geo", SunriseURL: srv.URL + "/sun?lat=%s&lng=%s", TimezoneURL: srv.URL + "/time?lat=%s&lng=%s"}}}
 	for _, tc := range []struct {
 		alias, text string
 		want        model.Status

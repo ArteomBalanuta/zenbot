@@ -6,12 +6,13 @@ import (
 
 	"zenbot/internal/listener"
 	"zenbot/internal/model"
+	"zenbot/internal/service"
 )
 
 func TestRegisterUserUtilitiesDispatchesEveryAliasThroughChatListener(t *testing.T) {
 	engine := &commandEngineStub{users: map[string]*model.User{
 		"alice": {Name: "alice", Hash: "hash"},
-	}}
+	}, bundle: &service.Bundle{Ping: auditPingService(t)}}
 	if err := RegisterUserUtilities(engine); err != nil {
 		t.Fatal(err)
 	}
@@ -20,8 +21,8 @@ func TestRegisterUserUtilitiesDispatchesEveryAliasThroughChatListener(t *testing
 		alias string
 		want  string
 	}{
-		{alias: "ping", want: "response time: 0 milliseconds"},
-		{alias: "p", want: "response time: 0 milliseconds"},
+		{alias: "ping", want: "response time:"},
+		{alias: "p", want: "response time:"},
 		{alias: "version", want: "1.1.1"},
 		{alias: "v", want: "1.1.1"},
 		{alias: "ape", want: "⣀"},

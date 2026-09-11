@@ -65,6 +65,7 @@ func (e *snapshotGatewayEngine) MoveFromServingRoom(context.Context, string, com
 
 func TestAgentCommandGatewayExecutesTrustedPublicCommandAndCapturesSuccessfulSend(t *testing.T) {
 	e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller", Trip: "trip", Hash: "hash"}}}, authorized: true}
+	e.bundle = &service.Bundle{Ping: auditPingService(t)}
 	caller, err := api.NewContext("trusted-room", "caller", "trip", "hash", false, []string{})
 	if err != nil {
 		t.Fatal(err)
@@ -93,12 +94,18 @@ func TestAgentCommandGatewayRejectsUnauthorizedUnknownAndSendFailure(t *testing.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}}, authorized: tc.authorized, sendErr: tc.sendErr}
+			if tc.command == "ping" {
+				e.bundle = &service.Bundle{Ping: auditPingService(t)}
+			}
 			result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, tc.command, "")
 			if (err != nil) != tc.wantError || result.Status != tc.wantStatus || result.EffectsCommitted || result.Delivery != nil || len(result.Messages) != 0 {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
 			if tc.command != "ping" && e.sends != 0 {
 				t.Fatalf("rejected command sent=%d", e.sends)
+			}
+			if tc.command == "ping" && e.sends != 1 {
+				t.Fatalf("send failure fixture never attempted delivery: %d", e.sends)
 			}
 		})
 	}
@@ -172,6 +179,7 @@ func TestAgentCommandGatewayRetainsDeliveryWhenLaterCodePanics(t *testing.T) {
 		}
 	}()
 	e := &panicAuditGatewayEngine{gatewayEngine: &gatewayEngine{commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}}, authorized: true}}
+	e.bundle = &service.Bundle{Ping: auditPingService(t)}
 	caller, _ := api.NewContext("room", "caller", "", "", false, []string{})
 	result, err := NewAgentCommandGateway(e).Execute(context.Background(), caller, "ping", "")
 	if err != nil || result.Status != commandgateway.OutcomeUnknown || !result.EffectsCommitted || result.Delivery == nil || result.Delivery.Count != 1 {

@@ -26,14 +26,15 @@ func (c *pingCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	b := bundle(c.engine)
 	if b == nil || b.Ping == nil {
-		reply(&c.commandBase, " pong")
-		return model.SUCCESSFUL, nil
+		return model.FAILED, fmt.Errorf("ping service unavailable")
 	}
 	d, e := b.Ping.Ping(ctx)
 	if e != nil {
 		return model.FAILED, e
 	}
-	reply(&c.commandBase, fmt.Sprintf("response time: %d milliseconds", d.Milliseconds()))
+	if _, err := c.engine.SendChatMessage(c.message.Name, fmt.Sprintf("response time: %d milliseconds", d.Milliseconds()), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -49,14 +50,15 @@ func (c *weatherCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	b := bundle(c.engine)
 	if b == nil || b.Weather == nil {
-		reply(&c.commandBase, " "+strings.Join(a, " "))
-		return model.SUCCESSFUL, nil
+		return model.FAILED, fmt.Errorf("weather service unavailable")
 	}
 	v, e := b.Weather.Get(ctx, strings.Join(a, " "))
 	if e != nil {
 		return model.FAILED, e
 	}
-	reply(&c.commandBase, v)
+	if _, err := c.engine.SendChatMessage(c.message.Name, v, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -72,18 +74,21 @@ func (c *timeCommand) Execute(ctx context.Context) (model.Status, error) {
 		if bundle(c.engine) != nil {
 			prefix = c.engine.GetPrefix()
 		}
-		reply(&c.commandBase, fmt.Sprintf("Example: %stime Tokyo", prefix))
+		if _, err := c.engine.SendChatMessage(c.message.Name, fmt.Sprintf("Example: %stime Tokyo", prefix), c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
 	if b == nil || b.Time == nil {
-		reply(&c.commandBase, " "+strings.Join(a, " "))
-		return model.SUCCESSFUL, nil
+		return model.FAILED, fmt.Errorf("time service unavailable")
 	}
 	v, e := b.Time.Get(ctx, strings.Join(a, " "))
 	if e != nil {
 		return model.FAILED, e
 	}
-	reply(&c.commandBase, v)
+	if _, err := c.engine.SendChatMessage(c.message.Name, v, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

@@ -60,7 +60,7 @@ func TestPingVersionApeAndCoinParity(t *testing.T) {
 		check func(t *testing.T, chats []string)
 	}{
 		{"p", "!p ignored arguments", func(t *testing.T, chats []string) {
-			if len(chats) != 1 || chats[0] != "alice|response time: 0 milliseconds|false" {
+			if len(chats) != 0 {
 				t.Fatalf("ping output=%v", chats)
 			}
 		}},
@@ -87,6 +87,13 @@ func TestPingVersionApeAndCoinParity(t *testing.T) {
 			t.Fatalf("missing definition for %s", tc.alias)
 		}
 		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: tc.text, IsWhisper: true}).Execute(context.Background())
+		if tc.alias == "p" {
+			if err == nil || status != model.FAILED {
+				t.Fatalf("unavailable ping status=%v err=%v", status, err)
+			}
+			tc.check(t, e.chats)
+			continue
+		}
 		if err != nil || status != model.SUCCESSFUL {
 			t.Fatalf("%s status=%v err=%v", tc.alias, status, err)
 		}
