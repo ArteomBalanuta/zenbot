@@ -37,12 +37,14 @@ type AgentToolSpec struct {
 	Arguments            AgentArgumentContract
 	TargetsUser          bool
 	RunCommandCompatible bool
+	AllowsSilentAction   bool
 }
 
 type agentToolOption func(*AgentToolSpec)
 
 func targetedCommand(spec *AgentToolSpec)      { spec.TargetsUser = true }
 func runCommandCompatible(spec *AgentToolSpec) { spec.RunCommandCompatible = true }
+func allowsSilentAction(spec *AgentToolSpec)   { spec.AllowsSilentAction = true }
 func primaryIntent(intent string) agentToolOption {
 	return func(spec *AgentToolSpec) { spec.PrimaryIntent = strings.TrimSpace(intent) }
 }

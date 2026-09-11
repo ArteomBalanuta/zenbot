@@ -25,25 +25,46 @@ func NewNukeRoomOperation(delay ...time.Duration) NukeRoomOperation {
 }
 
 func (o NukeRoomOperation) Apply(ctx RoomSnapshotContext, snapshot Snapshot) (OperationResult, error) {
+	result := Success()
+	fail := func(err error, unknown bool) (OperationResult, error) {
+		result.Outcome = OutcomeFailed
+		result.Reply = "Failed to nuke " + ctx.TargetChannel
+		result.OutcomeUnknown = unknown
+		return result, err
+	}
 	for _, user := range snapshot.Users {
+		if err := executionContext(ctx).Err(); err != nil {
+			return fail(err, false)
+		}
 		if user == nil {
-			return Failed("Failed to nuke " + ctx.TargetChannel), nil
+			return fail(fmt.Errorf("snapshot contains nil user"), false)
 		}
 		nick, err := util.NormalizeNickTarget(&user.Name)
 		if err != nil {
-			return Failed("Failed to nuke " + ctx.TargetChannel), nil
+			return fail(err, false)
 		}
 		if err := sendNukeRaw(ctx, map[string]string{"cmd": "ban", "nick": nick}); err != nil {
-			return Failed("Failed to nuke " + ctx.TargetChannel), nil
+			return fail(err, ctx.SendRaw != nil)
 		}
+		result.ActionCount++
 		if o.delay > 0 {
-			time.Sleep(o.delay)
+			timer := time.NewTimer(o.delay)
+			select {
+			case <-executionContext(ctx).Done():
+				timer.Stop()
+				return fail(executionContext(ctx).Err(), false)
+			case <-timer.C:
+			}
 		}
+	}
+	if err := executionContext(ctx).Err(); err != nil {
+		return fail(err, false)
 	}
 	if err := sendNukeRaw(ctx, map[string]string{"cmd": "lockroom"}); err != nil {
-		return Failed("Failed to nuke " + ctx.TargetChannel), nil
+		return fail(err, ctx.SendRaw != nil)
 	}
-	return Success(), nil
+	result.ActionCount++
+	return result, nil
 }
 
 func sendNukeRaw(ctx RoomSnapshotContext, payload map[string]string) error {

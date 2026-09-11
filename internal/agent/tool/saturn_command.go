@@ -47,7 +47,7 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	result := commandResultSchema(resultSchema)
 	resultMode := contract.RoomDelivery
 	writes := []string{"commands", "room_delivery"}
-	if definition.Canonical == "kick" {
+	if definition.Agent.AllowsSilentAction {
 		resultMode = contract.ModelData
 		writes = []string{"commands"}
 	}
@@ -113,7 +113,7 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	if err != nil && execution.Status != commandgateway.OutcomeRejected && execution.Status != commandgateway.OutcomeNotFound {
 		execution.Status = commandgateway.OutcomeUnknown
 	}
-	if failure, rejected := commandExecutionFailure(t.Name(), execution, definition.Canonical == "kick"); rejected {
+	if failure, rejected := commandExecutionFailure(t.Name(), execution, definition.Agent.AllowsSilentAction); rejected {
 		return failure, nil
 	}
 	if definition.Canonical != "list" {

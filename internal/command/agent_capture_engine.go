@@ -3,9 +3,11 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
@@ -23,6 +25,7 @@ type agentCaptureEngine struct {
 	actionCount         int
 	data                json.RawMessage
 	snapshotCompletions []agentSnapshotCompletion
+	snapshotStatus      commandgateway.OutcomeStatus
 }
 
 type agentSnapshotCompletion struct {
@@ -256,6 +259,12 @@ func (e *agentCaptureEngine) submitSnapshot(request snapshot.RoomSnapshotRequest
 		}
 	}
 	if err := submit(request); err != nil {
+		select {
+		case result := <-completed:
+			completed <- result
+			e.snapshotCompletions = append(e.snapshotCompletions, agentSnapshotCompletion{result: completed, whisper: request.Whisper})
+		default:
+		}
 		return err
 	}
 	e.snapshotCompletions = append(e.snapshotCompletions, agentSnapshotCompletion{result: completed, whisper: request.Whisper})
@@ -263,27 +272,49 @@ func (e *agentCaptureEngine) submitSnapshot(request snapshot.RoomSnapshotRequest
 }
 
 func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error {
+	var completionErr error
 	for _, completion := range e.snapshotCompletions {
-		select {
-		case result := <-completion.result:
-			message := strings.TrimSpace(result.Reply)
-			if result.Outcome == snapshot.OutcomeFailed {
-				if message == "" {
-					message = "remote room operation failed"
+		// Cancellation belongs to the execution owner. Wait for its terminal
+		// receipt, including operation return and cleanup, even after ctx expires.
+		result := <-completion.result
+		e.actionCount += result.ActionCount
+		e.deliveryCount += result.DeliveryCount
+		if result.OutcomeUnknown {
+			e.snapshotStatus = commandgateway.OutcomeUnknown
+		} else if e.snapshotStatus != commandgateway.OutcomeUnknown {
+			switch result.Outcome {
+			case snapshot.OutcomeAbsentTarget:
+				e.snapshotStatus = commandgateway.OutcomeNotFound
+			case snapshot.OutcomeEmpty, snapshot.OutcomeSkipped, snapshot.OutcomeFailed:
+				e.snapshotStatus = commandgateway.OutcomeRejected
+			case snapshot.OutcomeSuccess:
+				if e.snapshotStatus == "" {
+					e.snapshotStatus = commandgateway.OutcomeSucceeded
 				}
-				return fmt.Errorf("%s", message)
 			}
-			if len(result.Data) > 0 && (!completion.whisper || e.invocationWhisper) {
-				e.data = append(json.RawMessage(nil), result.Data...)
+		}
+		message := strings.TrimSpace(result.Reply)
+		if result.Outcome == snapshot.OutcomeFailed {
+			if message == "" {
+				message = "remote room operation failed"
 			}
-			if message != "" {
-				e.recordDelivery(result.Reply, completion.whisper)
+			operationErr := result.Error
+			if operationErr == nil {
+				operationErr = fmt.Errorf("%s", message)
 			}
-		case <-ctx.Done():
-			return ctx.Err()
+			completionErr = errors.Join(completionErr, operationErr)
+		}
+		if result.Outcome == snapshot.OutcomeSuccess && len(result.Data) > 0 && (!completion.whisper || e.invocationWhisper) {
+			e.data = append(json.RawMessage(nil), result.Data...)
+		}
+		if message != "" && result.Outcome != snapshot.OutcomeFailed && result.DeliveryCount > 0 {
+			if completion.whisper && !e.invocationWhisper {
+				message = privateDeliveryObservation
+			}
+			e.messages = append(e.messages, message)
 		}
 	}
-	return nil
+	return completionErr
 }
 
 func (e *agentCaptureEngine) UpdatePrefix(prefix string) (string, error) {

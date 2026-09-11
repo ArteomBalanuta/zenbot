@@ -89,23 +89,36 @@ func (f *CoordinatedSessionFactory) Create(req RoomSnapshotRequest, sink Snapsho
 	if f == nil || f.Registry == nil {
 		return nil, errors.New("temporary session factory is not configured")
 	}
-	id, ctx, err := f.Registry.Open(context.Background())
+	id, ctx, err := f.Registry.Open(req.Context)
 	if err != nil {
 		return nil, err
 	}
 	var s Session
 	if f.NewTransport != nil {
 		t, e := f.NewTransport(ctx, req)
+		if e == nil && t == nil {
+			e = errors.New("temporary transport constructor returned nil")
+		}
 		if e == nil {
 			join, nick := req.SourceChannel, ""
 			if req.TemporaryJoin != nil {
 				join = req.TemporaryJoin.Channel
 				nick = req.TemporaryJoin.Nick + "#" + req.TemporaryJoin.Password
 			}
-			s = &transportSession{id: id, ctx: ctx, transport: t, sink: sink, onError: f.OnTransportError, onClosed: f.OnClosed, join: join, nick: nick, done: make(chan struct{})}
+			onError, onClosed := f.OnTransportError, f.OnClosed
+			if req.onTransportError != nil {
+				onError = func(_ string, err error) { req.onTransportError(err) }
+				onClosed = nil // Owner-initiated close is cleanup, not a transport failure.
+			}
+			s = &transportSession{id: id, ctx: ctx, transport: t, sink: sink, onError: onError, onClosed: onClosed, join: join, nick: nick, done: make(chan struct{}), readerDone: make(chan struct{})}
 			err = e
 		} else {
 			err = e
+			if t != nil {
+				cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				err = errors.Join(err, t.Close(cleanup))
+				cancel()
+			}
 		}
 	} else if f.New != nil {
 		s, err = f.New(ctx, req, sink)
@@ -113,7 +126,10 @@ func (f *CoordinatedSessionFactory) Create(req RoomSnapshotRequest, sink Snapsho
 		err = errors.New("temporary session constructor is not configured")
 	}
 	if err != nil || s == nil {
-		_ = f.Registry.Close(id)
+		if s != nil {
+			err = errors.Join(err, s.Close())
+		}
+		err = errors.Join(err, f.Registry.Close(id))
 		if err == nil {
 			err = errors.New("temporary session factory returned nil session")
 		}
@@ -141,21 +157,27 @@ func (s *coordinatedSession) Close() error {
 }
 
 type transportSession struct {
-	id        string
-	ctx       context.Context
-	transport TemporaryTransport
-	sink      SnapshotSink
-	onError   func(string, error)
-	onClosed  func(string, int, string)
-	join      string
-	nick      string
-	errorOnce sync.Once
-	closeOnce sync.Once
-	done      chan struct{}
+	id            string
+	ctx           context.Context
+	transport     TemporaryTransport
+	sink          SnapshotSink
+	onError       func(string, error)
+	onClosed      func(string, int, string)
+	join          string
+	nick          string
+	errorOnce     sync.Once
+	closeOnce     sync.Once
+	done          chan struct{}
+	readerDone    chan struct{}
+	readerStarted bool
+	closeErr      error
 }
 
 func (s *transportSession) ID() string { return s.id }
 func (s *transportSession) Start() error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.transport.Start(s.ctx); err != nil {
 		return err
 	}
@@ -172,19 +194,31 @@ func (s *transportSession) Start() error {
 			return err
 		}
 	}
+	s.readerStarted = true
 	go s.loop()
 	return nil
 }
 func (s *transportSession) loop() {
+	defer close(s.readerDone)
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case msg := <-s.transport.Messages():
+		case <-s.done:
+			return
+		case msg, ok := <-s.transport.Messages():
+			if !ok {
+				s.reportError(errors.New("snapshot inbound channel closed"))
+				return
+			}
 			if msg.Payload != nil && s.sink != nil {
 				s.sink(string(msg.Payload))
 			}
-		case err := <-s.transport.Errors():
+		case err, ok := <-s.transport.Errors():
+			if !ok {
+				s.reportError(errors.New("snapshot error channel closed"))
+				return
+			}
 			if err != nil {
 				s.errorOnce.Do(func() {
 					if s.onError != nil {
@@ -196,6 +230,13 @@ func (s *transportSession) loop() {
 		}
 	}
 }
+func (s *transportSession) reportError(err error) {
+	s.errorOnce.Do(func() {
+		if s.onError != nil {
+			s.onError(s.id, err)
+		}
+	})
+}
 func (s *transportSession) Flush() error { return nil }
 func (s *transportSession) SendRaw(v string) error {
 	ctx, c := context.WithTimeout(s.ctx, 5*time.Second)
@@ -203,15 +244,21 @@ func (s *transportSession) SendRaw(v string) error {
 	return s.transport.SendRaw(ctx, []byte(v))
 }
 func (s *transportSession) Close() error {
-	var err error
 	s.closeOnce.Do(func() {
 		close(s.done)
 		ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
-		err = s.transport.Close(ctx)
+		s.closeErr = s.transport.Close(ctx)
+		if s.readerStarted {
+			select {
+			case <-s.readerDone:
+			case <-ctx.Done():
+				s.closeErr = errors.Join(s.closeErr, ctx.Err())
+			}
+		}
 		if s.onClosed != nil {
 			s.onClosed(s.id, 1000, "closed")
 		}
 	})
-	return err
+	return s.closeErr
 }

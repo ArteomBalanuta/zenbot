@@ -28,6 +28,64 @@ func (p *proofTransport) SendRaw(_ context.Context, raw []byte) error {
 	return nil
 }
 func (p *proofTransport) Close(context.Context) error { p.closed++; return nil }
+
+func TestTemporaryFactoryPropagatesCallerContextAndClosedChannelsTerminate(t *testing.T) {
+	for _, closed := range []string{"messages", "errors"} {
+		t.Run(closed, func(t *testing.T) {
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			p := &proofTransport{msgs: make(chan transport.InboundMessage), errs: make(chan error)}
+			registry := NewTemporarySessionRegistry()
+			seen := make(chan OperationResult, 1)
+			factory := &CoordinatedSessionFactory{Registry: registry, NewTransport: func(ctx context.Context, _ RoomSnapshotRequest) (TemporaryTransport, error) {
+				if ctx == context.Background() {
+					t.Error("factory lost caller context")
+				}
+				return p, nil
+			}}
+			c := NewRoomSnapshotCoordinator(factory, nil, ParseUsers, time.Second)
+			req := request(&recordingOperation{})
+			req.Context = parent
+			req.OnComplete = func(r OperationResult) { seen <- r }
+			if err := c.Submit(req); err != nil {
+				t.Fatal(err)
+			}
+			if closed == "messages" {
+				close(p.msgs)
+			} else {
+				close(p.errs)
+			}
+			select {
+			case r := <-seen:
+				if r.Outcome != OutcomeFailed || registry.Len() != 0 {
+					t.Fatalf("result=%+v registry=%d", r, registry.Len())
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("closed channel did not terminate workflow")
+			}
+		})
+	}
+}
+
+type failedStartupTransport struct {
+	proofTransport
+	err error
+}
+
+func (p *failedStartupTransport) Start(context.Context) error { return p.err }
+func TestTemporarySessionCloseWorksWhenStartupNeverLaunchedReader(t *testing.T) {
+	p := &failedStartupTransport{proofTransport: proofTransport{msgs: make(chan transport.InboundMessage), errs: make(chan error)}, err: errors.New("startup failed")}
+	registry := NewTemporarySessionRegistry()
+	f := &CoordinatedSessionFactory{Registry: registry, NewTransport: func(context.Context, RoomSnapshotRequest) (TemporaryTransport, error) { return p, nil }}
+	c := NewRoomSnapshotCoordinator(f, nil, ParseUsers, time.Second)
+	begin := time.Now()
+	if err := c.Submit(request(&recordingOperation{})); !errors.Is(err, p.err) {
+		t.Fatalf("submit=%v", err)
+	}
+	if registry.Len() != 0 || p.closed != 1 || time.Since(begin) > 500*time.Millisecond {
+		t.Fatalf("registry=%d closed=%d elapsed=%s", registry.Len(), p.closed, time.Since(begin))
+	}
+}
 func TestTransportSessionCredentialedRemoteMessageJoin(t *testing.T) {
 	transport := &proofTransport{msgs: make(chan transport.InboundMessage), errs: make(chan error)}
 	factory := &CoordinatedSessionFactory{Registry: NewTemporarySessionRegistry(), NewTransport: func(context.Context, RoomSnapshotRequest) (TemporaryTransport, error) { return transport, nil }}

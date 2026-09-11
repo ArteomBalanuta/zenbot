@@ -78,10 +78,12 @@ func environmentValues() map[string]string {
 }
 
 func roomSnapshotReplySink(send func(string, string, bool) (string, error)) snapshot.ReplySink {
-	return func(request snapshot.RoomSnapshotRequest, reply string) {
-		if _, err := send(request.Author, reply, request.Whisper); err != nil {
+	return func(request snapshot.RoomSnapshotRequest, reply string) error {
+		_, err := send(request.Author, reply, request.Whisper)
+		if err != nil {
 			log.Printf("room snapshot reply delivery: %v", err)
 		}
+		return err
 	}
 }
 

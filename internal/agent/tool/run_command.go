@@ -75,7 +75,8 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 	if err != nil && executed.Status != commandgateway.OutcomeRejected && executed.Status != commandgateway.OutcomeNotFound {
 		executed.Status = commandgateway.OutcomeUnknown
 	}
-	if failure, rejected := commandExecutionFailure(t.Name(), executed, false); rejected {
+	definition, _ := commandcatalog.AgentEntryByAlias(name)
+	if failure, rejected := commandExecutionFailure(t.Name(), executed, definition.Agent.AllowsSilentAction); rejected {
 		return failure, nil
 	}
 	return commandExecutionSuccess(t.Name(), executed), nil

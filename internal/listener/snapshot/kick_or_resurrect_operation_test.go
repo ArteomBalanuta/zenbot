@@ -23,7 +23,7 @@ func TestKickOrResurrectOperationMovesNormalizedPresentTarget(t *testing.T) {
 	if err := json.Unmarshal([]byte(raws[0]), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["cmd"] != "kick" || payload["nick"] != "Alice" || payload["to"] != "destination" || len(payload) != 3 {
+	if payload["cmd"] != "kick" || payload["nick"] != "aLiCe" || payload["to"] != "destination" || len(payload) != 3 {
 		t.Fatalf("payload=%v", payload)
 	}
 }

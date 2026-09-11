@@ -36,6 +36,7 @@ func (c *nukeCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	if err := submitter.SubmitCredentialedRoomSnapshot(snapshot.RoomSnapshotRequest{
+		Context:       ctx,
 		WorkflowID:    workflowID,
 		Author:        c.message.Name,
 		Whisper:       c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper",

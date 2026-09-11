@@ -2,8 +2,26 @@ package snapshot
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
+
+func TestFactoryClosesPartiallyConstructedSessionAndRetainsCleanupError(t *testing.T) {
+	registry := NewTemporarySessionRegistry()
+	creationErr, closeErr := errors.New("construction failed"), errors.New("cleanup failed")
+	s := &controlledSession{fakeSession: fakeSession{id: "partial"}, closeErr: closeErr, closeEntered: make(chan struct{}), closeRelease: make(chan struct{})}
+	close(s.closeRelease)
+	f := &CoordinatedSessionFactory{Registry: registry, New: func(context.Context, RoomSnapshotRequest, SnapshotSink) (Session, error) { return s, creationErr }}
+	_, err := f.Create(RoomSnapshotRequest{}, nil)
+	select {
+	case <-s.closeEntered:
+	default:
+		t.Error("partial session was not closed")
+	}
+	if !errors.Is(err, creationErr) || !errors.Is(err, closeErr) || registry.Len() != 0 {
+		t.Fatalf("error=%v registry=%d", err, registry.Len())
+	}
+}
 
 type testSession struct {
 	id              string

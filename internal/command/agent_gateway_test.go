@@ -263,7 +263,7 @@ func TestAgentCommandGatewayWaitsForEverySnapshotBackedCommandOutcome(t *testing
 			if request.OnComplete == nil {
 				t.Fatal("snapshot request has no agent completion observer")
 			}
-			request.OnComplete(snapshot.Success("remote operation result"))
+			request.OnComplete(snapshot.OperationResult{Outcome: snapshot.OutcomeSuccess, Reply: "remote operation result", ActionCount: 1, DeliveryCount: 1})
 
 			select {
 			case execution := <-completed:
@@ -314,6 +314,7 @@ func TestAgentCommandGatewayPreservesTypedRemoteListDataAndDeliveryReceipts(t *t
 		t.Fatal(err)
 	}
 	wantData := append(json.RawMessage(nil), operationResult.Data...)
+	operationResult.ActionCount, operationResult.DeliveryCount = 1, 1 // The fixture simulates the coordinator's successful reply sink.
 	request.OnComplete(operationResult)
 	for index := range operationResult.Data {
 		operationResult.Data[index] = 'x'
@@ -409,7 +410,7 @@ func TestAgentCommandGatewayReturnsSnapshotFailureInsteadOfEarlySuccess(t *testi
 
 	select {
 	case outcome := <-completed:
-		if outcome.err != nil || outcome.result.Status != commandgateway.OutcomeUnknown || outcome.result.EffectsCommitted || outcome.result.Delivery != nil {
+		if outcome.err != nil || outcome.result.Status != commandgateway.OutcomeRejected || outcome.result.EffectsCommitted || outcome.result.Delivery != nil {
 			t.Fatalf("outcome=%#v", outcome)
 		}
 	case <-time.After(time.Second):

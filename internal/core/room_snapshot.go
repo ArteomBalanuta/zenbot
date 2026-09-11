@@ -1,7 +1,9 @@
 package core
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
@@ -56,19 +58,6 @@ func (e *credentialedRoomSnapshotMaster) SubmitCredentialedRoomSnapshot(request 
 }
 
 func temporarySnapshotNick(workflowID string) string {
-	const suffixLength = 8
-	suffix := []byte(workflowID[:suffixLength])
-	for i, character := range suffix {
-		if !isSnapshotNickCharacter(character) {
-			suffix[i] = '_'
-		}
-	}
-	return "msg_" + string(suffix)
-}
-
-func isSnapshotNickCharacter(character byte) bool {
-	return character >= 'a' && character <= 'z' ||
-		character >= 'A' && character <= 'Z' ||
-		character >= '0' && character <= '9' ||
-		character == '_'
+	digest := sha256.Sum256([]byte(workflowID))
+	return fmt.Sprintf("msg_%x", digest[:8])
 }

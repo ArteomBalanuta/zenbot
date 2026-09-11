@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	"zenbot/internal/common"
@@ -11,6 +12,14 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/profiling"
 )
+
+func TestRoomSnapshotReplySinkReturnsDeliveryFailure(t *testing.T) {
+	want := errors.New("delivery failed")
+	sink := roomSnapshotReplySink(func(string, string, bool) (string, error) { return "", want })
+	if err := sink(snapshot.RoomSnapshotRequest{Author: "alice"}, "reply"); !errors.Is(err, want) {
+		t.Fatalf("error=%v", err)
+	}
+}
 
 func TestMasterBindingSnapshotReplyUsesReboundMaster(t *testing.T) {
 	old := &core.EngineImpl{OutMessageQueue: make(chan string, 1)}
@@ -56,7 +65,7 @@ func TestRoomSnapshotReplySinkPreservesRequestWhisperMode(t *testing.T) {
 func TestRoomSnapshotEngineOptionsInstallsCoordinatorOnMaster(t *testing.T) {
 	cfg := &config.Config{Channel: "source", Name: "bot", WebsocketUrl: "ws://example.test"}
 	profiler := profiling.New(profiling.Settings{Enabled: true}, nil)
-	opts := newRoomSnapshotEngineOptions(cfg, nil, func(snapshot.RoomSnapshotRequest, string) {}, profiler)
+	opts := newRoomSnapshotEngineOptions(cfg, nil, func(snapshot.RoomSnapshotRequest, string) error { return nil }, profiler)
 	if opts.SessionRegistry == nil || opts.SnapshotCoordinator == nil {
 		t.Fatalf("snapshot options = %#v, want registry and coordinator", opts)
 	}

@@ -30,7 +30,7 @@ func TestRemoteMsgChannelWorkflow(t *testing.T) {
 	t.Run("success replies once and cleans up late events", func(t *testing.T) {
 		session := &remoteWorkflowSession{id: "remote-session"}
 		var replies []string
-		coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) { replies = append(replies, reply) }, ParseUsers, 0)
+		coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) error { replies = append(replies, reply); return nil }, ParseUsers, 0)
 		if err := coordinator.Submit(remoteWorkflowRequest()); err != nil {
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func TestRemoteMsgChannelWorkflow(t *testing.T) {
 	t.Run("all is me replies empty without raw", func(t *testing.T) {
 		session := &remoteWorkflowSession{id: "empty-session"}
 		var replies []string
-		coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) { replies = append(replies, reply) }, ParseUsers, 0)
+		coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) error { replies = append(replies, reply); return nil }, ParseUsers, 0)
 		request := remoteWorkflowRequest()
 		request.WorkflowID = "empty-workflow"
 		if err := coordinator.Submit(request); err != nil || !coordinator.OnSnapshot(session.id, `{"cmd":"onlineSet","users":[{"nick":"temporary","isme":true}]}`) {
@@ -69,7 +69,7 @@ func TestRemoteMsgChannelWorkflow(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				session := &remoteWorkflowSession{id: tc.name + "-session", sendErr: tc.sendErr}
 				var replies []string
-				coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) { replies = append(replies, reply) }, tc.parser, 0)
+				coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) error { replies = append(replies, reply); return nil }, tc.parser, 0)
 				request := remoteWorkflowRequest()
 				request.WorkflowID = tc.name + "-workflow"
 				if err := coordinator.Submit(request); err != nil || !coordinator.OnSnapshot(session.id, tc.payload) {

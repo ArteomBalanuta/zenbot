@@ -101,6 +101,7 @@ func TestAgentCapturePrivacyWithholdsPrivateSnapshotReplyAndDataFromPublicInvoca
 		t.Fatal(err)
 	}
 	result := snapshot.OperationResult{
+		ActionCount: 1, DeliveryCount: 1,
 		Outcome: snapshot.OutcomeSuccess,
 		Reply:   secret,
 		Data:    json.RawMessage(`{"value":"private snapshot secret"}`),
@@ -186,6 +187,7 @@ func TestAgentCapturePrivacyRetainsPrivateSnapshotForPrivateInvocation(t *testin
 		t.Fatal(err)
 	}
 	engine.request.OnComplete(snapshot.OperationResult{
+		ActionCount: 1, DeliveryCount: 1,
 		Outcome: snapshot.OutcomeSuccess,
 		Reply:   secret,
 		Data:    json.RawMessage(`{"value":"private snapshot result"}`),

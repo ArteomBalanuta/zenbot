@@ -1,6 +1,7 @@
 package core
 
 import (
+	"regexp"
 	"testing"
 	"time"
 
@@ -8,6 +9,13 @@ import (
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
 )
+
+func TestTemporarySnapshotNickHashesEntireWorkflowID(t *testing.T) {
+	first, second := temporarySnapshotNick("resurrect-0123456789"), temporarySnapshotNick("resurrect-9876543210")
+	if first == second || !regexp.MustCompile(`^msg_[A-Za-z0-9_]+$`).MatchString(first) || len(first) > 24 {
+		t.Fatalf("nicks=%q %q", first, second)
+	}
+}
 
 type roomSnapshotSessionStub struct{ id string }
 
@@ -100,7 +108,7 @@ func TestCredentialedRoomSnapshotUsesProtocolValidTemporaryNick(t *testing.T) {
 	if captured.TemporaryJoin == nil {
 		t.Fatal("credentialed snapshot did not receive a temporary join")
 	}
-	if captured.TemporaryJoin.Channel != "lounge" || captured.TemporaryJoin.Nick != "msg_list_abc" || captured.TemporaryJoin.Password != "secret" {
+	if captured.TemporaryJoin.Channel != "lounge" || !regexp.MustCompile(`^msg_[a-f0-9]{16}$`).MatchString(captured.TemporaryJoin.Nick) || captured.TemporaryJoin.Password != "secret" {
 		t.Fatalf("temporary join = %#v", captured.TemporaryJoin)
 	}
 }

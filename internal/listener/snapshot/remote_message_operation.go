@@ -2,6 +2,8 @@ package snapshot
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"zenbot/internal/model"
 )
@@ -13,8 +15,22 @@ func NewRemoteMessageOperation(message string) RemoteMessageOperation {
 }
 
 func (o RemoteMessageOperation) Apply(context RoomSnapshotContext, snapshot Snapshot) (OperationResult, error) {
+	if err := executionContext(context).Err(); err != nil {
+		return Failed(), err
+	}
+	for _, user := range snapshot.Users {
+		if user == nil {
+			return Failed(), fmt.Errorf("snapshot contains nil user")
+		}
+	}
+	if strings.TrimSpace(o.message) == "" {
+		return Empty(), nil
+	}
 	if snapshotContainsOnlyMe(snapshot.Users) {
 		return Empty(" " + context.TargetChannel + " is empty"), nil
+	}
+	if context.SendRaw == nil {
+		return Failed(), fmt.Errorf("snapshot raw sender is not configured")
 	}
 	payload, err := json.Marshal(struct {
 		Cmd  string `json:"cmd"`
@@ -25,14 +41,19 @@ func (o RemoteMessageOperation) Apply(context RoomSnapshotContext, snapshot Snap
 		return Failed(), err
 	}
 	if err := context.SendRaw(string(payload)); err != nil {
-		return Failed(), err
+		result := Failed()
+		result.OutcomeUnknown = true
+		return result, err
 	}
-	return Success("sent successfully."), nil
+	result := Success("sent successfully.")
+	result.ActionCount = 1
+	result.DeliveryCount = 1
+	return result, nil
 }
 
 func snapshotContainsOnlyMe(users []*model.User) bool {
 	for _, user := range users {
-		if !user.Isme {
+		if user != nil && !user.Isme {
 			return false
 		}
 	}

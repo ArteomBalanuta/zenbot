@@ -61,7 +61,7 @@ func TestCoordinatorProcessesFirstCorrelatedSnapshotAndCleansUp(t *testing.T) {
 	s := &fakeSession{id: "session-1"}
 	op := &recordingOperation{result: OperationResult{Outcome: OutcomeSuccess, Reply: "done"}}
 	var replies []string
-	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, func(_ RoomSnapshotRequest, reply string) { replies = append(replies, reply) }, ParseUsers, time.Second)
+	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, func(_ RoomSnapshotRequest, reply string) error { replies = append(replies, reply); return nil }, ParseUsers, time.Second)
 
 	if err := c.Submit(request(op)); err != nil {
 		t.Fatal(err)
@@ -95,8 +95,9 @@ func TestCoordinatorCompletesRequestAfterPublishingReply(t *testing.T) {
 	events := make([]string, 0, 2)
 	var completed OperationResult
 	var completionFlushed, completionClosed int32
-	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, func(_ RoomSnapshotRequest, _ string) {
+	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, func(_ RoomSnapshotRequest, _ string) error {
 		events = append(events, "reply")
+		return nil
 	}, ParseUsers, time.Second)
 	req := RoomSnapshotRequest{
 		WorkflowID:    "wf-completion",
@@ -223,10 +224,14 @@ func TestCoordinatorFailureAndStartFailureCleanup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &fakeSession{id: "session"}
 			c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, nil, ParseUsers, time.Second)
-			if err := c.Submit(request(&recordingOperation{})); err != nil {
+			completed := make(chan OperationResult, 1)
+			req := request(&recordingOperation{})
+			req.OnComplete = func(r OperationResult) { completed <- r }
+			if err := c.Submit(req); err != nil {
 				t.Fatal(err)
 			}
 			tc.event(c)
+			<-completed
 			if c.State("wf-1") != tc.want || s.closed.Load() != 1 || c.ActiveWorkflowCount() != 0 {
 				t.Fatalf("state=%s closed=%d active=%d", c.State("wf-1"), s.closed.Load(), c.ActiveWorkflowCount())
 			}
@@ -246,8 +251,9 @@ func TestCoordinatorFailureAndStartFailureCleanup(t *testing.T) {
 func TestCoordinatorUsesRequestSpecificFailureReply(t *testing.T) {
 	session := &fakeSession{id: "list-session"}
 	var replies []string
-	coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) {
+	coordinator := NewRoomSnapshotCoordinator(fakeFactory{session: session}, func(_ RoomSnapshotRequest, reply string) error {
 		replies = append(replies, reply)
+		return nil
 	}, ParseUsers, time.Second)
 	req := request(&recordingOperation{})
 	req.ReplyMessage = "Unable to list users in the requested room."

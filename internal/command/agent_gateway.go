@@ -99,6 +99,10 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 	}()
 	status, err := definition.New(capturing, message).Execute(ctx)
 	(&legacyAdapter{engine: capturing, def: definition, msg: message}).audit(ctx, status)
+	if len(capturing.snapshotCompletions) > 0 {
+		_ = capturing.awaitSnapshotCompletions(ctx)
+		return CommandExecution{Status: capturing.snapshotStatus}, nil
+	}
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return CommandExecution{Status: commandgateway.OutcomeNotFound}, nil
@@ -107,9 +111,6 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 	}
 	if status != model.SUCCESSFUL {
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, nil
-	}
-	if err := capturing.awaitSnapshotCompletions(ctx); err != nil {
-		return CommandExecution{Status: commandgateway.OutcomeUnknown}, nil
 	}
 	return CommandExecution{Status: commandgateway.OutcomeSucceeded}, nil
 }

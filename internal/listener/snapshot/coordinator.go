@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,10 @@ type TemporaryJoin struct {
 }
 
 type RoomSnapshotRequest struct {
+	// Context owns temporary construction, execution, and cancellation. Nil is
+	// retained only for legacy callers and means context.Background().
+	Context            context.Context
+	onTransportError   func(error)
 	WorkflowID         string
 	Author             string
 	Whisper            bool
@@ -43,6 +48,7 @@ func (r RoomSnapshotRequest) validate() error {
 }
 
 type RoomSnapshotContext struct {
+	Context                                                              context.Context
 	WorkflowID, Author, SourceChannel, TargetChannel, DestinationChannel string
 	Reply                                                                func(string)
 	SendRaw                                                              func(string) error
@@ -51,6 +57,14 @@ type RoomSnapshotContext struct {
 type RoomSnapshotOperation interface {
 	Apply(RoomSnapshotContext, Snapshot) (OperationResult, error)
 }
+
+func executionContext(ctx RoomSnapshotContext) context.Context {
+	if ctx.Context == nil {
+		return context.Background()
+	}
+	return ctx.Context
+}
+
 type OperationFunc func(RoomSnapshotContext, Snapshot) (OperationResult, error)
 
 func (f OperationFunc) Apply(c RoomSnapshotContext, s Snapshot) (OperationResult, error) {
@@ -71,6 +85,14 @@ type OperationResult struct {
 	Outcome OperationOutcome
 	Reply   string
 	Data    json.RawMessage
+	// Counts describe successful outward writes, including delivered replies.
+	// Temporary-session join frames are setup and never contribute.
+	ActionCount   int
+	DeliveryCount int
+	// OutcomeUnknown marks ambiguous writes/flushes or an interrupted partial
+	// action. Error retains the operation and cleanup causes independently.
+	OutcomeUnknown bool
+	Error          error
 }
 
 func Success(reply ...string) OperationResult { return result(OutcomeSuccess, reply...) }
@@ -103,7 +125,7 @@ func (f SessionFactoryFunc) Create(r RoomSnapshotRequest, sink SnapshotSink) (Se
 	return f(r, sink)
 }
 
-type ReplySink func(RoomSnapshotRequest, string)
+type ReplySink func(RoomSnapshotRequest, string) error
 type OutcomeSink func(RoomSnapshotRequest, OperationResult)
 type SnapshotParser func(string) (Snapshot, error)
 
@@ -119,22 +141,29 @@ const (
 )
 
 type RoomSnapshotCoordinator struct {
-	factory SessionFactory
-	reply   ReplySink
-	outcome OutcomeSink
-	parser  SnapshotParser
-	timeout time.Duration
-	mu      sync.Mutex
-	active  map[string]*workflow
-	states  map[string]WorkflowState
+	factory  SessionFactory
+	reply    ReplySink
+	outcome  OutcomeSink
+	parser   SnapshotParser
+	timeout  time.Duration
+	mu       sync.Mutex
+	active   map[string]*workflow
+	states   map[string]WorkflowState
+	retained []string
 }
 type workflow struct {
-	coordinator *RoomSnapshotCoordinator
-	request     RoomSnapshotRequest
-	session     Session
-	timer       *time.Timer
-	mu          sync.Mutex
-	state       WorkflowState
+	coordinator  *RoomSnapshotCoordinator
+	request      RoomSnapshotRequest
+	session      Session
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	payload      chan string
+	done         chan struct{}
+	claimed      bool
+	terminal     bool
+	failureState WorkflowState
+	failure      error
 }
 
 func NewRoomSnapshotCoordinator(factory SessionFactory, reply ReplySink, parser SnapshotParser, timeout time.Duration) *RoomSnapshotCoordinator {
@@ -162,36 +191,34 @@ func (c *RoomSnapshotCoordinator) Submit(request RoomSnapshotRequest) error {
 	if err := request.validate(); err != nil {
 		return err
 	}
-	w := &workflow{coordinator: c, request: request, state: StatePending}
+	parent := request.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, c.timeout)
+	w := &workflow{coordinator: c, request: request, ctx: ctx, cancel: cancel, payload: make(chan string, 1), done: make(chan struct{})}
+	w.request.Context = ctx
+	w.request.onTransportError = func(err error) { w.fail(StateFailed, err) }
 	c.mu.Lock()
 	if _, exists := c.active[request.WorkflowID]; exists {
 		c.mu.Unlock()
+		cancel()
 		return fmt.Errorf("workflow %q already active", request.WorkflowID)
 	}
 	c.active[request.WorkflowID], c.states[request.WorkflowID] = w, StatePending
 	c.mu.Unlock()
 
-	session, err := c.factory.Create(request, SnapshotSink(func(payload string) { w.receive(payload) }))
-	if err == nil && session == nil {
-		err = errors.New("session factory returned nil session")
-	}
-	if err == nil {
-		w.session = session
-		w.setState(StateRunning)
-		w.mu.Lock()
-		w.timer = time.AfterFunc(c.timeout, func() { w.fail(StateTimedOut, errors.New("snapshot workflow timed out")) })
-		w.mu.Unlock()
-		err = session.Start()
-	}
-	if err != nil {
-		w.fail(StateFailed, err)
-		return err
-	}
-	return nil
+	started := make(chan error, 1)
+	go w.run(started)
+	return <-started
 }
 func (c *RoomSnapshotCoordinator) OnSnapshot(sessionID, payload string) bool {
 	w := c.find(sessionID)
-	return w != nil && w.receive(payload)
+	if w == nil || !w.receive(payload) {
+		return false
+	}
+	<-w.done
+	return true
 }
 func (c *RoomSnapshotCoordinator) OnTransportError(sessionID string, err error) bool {
 	w := c.find(sessionID)
@@ -221,126 +248,216 @@ func (c *RoomSnapshotCoordinator) find(sessionID string) *workflow {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, w := range c.active {
-		if w.session != nil && w.session.ID() == sessionID {
+		w.mu.Lock()
+		matches := w.session != nil && w.session.ID() == sessionID
+		w.mu.Unlock()
+		if matches {
 			return w
 		}
 	}
 	return nil
 }
-func (w *workflow) setState(state WorkflowState) {
-	w.mu.Lock()
-	w.state = state
-	w.mu.Unlock()
-	w.coordinator.mu.Lock()
-	w.coordinator.states[w.request.WorkflowID] = state
-	w.coordinator.mu.Unlock()
-}
+
+// receive only queues work: it may be called synchronously during Start or by
+// the transport reader. The execution owner never runs on either callback.
 func (w *workflow) receive(payload string) bool {
 	w.mu.Lock()
-	if w.state != StateRunning {
-		w.mu.Unlock()
+	defer w.mu.Unlock()
+	if w.claimed || w.terminal || w.ctx.Err() != nil {
 		return false
 	}
-	w.mu.Unlock()
-	snapshot, err := w.coordinator.parser(payload)
-	if err != nil {
-		return w.fail(StateFailed, err)
-	}
-	w.mu.Lock()
-	if w.state != StateRunning {
-		w.mu.Unlock()
-		return false
-	}
-	w.state = StateCompleted
-	w.mu.Unlock()
-	w.coordinator.mu.Lock()
-	w.coordinator.states[w.request.WorkflowID] = StateCompleted
-	delete(w.coordinator.active, w.request.WorkflowID)
-	w.coordinator.mu.Unlock()
-	w.stopTimer()
-	ctx := RoomSnapshotContext{WorkflowID: w.request.WorkflowID, Author: w.request.Author, SourceChannel: w.request.SourceChannel, TargetChannel: w.request.TargetChannel, DestinationChannel: w.request.DestinationChannel, Reply: func(s string) {
-		if w.coordinator.reply != nil {
-			w.coordinator.reply(w.request, s)
-		}
-	}, SendRaw: func(s string) error { return w.session.SendRaw(s) }}
-	result, opErr := w.request.Operation.Apply(ctx, snapshot)
-	if opErr != nil {
-		w.mu.Lock()
-		w.state = StateFailed
-		w.mu.Unlock()
-		w.coordinator.mu.Lock()
-		w.coordinator.states[w.request.WorkflowID] = StateFailed
-		w.coordinator.mu.Unlock()
-		result = Failed(errString(opErr))
-		if w.coordinator.outcome != nil {
-			w.coordinator.outcome(w.request, cloneOperationResult(result))
-		}
-		w.publishFailure()
-	} else {
-		w.publish(result)
-		_ = w.session.Flush()
-	}
-	_ = w.session.Close()
-	w.complete(result)
+	w.claimed = true
+	w.payload <- payload
 	return true
 }
 func (w *workflow) fail(state WorkflowState, err error) bool {
 	w.mu.Lock()
-	if w.state == StateCompleted || w.state == StateFailed || w.state == StateCancelled || w.state == StateTimedOut {
-		w.mu.Unlock()
+	defer w.mu.Unlock()
+	if w.terminal || w.failure != nil {
 		return false
 	}
-	w.state = state
-	w.mu.Unlock()
-	w.coordinator.mu.Lock()
-	w.coordinator.states[w.request.WorkflowID] = state
-	delete(w.coordinator.active, w.request.WorkflowID)
-	w.coordinator.mu.Unlock()
-	w.stopTimer()
-	result := OperationResult{Outcome: OutcomeFailed, Reply: errString(err)}
-	w.publishFailure()
-	if w.coordinator.outcome != nil {
-		w.coordinator.outcome(w.request, cloneOperationResult(result))
+	if err == nil {
+		err = errors.New("snapshot transport failed")
 	}
-	if w.session != nil {
-		_ = w.session.Close()
-	}
-	w.complete(result)
+	w.failureState, w.failure = state, err
+	w.cancel()
 	return true
 }
 
-func (w *workflow) stopTimer() {
+func (w *workflow) run(started chan<- error) {
+	result := Success()
+	var session Session
+	startSent := false
+	actions, deliveries := 0, 0
+	unknown := false
+	var actionErr error
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result.Outcome = OutcomeFailed
+			result.Error = fmt.Errorf("snapshot operation panic: %v", recovered)
+			unknown = true
+		}
+		// Boundary counts also survive a panic before the operation returns.
+		result.ActionCount = actions
+		result.DeliveryCount += deliveries
+		result.OutcomeUnknown = result.OutcomeUnknown || unknown
+		result.Error = errors.Join(result.Error, actionErr)
+		if session != nil {
+			if err := session.Flush(); err != nil {
+				result.Error = errors.Join(result.Error, err)
+				result.OutcomeUnknown = true
+			}
+			if err := session.Close(); err != nil {
+				result.Error = errors.Join(result.Error, err)
+			}
+		}
+		w.mu.Lock()
+		failure, state := w.failure, w.failureState
+		w.terminal = true
+		w.mu.Unlock()
+		if failure == nil && w.ctx.Err() != nil {
+			failure = w.ctx.Err()
+			state = StateCancelled
+			if errors.Is(failure, context.DeadlineExceeded) {
+				state = StateTimedOut
+			}
+		}
+		result.Error = errors.Join(result.Error, failure)
+		if failure != nil && actions > 0 {
+			result.OutcomeUnknown = true
+		}
+		if result.Error != nil {
+			if result.Outcome != OutcomeFailed {
+				result.Reply = errString(result.Error)
+			}
+			result.Outcome = OutcomeFailed
+		}
+		if result.Outcome == OutcomeFailed {
+			if state == "" {
+				state = StateFailed
+			}
+			if result.Reply == "" {
+				result.Reply = errString(result.Error)
+			}
+		} else {
+			state = StateCompleted
+		}
+		reply := result.Reply
+		if result.Outcome == OutcomeFailed {
+			reply = w.request.ReplyMessage
+		}
+		if reply != "" && w.coordinator.reply != nil {
+			if err := w.coordinator.reply(w.request, reply); err != nil {
+				result.Error = errors.Join(result.Error, err)
+				result.Outcome, result.OutcomeUnknown = OutcomeFailed, true
+				state = StateFailed
+			} else {
+				result.DeliveryCount++
+				result.ActionCount++
+			}
+		}
+		w.cancel()
+		c := w.coordinator
+		c.mu.Lock()
+		delete(c.active, w.request.WorkflowID)
+		c.states[w.request.WorkflowID] = state
+		// Retain at most 256 terminal outcomes; active workflows remain queryable.
+		for i, id := range c.retained {
+			if id == w.request.WorkflowID {
+				c.retained = append(c.retained[:i], c.retained[i+1:]...)
+				break
+			}
+		}
+		c.retained = append(c.retained, w.request.WorkflowID)
+		if len(c.retained) > 256 {
+			id := c.retained[0]
+			c.retained = c.retained[1:]
+			if c.active[id] == nil {
+				delete(c.states, id)
+			}
+		}
+		c.mu.Unlock()
+		if c.outcome != nil {
+			c.outcome(w.request, cloneOperationResult(result))
+		}
+		if w.request.OnComplete != nil {
+			w.request.OnComplete(cloneOperationResult(result))
+		}
+		close(w.done)
+		if !startSent {
+			started <- result.Error
+		}
+	}()
+	var err error
+	session, err = w.coordinator.factory.Create(w.request, func(payload string) { w.receive(payload) })
+	if err == nil && session == nil {
+		err = errors.New("session factory returned nil session")
+	}
 	w.mu.Lock()
-	timer := w.timer
+	w.session = session
 	w.mu.Unlock()
-	if timer != nil {
-		timer.Stop()
+	if err == nil {
+		err = w.ctx.Err()
 	}
-}
-
-func (w *workflow) publish(result OperationResult) {
-	if w.coordinator.outcome != nil {
-		w.coordinator.outcome(w.request, cloneOperationResult(result))
+	if err == nil {
+		w.coordinator.mu.Lock()
+		w.coordinator.states[w.request.WorkflowID] = StateRunning
+		w.coordinator.mu.Unlock()
+		err = session.Start()
 	}
-	if result.Reply != "" && w.coordinator.reply != nil {
-		w.coordinator.reply(w.request, result.Reply)
+	if err != nil {
+		result.Error = err
+		return
 	}
-}
-
-func (w *workflow) complete(result OperationResult) {
-	if w.request.OnComplete != nil {
-		w.request.OnComplete(cloneOperationResult(result))
+	started <- nil
+	startSent = true
+	select {
+	case <-w.ctx.Done():
+		return
+	case payload := <-w.payload:
+		if err = w.ctx.Err(); err != nil {
+			result.Error = err
+			return
+		}
+		parsed, parseErr := w.coordinator.parser(payload)
+		if parseErr != nil {
+			result.Error = parseErr
+			return
+		}
+		operationContext := RoomSnapshotContext{Context: w.ctx, WorkflowID: w.request.WorkflowID, Author: w.request.Author, SourceChannel: w.request.SourceChannel, TargetChannel: w.request.TargetChannel, DestinationChannel: w.request.DestinationChannel}
+		operationContext.SendRaw = func(raw string) error {
+			if err := w.ctx.Err(); err != nil {
+				return err
+			}
+			err := session.SendRaw(raw)
+			if err != nil {
+				unknown = true
+				actionErr = errors.Join(actionErr, err)
+			} else {
+				actions++
+			}
+			return err
+		}
+		operationContext.Reply = func(reply string) {
+			if w.coordinator.reply == nil {
+				return
+			}
+			if err := w.coordinator.reply(w.request, reply); err != nil {
+				unknown = true
+				actionErr = errors.Join(actionErr, err)
+			} else {
+				deliveries++
+				actions++
+			}
+		}
+		result, err = w.request.Operation.Apply(operationContext, parsed)
+		result.Error = errors.Join(result.Error, err)
 	}
 }
 
 func cloneOperationResult(result OperationResult) OperationResult {
 	result.Data = append(json.RawMessage(nil), result.Data...)
 	return result
-}
-func (w *workflow) publishFailure() {
-	if w.coordinator.reply != nil && w.request.ReplyMessage != "" {
-		w.coordinator.reply(w.request, w.request.ReplyMessage)
-	}
 }
 func errString(err error) string {
 	if err == nil {

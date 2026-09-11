@@ -22,7 +22,7 @@ func TestNukeRoomOperationDoesNotLockWhenABanFails(t *testing.T) {
 			return assertNukeBanFailure(payload)
 		},
 	}, Snapshot{Users: []*model.User{{Name: "alice"}, {Name: "bob"}}})
-	if err != nil || result.Outcome != OutcomeFailed || result.Reply != "Failed to nuke hotlinks" {
+	if err == nil || result.Outcome != OutcomeFailed || result.Reply != "Failed to nuke hotlinks" {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	if len(payloads) != 1 || !mapsEqual(payloads[0], map[string]string{"cmd": "ban", "nick": "alice"}) {
