@@ -3,6 +3,7 @@ package core
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 type opaqueManagedEngine struct{ ManagedEngine }
@@ -86,4 +87,48 @@ func TestGetPrefixAndUpdatePrefixAreRaceFree(t *testing.T) {
 		}
 	}
 	readers.Wait()
+}
+
+func TestFinalIntegrationCompatibilitySetPrefixAndReadAreRaceFree(t *testing.T) {
+	host := &EngineImpl{Prefix: "!"}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				host.SetPrefix("$")
+				_ = host.GetPrefix()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+type prefixCallbackEngine struct {
+	ManagedEngine
+	host     *EngineImpl
+	observed chan string
+}
+
+func (e prefixCallbackEngine) SetPrefix(string) { e.observed <- e.host.GetPrefix() }
+
+func TestFinalIntegrationCompatibilityPrefixUnlocksBeforePropagation(t *testing.T) {
+	host := &EngineImpl{Prefix: "!"}
+	callback := prefixCallbackEngine{host: host, observed: make(chan string, 1)}
+	manager := NewReplicaManager("host")
+	if err := manager.Add("replica", managedReplica{ManagedEngine: callback}); err != nil {
+		t.Fatal(err)
+	}
+	host.SetReplicaController(NewManagedReplicaController(manager, nil))
+	done := make(chan struct{})
+	go func() { host.SetPrefix("$"); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("prefix propagation held host lock across callback")
+	}
+	if got := <-callback.observed; got != "$" {
+		t.Fatalf("callback observed prefix=%q", got)
+	}
 }

@@ -554,9 +554,13 @@ func (e *EngineImpl) startSharingMessages() {
 
 func (e *EngineImpl) ReplaceActiveUsers(users []*model.User) {
 	next := make(map[*model.User]struct{}, len(users))
+	byName := make(map[string]*model.User, len(users))
 	for _, u := range users {
 		if u != nil {
-			next[copyRoomUser(u)] = struct{}{}
+			delete(next, byName[u.Name])
+			owned := copyRoomUser(u)
+			byName[u.Name] = owned
+			next[owned] = struct{}{}
 		}
 	}
 	e.usersMu.Lock()
@@ -575,7 +579,7 @@ func (e *EngineImpl) AddActiveUser(joined *model.User) {
 		e.ActiveUsers = make(map[*model.User]struct{})
 	}
 	for u := range e.ActiveUsers {
-		if model.IdentityKey(u.Trip, u.Hash, u.Name) == model.IdentityKey(owned.Trip, owned.Hash, owned.Name) {
+		if u.Name == owned.Name {
 			delete(e.ActiveUsers, u)
 		}
 	}
@@ -660,9 +664,8 @@ func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
 	if e.AfkUsers == nil {
 		e.AfkUsers = make(map[*model.User]string)
 	}
-	identity := model.IdentityKey(owned.Trip, owned.Hash, owned.Name)
 	for current := range e.AfkUsers {
-		if model.IdentityKey(current.Trip, current.Hash, current.Name) == identity {
+		if current.Name == owned.Name {
 			delete(e.AfkUsers, current)
 		}
 	}
@@ -691,7 +694,7 @@ func (e *EngineImpl) RemoveIfAfk(u *model.User) {
 	removed := false
 	e.afkMu.Lock()
 	for user := range e.AfkUsers {
-		if user.Name == name || (trip != "" && user.Trip == trip) {
+		if user.Name == name && user.Trip == trip {
 			delete(e.AfkUsers, user)
 			removed = true
 			break
@@ -944,7 +947,7 @@ func (e *EngineImpl) SetName(name string) {
 }
 
 func (e *EngineImpl) SetPrefix(prefix string) {
-	e.Prefix = prefix
+	e.setPrefix(prefix)
 	if e.replicaController != nil {
 		e.replicaController.SetPrefix(prefix)
 	}

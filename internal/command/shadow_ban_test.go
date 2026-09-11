@@ -223,7 +223,7 @@ func TestShadowBanOfflineAndContainsModePreserveSourceReplies(t *testing.T) {
 
 	repo.persisted, engine.chats, engine.kicked = nil, nil, nil
 	status, err = definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban -c raid"}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || len(repo.persisted) != 1 || repo.persisted[0].Name != "raider-a" || !equalStrings(engine.kicked, []string{"raider-a"}) || len(engine.chats) != 0 {
+	if status != model.SUCCESSFUL || err != nil || len(repo.persisted) != 1 || repo.persisted[0].Name != "raider-a" || !equalStrings(engine.kicked, []string{"raider-a"}) || len(engine.chats) != 1 || !strings.Contains(engine.chats[0], "server application unconfirmed") {
 		t.Fatalf("contains status=%v err=%v records=%+v kicked=%v chats=%v", status, err, repo.persisted, engine.kicked, engine.chats)
 	}
 }

@@ -91,6 +91,9 @@ func (c *shadowBanCommand) shadowBanContaining(ctx context.Context, pattern stri
 			return model.FAILED, err
 		}
 	}
+	if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Shadow-ban records saved for %d users; %d kick requests sent, server application unconfirmed.", len(selected), len(selected))); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

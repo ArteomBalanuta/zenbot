@@ -185,7 +185,9 @@ func TestReplicaExplicitStopDoesNotReportTransportCancellation(t *testing.T) {
 		select {
 		case err := <-reports:
 			t.Fatalf("explicit stop reported as failure: %v", err)
-		default:
+		case <-time.After(10 * time.Millisecond):
+			// runtimeDone precedes reporting. Allow the callback a bounded
+			// settling window; this is not proof of indefinite silence.
 		}
 	}
 }

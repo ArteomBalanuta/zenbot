@@ -11,7 +11,7 @@ import (
 
 func TestKickOrResurrectOperationSendsMoveRequestForNormalizedPresentTarget(t *testing.T) {
 	var raws []string
-	operation := NewKickOrResurrectOperation("@Alice")
+	operation := NewKickOrResurrectOperation("Alice")
 	result, err := operation.Apply(RoomSnapshotContext{DestinationChannel: "destination", SendRaw: func(raw string) error {
 		raws = append(raws, raw)
 		return nil

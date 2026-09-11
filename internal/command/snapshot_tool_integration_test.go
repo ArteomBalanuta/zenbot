@@ -37,8 +37,10 @@ type ownedSnapshotSession struct {
 	ctx                        context.Context
 	sink                       snapshot.SnapshotSink
 	payload                    string
+	raws                       []string
 	sends, closed              int
 	failAt                     int
+	blockAt                    int
 	entered, release           chan struct{}
 	closeEntered, closeRelease chan struct{}
 }
@@ -54,9 +56,14 @@ func (s *ownedSnapshotSession) Close() error {
 	s.closed++
 	return nil
 }
-func (s *ownedSnapshotSession) SendRaw(string) error {
+func (s *ownedSnapshotSession) SendRaw(raw string) error {
+	s.raws = append(s.raws, raw)
 	s.sends++
-	if s.entered != nil && s.sends == 2 {
+	blockAt := s.blockAt
+	if blockAt == 0 {
+		blockAt = 2
+	}
+	if s.entered != nil && s.sends == blockAt {
 		close(s.entered)
 		<-s.ctx.Done()
 		<-s.release
@@ -66,6 +73,34 @@ func (s *ownedSnapshotSession) SendRaw(string) error {
 		return errors.New("write outcome unknown")
 	}
 	return nil
+}
+
+func TestFinalIntegrationSnapshotCanonicalTargets(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, arguments, payload, wantNick string
+		wantActions                                 int
+	}{
+		{"nuke marked", "nuke", `{"room":"lounge"}`, `{"cmd":"onlineSet","users":[{"nick":"@alice"}]}`, "@alice", 2},
+		{"move competing", "resurrect", `{"nick":"@@alice","source":"lounge","destination":"room"}`, `{"cmd":"onlineSet","users":[{"nick":"alice"},{"nick":"@alice"}]}`, "@alice", 1},
+		{"move unicode and escaped", "resurrect", `{"nick":"@@É\\\"ve","source":"lounge","destination":"room"}`, `{"cmd":"onlineSet","users":[{"nick":"É\\\"ve"},{"nick":"@é\\\"ve"}]}`, "@é\\\"ve", 1},
+		{"nuke unicode and escaped", "nuke", `{"room":"lounge"}`, `{"cmd":"onlineSet","users":[{"nick":"@é\\\"ve"}]}`, "@é\\\"ve", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &ownedSnapshotSession{payload: tc.payload}
+			// Use the registered operation, including the real command constructor.
+			result := executeSnapshotTool(t, context.Background(), snapshotToolFixture(session, nil, nil), tc.command, tc.arguments)
+			if result.IsError || result.ActionCount != tc.wantActions || len(session.raws) != tc.wantActions || session.closed != 1 {
+				t.Fatalf("result=%+v raws=%v closed=%d", result, session.raws, session.closed)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal([]byte(session.raws[0]), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["nick"] != tc.wantNick {
+				t.Fatalf("wire nick=%q want=%q", payload["nick"], tc.wantNick)
+			}
+		})
+	}
 }
 func snapshotToolFixture(session *ownedSnapshotSession, replyErr error, operation snapshot.RoomSnapshotOperation) *ownedSnapshotEngine {
 	coordinator := snapshot.NewRoomSnapshotCoordinator(snapshot.SessionFactoryFunc(func(req snapshot.RoomSnapshotRequest, sink snapshot.SnapshotSink) (snapshot.Session, error) {
@@ -126,7 +161,7 @@ func TestSnapshotToolIntegrationReceipts(t *testing.T) {
 
 func TestSnapshotToolCancellationWaitsForSendAndCloseAndRetainsPartialEvidence(t *testing.T) {
 	session := &ownedSnapshotSession{payload: `{"cmd":"onlineSet","users":[{"nick":"alice"},{"nick":"bob"}]}`, entered: make(chan struct{}), release: make(chan struct{}), closeEntered: make(chan struct{}), closeRelease: make(chan struct{})}
-	engine := snapshotToolFixture(session, nil, snapshot.NewNukeRoomOperation(0))
+	engine := snapshotToolFixture(session, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan contract.Result, 1)
@@ -149,6 +184,52 @@ func TestSnapshotToolCancellationWaitsForSendAndCloseAndRetainsPartialEvidence(t
 	r := <-done
 	if r.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || r.EffectState != contract.EffectUnknown || r.ActionCount != 2 || r.DeliveryCount != 1 || !strings.Contains(r.Content, "do not repeat") || session.sends != 2 || session.closed != 1 {
 		t.Fatalf("result=%+v sends=%d closed=%d", r, session.sends, session.closed)
+	}
+}
+
+func TestFinalIntegrationRemoteMoveAbsentMarkerDoesNotSelectPlainName(t *testing.T) {
+	session := &ownedSnapshotSession{payload: `{"cmd":"onlineSet","users":[{"nick":"alice"}]}`}
+	result := executeSnapshotTool(t, context.Background(), snapshotToolFixture(session, nil, nil), "resurrect", `{"nick":"@@alice","source":"lounge","destination":"room"}`)
+	if result.ErrorCode != "NOT_FOUND" || len(session.raws) != 0 || session.closed != 1 || result.ActionCount != 1 || result.DeliveryCount != 1 {
+		t.Fatalf("result=%+v raws=%v closed=%d", result, session.raws, session.closed)
+	}
+}
+
+func TestFinalIntegrationRemoteMoveCancellationWaitsForSourceSend(t *testing.T) {
+	session := &ownedSnapshotSession{payload: `{"cmd":"onlineSet","users":[{"nick":"alice"},{"nick":"@alice"}]}`, blockAt: 1, entered: make(chan struct{}), release: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan contract.Result, 1)
+	go func() {
+		done <- executeSnapshotTool(t, ctx, snapshotToolFixture(session, nil, nil), "resurrect", `{"nick":"@@alice","source":"lounge","destination":"room"}`)
+	}()
+	select {
+	case <-session.entered:
+	case <-time.After(time.Second):
+		t.Fatal("move did not reach source send")
+	}
+	cancel()
+	select {
+	case result := <-done:
+		t.Fatalf("returned while source send remained active: %+v", result)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(session.release)
+	var result contract.Result
+	select {
+	case result = <-done:
+	case <-time.After(time.Second):
+		t.Fatal("move did not settle after source send stopped")
+	}
+	if result.ErrorCode != "ACTION_OUTCOME_UNKNOWN" || result.EffectState != contract.EffectUnknown || !strings.Contains(result.Content, "do not repeat") || session.sends != 1 || session.closed != 1 {
+		t.Fatalf("result=%+v sends=%d closed=%d", result, session.sends, session.closed)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(session.raws[0]), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["nick"] != "@alice" {
+		t.Fatalf("cancelled move targeted %q", payload["nick"])
 	}
 }
 

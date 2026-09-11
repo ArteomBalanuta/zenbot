@@ -154,6 +154,26 @@ func TestSaturnListRejectsCurrentRoomSoPresenceRoutesAreDisjoint(t *testing.T) {
 	}
 }
 
+func TestFinalIntegrationListSingleRoomMarkerRestriction(t *testing.T) {
+	for _, tc := range []struct {
+		room, operand string
+		reject        bool
+	}{
+		{"Programming", "?programming", true},
+		{"?Programming", "??programming", true},
+		{"?Programming", "?programming", false},
+		{"Programming", "??programming", false},
+	} {
+		gateway := &runCommandGatewayStub{result: verifiedCommandExecution("sent")}
+		caller, _ := api.NewContext(tc.room, "caller", "", "", false, []string{})
+		args, _ := json.Marshal(map[string]string{"room": tc.operand})
+		result, err := (agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "list"), Gateway: gateway}).Execute(context.Background(), caller, args)
+		if err != nil || (result.ErrorCode == "INVALID_ARGUMENTS") != tc.reject || (gateway.calls == 0) != tc.reject {
+			t.Errorf("case=%+v result=%+v calls=%d err=%v", tc, result, gateway.calls, err)
+		}
+	}
+}
+
 func TestSaturnListReturnsTypedRemoteRosterAlongsideDeliveryReceipts(t *testing.T) {
 	wantData := json.RawMessage(`{"room":"lounge","users":["alice","bob"],"count":2,"returnedCount":2,"truncated":false}`)
 	executed := verifiedCommandExecution("remote users")

@@ -120,3 +120,40 @@ func TestMailDeliveryCanceledAfterClaimReleasesOnlyUnsentAttempt(t *testing.T) {
 	}
 	assertAttemptState(t, d.DB, "trip-a", "ACCEPTED")
 }
+
+func TestMailDeliveryLostAcceptedCommitResponsePreservesReceiptAndRecipientIsolation(t *testing.T) {
+	d := openTestDB(t)
+	seedDeliveryMail(t, d.DB, "trip-a,trip-b", "PENDING")
+	lost := errors.New("accepted acknowledgement lost")
+	var commits atomic.Int32
+	db := mailDBWithCommitHook(t, d, func() error {
+		if commits.Add(1) == 2 {
+			return lost
+		}
+		return nil
+	})
+	sends := 0
+	err := deliveryService(t, db).DeliverPending(context.Background(), "alice", "trip-a", func(context.Context, model.Mail) error { sends++; return nil })
+	var uncertain *service.MailDeliveryUncertainError
+	if !errors.Is(err, repository.ErrCommitOutcomeUnknown) || !errors.Is(err, lost) || !errors.Is(err, service.ErrMailDeliveryUnknown) || !errors.As(err, &uncertain) || uncertain.MailID == 0 || uncertain.AttemptID == "" || sends != 1 {
+		t.Fatalf("err=%v sends=%d", err, sends)
+	}
+	// The service has already attempted markMailUnknown on this failure path.
+	assertAttemptState(t, d.DB, "trip-a", "ACCEPTED")
+	fresh := deliveryService(t, d.DB)
+	if err := fresh.DeliverPending(context.Background(), "alice", "trip-a", func(context.Context, model.Mail) error { sends++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if sends != 1 {
+		t.Fatalf("accepted recipient was resent: %d", sends)
+	}
+	otherSends := 0
+	if err := fresh.DeliverPending(context.Background(), "bob", "trip-b", func(context.Context, model.Mail) error { otherSends++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if otherSends != 1 || sends != 1 {
+		t.Fatalf("recipient isolation: alice=%d bob=%d", sends, otherSends)
+	}
+	assertAttemptState(t, d.DB, "trip-b", "ACCEPTED")
+	assertAttemptState(t, d.DB, "trip-a", "ACCEPTED")
+}

@@ -92,7 +92,7 @@ const moderatorCommands = " activity <trip>   - shows recent activity pa
 	" register,reg <nick> <trip> - registers or updates a nick/trip pair\n" +
 	" remove <name|trip>  - removes a registered user\n" +
 	" move,recover,heal,resurrect <nick> <source> <destination> - requests moving a user between rooms\n" +
-	" shadowban,sban <target> - shadow-bans by nick, trip, or hash\n" +
+	" shadowban,sban <nick> | -c <fragment> - saves local shadow-ban records and requests kicks for active matches\n" +
 	" shadowbanlist,banlist - lists shadow-banned users\n" +
 	" unshadowban <target> - removes a shadow ban\n" +
 	" ban <nick>    - bans a user\n" +

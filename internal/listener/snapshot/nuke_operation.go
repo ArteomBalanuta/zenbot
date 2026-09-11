@@ -3,6 +3,7 @@ package snapshot
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"zenbot/internal/util"
@@ -39,11 +40,10 @@ func (o NukeRoomOperation) Apply(ctx RoomSnapshotContext, snapshot Snapshot) (Op
 		if user == nil {
 			return fail(fmt.Errorf("snapshot contains nil user"), false)
 		}
-		nick, err := util.NormalizeNickTarget(&user.Name)
-		if err != nil {
-			return fail(err, false)
+		if strings.TrimSpace(user.Name) == "" {
+			return fail(util.ErrBlankNickTarget, false)
 		}
-		if err := sendNukeRaw(ctx, map[string]string{"cmd": "ban", "nick": nick}); err != nil {
+		if err := sendNukeRaw(ctx, map[string]string{"cmd": "ban", "nick": user.Name}); err != nil {
 			return fail(err, ctx.SendRaw != nil)
 		}
 		result.ActionCount++

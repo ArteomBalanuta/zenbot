@@ -113,7 +113,7 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	if err != nil {
 		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", err.Error(), contract.EffectNotStarted), nil
 	}
-	if definition.Canonical == "list" && strings.EqualFold(strings.TrimSpace(arguments), strings.TrimSpace(caller.Room())) {
+	if definition.Canonical == "list" && strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(arguments), "?"), caller.Room()) {
 		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", "saturn_list requires a room other than the caller's current room; use room_users for current-room presence", contract.EffectNotStarted), nil
 	}
 	if !commandgateway.TargetAllowed(caller, definition.Canonical, arguments) {

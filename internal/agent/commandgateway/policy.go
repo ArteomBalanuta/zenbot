@@ -39,5 +39,5 @@ func TargetAllowed(caller api.Context, command, arguments string) bool {
 	if len(fields) == 0 {
 		return false
 	}
-	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(fields[0]), "@"), strings.TrimPrefix(strings.TrimSpace(*target), "@"))
+	return strings.EqualFold(strings.TrimPrefix(fields[0], "@"), *target)
 }

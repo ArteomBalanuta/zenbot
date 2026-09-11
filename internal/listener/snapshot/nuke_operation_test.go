@@ -41,7 +41,7 @@ type errNukeRawFailure struct{}
 
 func (errNukeRawFailure) Error() string { return "raw ban failed" }
 
-func TestNukeRoomOperationSendsBanRequestsForNormalizedSnapshotUsersBeforeLockRequest(t *testing.T) {
+func TestNukeRoomOperationSendsBanRequestsForLiteralSnapshotUsersBeforeLockRequest(t *testing.T) {
 	var rawPayloads []map[string]string
 	operation := NewNukeRoomOperation(0)
 	result, err := operation.Apply(RoomSnapshotContext{
@@ -58,7 +58,7 @@ func TestNukeRoomOperationSendsBanRequestsForNormalizedSnapshotUsersBeforeLockRe
 	if err != nil || result.Outcome != OutcomeSuccess {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	want := []map[string]string{{"cmd": "ban", "nick": "alice"}, {"cmd": "ban", "nick": "bob"}, {"cmd": "lockroom"}}
+	want := []map[string]string{{"cmd": "ban", "nick": "@alice"}, {"cmd": "ban", "nick": " bob "}, {"cmd": "lockroom"}}
 	if len(rawPayloads) != len(want) {
 		t.Fatalf("payload count=%d, want %d: %#v", len(rawPayloads), len(want), rawPayloads)
 	}

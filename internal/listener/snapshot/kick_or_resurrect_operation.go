@@ -3,17 +3,17 @@ package snapshot
 import (
 	"encoding/json"
 	"fmt"
-
-	"zenbot/internal/util"
+	"strings"
 )
 
 // KickOrResurrectOperation submits the kick-to-room move request only after its
 // source-room snapshot establishes that the normalized target is present.
 type KickOrResurrectOperation struct{ target string }
 
+// NewKickOrResurrectOperation accepts the selector already normalized by the
+// command, so a remaining leading @ belongs to the observed nickname.
 func NewKickOrResurrectOperation(target string) KickOrResurrectOperation {
-	normalized, _ := util.NormalizeNickTarget(&target)
-	return KickOrResurrectOperation{target: normalized}
+	return KickOrResurrectOperation{target: target}
 }
 
 func (o KickOrResurrectOperation) Apply(ctx RoomSnapshotContext, source Snapshot) (OperationResult, error) {
@@ -21,7 +21,7 @@ func (o KickOrResurrectOperation) Apply(ctx RoomSnapshotContext, source Snapshot
 		return Failed(), err
 	}
 	for _, user := range source.Users {
-		if user == nil || !util.SameNick(&user.Name, &o.target) {
+		if user == nil || !strings.EqualFold(user.Name, o.target) {
 			continue
 		}
 		if ctx.SendRaw == nil {

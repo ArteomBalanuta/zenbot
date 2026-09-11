@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,15 +21,14 @@ import (
 func TestRealInboundWebSocketReplicaCommandReachesManager(t *testing.T) {
 	joins := make(chan string, 2)
 	connections := make(chan int, 2)
-	var n int
+	var n atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := (&websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}).Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
 		defer ws.Close()
-		n++
-		connection := n
+		connection := int(n.Add(1))
 		_, join, err := ws.ReadMessage()
 		if err != nil {
 			return
@@ -41,7 +41,11 @@ func TestRealInboundWebSocketReplicaCommandReachesManager(t *testing.T) {
 		} else {
 			_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"cmd":"onlineSet","users":[{"nick":"alice","trip":"x"}]}`))
 		}
-		<-r.Context().Done()
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
 	}))
 	defer server.Close()
 	url := "ws" + server.URL[4:]
@@ -57,6 +61,18 @@ func TestRealInboundWebSocketReplicaCommandReachesManager(t *testing.T) {
 		return replicas.NewReplica(ctx, channel)
 	})
 	master.SetReplicaController(controller)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := master.StopContext(cleanup); err != nil {
+			t.Error(err)
+		}
+		cancel()
+		replicaCleanup, cancelReplicas := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelReplicas()
+		if err := manager.StopAll(replicaCleanup); err != nil {
+			t.Error(err)
+		}
+	}()
 	if err := command.RegisterUserUtilities(master); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +81,6 @@ func TestRealInboundWebSocketReplicaCommandReachesManager(t *testing.T) {
 	if err := master.StartContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer master.StopContext(context.Background())
 	deadline := time.Now().Add(3 * time.Second)
 	for len(manager.Channels()) != 1 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -73,13 +88,14 @@ func TestRealInboundWebSocketReplicaCommandReachesManager(t *testing.T) {
 	if got := manager.Channels(); len(got) != 1 || got[0] != "requested-room" {
 		t.Fatalf("manager channels=%v", got)
 	}
-	seenReplica := false
-	for len(connections) > 0 {
-		if <-connections == 2 {
-			seenReplica = true
+	for {
+		select {
+		case connection := <-connections:
+			if connection == 2 {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("server did not consume the replica join frame")
 		}
-	}
-	if !seenReplica {
-		t.Fatal("replica websocket was not opened")
 	}
 }
