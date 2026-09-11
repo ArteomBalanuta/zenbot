@@ -7,14 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"zenbot/internal/testutil/h2jar"
 )
 
-const pinnedH2Jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
-
 func TestOpenAutoPortEmptyH2VersionClosesOwnedChild(t *testing.T) {
-	jar := os.Getenv("H2_JAR")
-	if jar == "" {
-		jar = pinnedH2Jar
+	jar, err := h2jar.Path()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(jar); err != nil {
 		t.Fatalf("H2 fixture jar: %v", err)

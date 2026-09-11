@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"zenbot/internal/repository/h2"
+	"zenbot/internal/testutil/h2jar"
 )
-
-const pinnedH2Jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
 
 // Open creates one independently owned H2 PostgreSQL-wire fixture for t.
 func Open(t testing.TB, stem string) *h2.Database {
@@ -20,9 +19,9 @@ func Open(t testing.TB, stem string) *h2.Database {
 	if stem == "" || stem == "." || strings.ContainsAny(stem, `/\\`) || strings.HasSuffix(stem, ".db") || strings.HasSuffix(stem, ".mv.db") {
 		t.Fatalf("invalid H2 fixture stem %q", stem)
 	}
-	jar := os.Getenv("H2_JAR")
-	if jar == "" {
-		jar = pinnedH2Jar
+	jar, err := h2jar.Path()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(jar); err != nil {
 		t.Fatalf("H2 fixture jar: %v", err)

@@ -5,13 +5,13 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
+	"zenbot/internal/testutil/h2jar"
 )
 
 type commitErrorDriver struct{ err error }
@@ -39,9 +39,9 @@ var (
 func openTestDB(t *testing.T) *Database {
 	t.Helper()
 	dir := t.TempDir()
-	jar := os.Getenv("H2_JAR")
-	if jar == "" {
-		jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
+	jar, err := h2jar.Path()
+	if err != nil {
+		t.Fatal(err)
 	}
 	d, err := Open(context.Background(), Config{
 		BaseDir: dir, DatabaseStem: filepath.Join(dir, "db"),

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"zenbot/internal/testutil/h2jar"
 
 	_ "modernc.org/sqlite"
 )
@@ -19,7 +20,7 @@ func TestOpenMigratesLegacySQLiteRowsAndArchivesSource(t *testing.T) {
 	legacy := stem + ".db"
 	createLegacySQLite(t, legacy, "legacy", 7, 1784648927381)
 
-	database, err := Open(context.Background(), testH2Config(dir, stem))
+	database, err := Open(context.Background(), testH2Config(t, dir, stem))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestOpenMigratesLegacySQLiteRowsAndArchivesSource(t *testing.T) {
 func TestOpenConnectsToSaturnCredentiallessH2Database(t *testing.T) {
 	dir := t.TempDir()
 	stem := filepath.Join(dir, "database")
-	config := testH2Config(dir, stem)
+	config := testH2Config(t, dir, stem)
 	createSaturnH2Database(t, config.H2Jar, stem)
 
 	database, err := Open(context.Background(), config)
@@ -80,7 +81,7 @@ func TestOpenNormalizesRelativeBaseDirectoryForPGServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config := testH2Config(relativeBaseDirectory, "database")
+	config := testH2Config(t, relativeBaseDirectory, "database")
 	database, err := Open(context.Background(), config)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -99,7 +100,7 @@ func TestOpenNormalizesRelativeBaseDirectoryForPGServer(t *testing.T) {
 func TestOpenRefusesToMergeConflictingSQLiteAndH2Data(t *testing.T) {
 	dir := t.TempDir()
 	stem := filepath.Join(dir, "database")
-	first, err := Open(context.Background(), testH2Config(dir, stem))
+	first, err := Open(context.Background(), testH2Config(t, dir, stem))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestOpenRefusesToMergeConflictingSQLiteAndH2Data(t *testing.T) {
 	}
 	createLegacySQLite(t, stem+".db", "sqlite", 1, 2)
 
-	second, err := Open(context.Background(), testH2Config(dir, stem))
+	second, err := Open(context.Background(), testH2Config(t, dir, stem))
 	if second != nil {
 		_ = second.Close()
 	}
@@ -161,10 +162,11 @@ func createSaturnH2Database(t *testing.T, jar, stem string) {
 	}
 }
 
-func testH2Config(dir, stem string) Config {
-	jar := os.Getenv("H2_JAR")
-	if jar == "" {
-		jar = "/Users/ab/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
+func testH2Config(t *testing.T, dir, stem string) Config {
+	t.Helper()
+	jar, err := h2jar.Path()
+	if err != nil {
+		t.Fatal(err)
 	}
 	return Config{BaseDir: dir, DatabaseStem: stem, H2Jar: jar, Host: "127.0.0.1", AutoPort: true, StartupTimeout: 5 * time.Second}
 }
