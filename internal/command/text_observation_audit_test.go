@@ -208,7 +208,7 @@ func TestTextObservationAuditSourceReadInventoryRunsOnceAndRetainsText(t *testin
 		Queries: queries,
 		Now:     func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) },
 	}}}
-	if got := executeTextObservationSource(t, users, "lastonline", "!lastonline merc", ""); !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || queries.calls != 1 {
+	if got := executeTextObservationSource(t, users, "lastonline", "!lastonline merc", ""); !strings.Contains(got, "merc — last seen messaging · 1 Jan 00:00 UTC\nLast message: hello") || queries.calls != 1 {
 		t.Fatalf("lastonline observation=%q calls=%d", got, queries.calls)
 	}
 	if got := executeTextObservationSource(t, users, "users", "!users", ""); got != "No registered users found." || queries.registeredCalls != 1 {

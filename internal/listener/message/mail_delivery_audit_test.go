@@ -17,6 +17,7 @@ type mailDeliveryAuditEngine struct {
 	whispers       int
 	publicAttempts int
 	whisperError   error
+	bodies         []string
 }
 
 func (e *mailDeliveryAuditEngine) ServiceBundle() *service.Bundle {
@@ -24,6 +25,7 @@ func (e *mailDeliveryAuditEngine) ServiceBundle() *service.Bundle {
 }
 
 func (e *mailDeliveryAuditEngine) SendChatMessage(_, body string, whisper bool) (string, error) {
+	e.bodies = append(e.bodies, body)
 	if whisper {
 		e.whispers++
 		return body, e.whisperError
@@ -33,6 +35,20 @@ func (e *mailDeliveryAuditEngine) SendChatMessage(_, body string, whisper bool) 
 		return "", errors.New("public send failed")
 	}
 	return body, nil
+}
+
+func TestMailDeliveryCompactFormatPreservesBodyAndPrivacy(t *testing.T) {
+	database := h2fixture.Open(t, "mail-compact-format")
+	body := "first\nsecond \\n <>&"
+	if _, err := database.DB.Exec(`INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper,text_encoding) VALUES('sender','trip-a',$1,'PENDING',1,'true','PLAIN')`, body); err != nil {
+		t.Fatal(err)
+	}
+	engine := &mailDeliveryAuditEngine{mail: &service.MailService{DB: database.DB}}
+	_, err := (DeliverPendingMail{}).Handle(context.Background(), &Context{Engine: engine, Message: &model.ChatMessage{Name: "alice", Trip: "trip-a"}})
+	want := "Mail from sender · 1 Jan 1970 00:00 UTC\n" + body
+	if err != nil || len(engine.bodies) != 1 || engine.bodies[0] != want || engine.whispers != 1 || engine.publicAttempts != 0 {
+		t.Fatalf("bodies=%q whispers=%d public=%d err=%v", engine.bodies, engine.whispers, engine.publicAttempts, err)
+	}
 }
 
 // A failure in a later public batch must not replay a previously delivered

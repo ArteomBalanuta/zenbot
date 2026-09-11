@@ -34,7 +34,7 @@ func TestLastOnlinePreservesPublicMessageText(t *testing.T) {
 		LastMessageMillis: sql.NullInt64{Int64: 0, Valid: true},
 	}}}
 	got, err := s.LastOnline(context.Background(), "merc")
-	if err != nil || !strings.Contains(got, " — "+message+"\n") || !strings.HasPrefix(got, "\n Nick|Trip: merc\n") {
+	if err != nil || !strings.HasSuffix(got, "Last message: "+message) || !strings.HasPrefix(got, "merc — last seen messaging · ") {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }

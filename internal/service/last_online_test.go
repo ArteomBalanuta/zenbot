@@ -44,8 +44,9 @@ func TestUserServiceLastOnlineRendersIndependentPublicFacts(t *testing.T) {
 		LastPresenceMillis: sql.NullInt64{Int64: 12 * 60 * 60 * 1000, Valid: true},
 		LastPresenceEvent:  sql.NullString{String: "LEFT", Valid: true},
 	}}
-	want := "\n Nick|Trip: merc\n Last observed: Thu, 1 Jan 1970 12:00:00 GMT\n Last presence event: LEFT at Thu, 1 Jan 1970 12:00:00 GMT\n Last public message: Thu, 1 Jan 1970 00:00:00 GMT — quote \" slash \\ newline\n<>&\u0001\n"
+	want := "merc — last seen leaving · 12h ago\nLast message · 1 Jan 00:00 UTC: quote \" slash \\ newline\n<>&\u0001"
 	for _, service := range []UserService{{Queries: queries}, {LastSeen: queries}} {
+		service.Now = func() time.Time { return time.Date(1970, 1, 2, 0, 0, 0, 0, time.UTC) }
 		got, err := service.LastOnline(context.Background(), "merc")
 		if err != nil || got != want {
 			t.Fatalf("payload=%q want=%q err=%v", got, want, err)
@@ -76,7 +77,7 @@ func TestUserServiceLastOnlineRendersPresenceWithoutMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "\n Nick|Trip: join-only\n Last observed: Thu, 1 Jan 1970 00:00:00 GMT\n Last presence event: JOINED at Thu, 1 Jan 1970 00:00:00 GMT\n Last public message:  - \n"
+	want := "join-only — last seen joining · 1 Jan 00:00 UTC\nNo public messages found."
 	if got != want {
 		t.Fatalf("payload=%q, want %q", got, want)
 	}

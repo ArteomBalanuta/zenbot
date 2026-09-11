@@ -378,7 +378,7 @@ func TestLastOnlineRendersPersistedLastSeen(t *testing.T) {
 	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
-	if got := e.chats[0]; !strings.Contains(got, "Nick|Trip: @merc") || !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || !strings.Contains(got, "world") || !strings.Contains(got, "Last observed: Thu, 1 Jan 1970 00:00:00 GMT") {
+	if got := e.chats[0]; !strings.Contains(got, "@merc — last seen joining · ") || !strings.Contains(got, "Last message: hello") || !strings.Contains(got, "world") {
 		t.Fatalf("unexpected last-online response %q", got)
 	}
 }

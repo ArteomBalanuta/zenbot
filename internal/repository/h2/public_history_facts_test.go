@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
@@ -60,14 +61,14 @@ func TestPublicHistoryNicksExcludeWhitespaceOnlyNames(t *testing.T) {
 }
 
 func TestPublicHistoryIndependentFactsBothServicePaths(t *testing.T) {
-	for _, tc := range []struct{ name, rows, presence, message, observed string }{
-		{"join-only", `INSERT INTO user_presence_log(name,event_type,created_on) VALUES('target','JoInEd',2000)`, "JOINED at Thu, 1 Jan 1970 00:00:02 GMT", " - ", "00:00:02"},
-		{"leave-only", `INSERT INTO user_presence_log(name,event_type,created_on) VALUES('target','left',3000)`, "LEFT at Thu, 1 Jan 1970 00:00:03 GMT", " - ", "00:00:03"},
-		{"leave-after-join", `INSERT INTO user_presence_log(name,event_type,created_on) VALUES('target','joined',2000),('target','left',3000)`, "LEFT at Thu, 1 Jan 1970 00:00:03 GMT", " - ", "00:00:03"},
-		{"legacy-presence", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','JOINED',2000,'PUBLIC'),('target','LEFT',3000,'PUBLIC'),('target','JOINED',9000,'WHISPER')`, "LEFT at Thu, 1 Jan 1970 00:00:03 GMT", " - ", "00:00:03"},
-		{"legacy-presence-tie", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','JOINED',3000,'PUBLIC'),('target','LEFT',3000,'PUBLIC')`, "LEFT at Thu, 1 Jan 1970 00:00:03 GMT", " - ", "00:00:03"},
-		{"message-tie", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','older id',4000,'PUBLIC'),('target','latest id',4000,'PUBLIC'),('target','secret',9000,'WHISPER')`, " - ", "Thu, 1 Jan 1970 00:00:04 GMT — latest id", "00:00:04"},
-		{"empty-message", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','',4000,'PUBLIC')`, " - ", "Thu, 1 Jan 1970 00:00:04 GMT — ", "00:00:04"},
+	for _, tc := range []struct{ name, rows, action, message, observed string }{
+		{"join-only", `INSERT INTO user_presence_log(name,event_type,created_on) VALUES('target','JoInEd',2000)`, "joining", "No public messages found.", "00:00:02"},
+		{"leave-only", `INSERT INTO user_presence_log(name,event_type,created_on) VALUES('target','left',3000)`, "leaving", "No public messages found.", "00:00:03"},
+		{"leave-after-join", `INSERT INTO user_presence_log(name,event_type,created_on) VALUES('target','joined',2000),('target','left',3000)`, "leaving", "No public messages found.", "00:00:03"},
+		{"legacy-presence", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','JOINED',2000,'PUBLIC'),('target','LEFT',3000,'PUBLIC'),('target','JOINED',9000,'WHISPER')`, "leaving", "No public messages found.", "00:00:03"},
+		{"legacy-presence-tie", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','JOINED',3000,'PUBLIC'),('target','LEFT',3000,'PUBLIC')`, "leaving", "No public messages found.", "00:00:03"},
+		{"message-tie", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','older id',4000,'PUBLIC'),('target','latest id',4000,'PUBLIC'),('target','secret',9000,'WHISPER')`, "messaging", "Last message: latest id", "00:00:04"},
+		{"empty-message", `INSERT INTO messages(name,message,created_on,visibility) VALUES('target','',4000,'PUBLIC')`, "messaging", "Last message: ", "00:00:04"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := openTestDB(t)
@@ -82,16 +83,23 @@ func TestPublicHistoryIndependentFactsBothServicePaths(t *testing.T) {
 			if err != nil || primary != fallback {
 				t.Fatalf("primary=%+v fallback=%+v err=%v", primary, fallback, err)
 			}
+			observed := primary.LastMessageMillis.Int64
+			if primary.LastPresenceMillis.Valid && primary.LastPresenceMillis.Int64 > observed {
+				observed = primary.LastPresenceMillis.Int64
+			}
+			if got := time.UnixMilli(observed).UTC().Format("15:04:05"); got != tc.observed {
+				t.Fatalf("observed=%s want=%s", got, tc.observed)
+			}
 			for _, svc := range []*service.UserService{{Queries: d}, {LastSeen: d}} {
+				svc.Now = func() time.Time { return time.Date(1970, 1, 3, 0, 0, 0, 0, time.UTC) }
 				got, err := svc.LastOnline(context.Background(), "target")
 				if err != nil {
 					t.Errorf("history unavailable: %v", err)
 					continue
 				}
-				for _, want := range []string{"Last observed: Thu, 1 Jan 1970 " + tc.observed + " GMT", "Last presence event: " + tc.presence, "Last public message: " + tc.message} {
-					if !strings.Contains(got, want+"\n") {
-						t.Errorf("reply=%q missing fact %q", got, want)
-					}
+				want := "target — last seen " + tc.action + " · 1 Jan 00:00 UTC\n" + tc.message
+				if got != want {
+					t.Errorf("reply=%q want=%q", got, want)
 				}
 				for _, forbidden := range []string{"Session duration", "Seen active", "secret"} {
 					if strings.Contains(got, forbidden) {
@@ -113,18 +121,31 @@ func TestPublicHistoryIndependentTimestampsAndStablePresenceTies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	assertTimes := func(messageMillis int64) {
+		t.Helper()
+		for _, lookup := range []func(context.Context, string) (repository.LastOnlineRecord, error){d.LastOnline, d.LastSeen} {
+			record, err := lookup(context.Background(), "target")
+			if err != nil || !record.LastPresenceMillis.Valid || record.LastPresenceMillis.Int64 != 3000 || !record.LastPresenceEvent.Valid || record.LastPresenceEvent.String != "JOINED" || !record.LastMessageMillis.Valid || record.LastMessageMillis.Int64 != messageMillis {
+				t.Fatalf("independent timestamps=%+v err=%v", record, err)
+			}
+		}
+	}
+	assertTimes(1000)
 	for _, svc := range []*service.UserService{{Queries: d}, {LastSeen: d}} {
+		svc.Now = func() time.Time { return time.Date(1970, 1, 3, 0, 0, 0, 0, time.UTC) }
 		got, err := svc.LastOnline(context.Background(), "target")
-		if err != nil || !strings.Contains(got, "Last observed: Thu, 1 Jan 1970 00:00:03 GMT") || !strings.Contains(got, "Last presence event: JOINED at Thu, 1 Jan 1970 00:00:03 GMT") || !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:01 GMT — earlier public") {
+		if err != nil || got != "target — last seen joining · 1 Jan 00:00 UTC\nLast message · 1 Jan 00:00 UTC: earlier public" {
 			t.Errorf("independent observations=%q err=%v", got, err)
 		}
 	}
 	if _, err := d.DB.Exec(`INSERT INTO messages(name,message,created_on,visibility) VALUES('target','later public',5000,'PUBLIC')`); err != nil {
 		t.Fatal(err)
 	}
+	assertTimes(5000)
 	for _, svc := range []*service.UserService{{Queries: d}, {LastSeen: d}} {
+		svc.Now = func() time.Time { return time.Date(1970, 1, 3, 0, 0, 0, 0, time.UTC) }
 		got, err := svc.LastOnline(context.Background(), "target")
-		if err != nil || !strings.Contains(got, "Last observed: Thu, 1 Jan 1970 00:00:05 GMT") || !strings.Contains(got, "Last presence event: JOINED at Thu, 1 Jan 1970 00:00:03 GMT") {
+		if err != nil || got != "target — last seen messaging · 1 Jan 00:00 UTC\nLast presence: joined · 1 Jan 00:00 UTC\nLast message: later public" {
 			t.Errorf("independent observations=%q err=%v", got, err)
 		}
 	}

@@ -71,32 +71,46 @@ func (s *UserService) LastOnline(ctx context.Context, target string) (string, er
 	if !record.Found {
 		return "", repository.ErrNotFound
 	}
-	lastObserved, presence, message := " - ", " - ", " - "
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	stamp := func(millis int64) string { return util.CompactTime(time.UnixMilli(millis), now) }
 	observedMillis := record.LastMessageMillis
-	if record.LastPresenceMillis.Valid && (!observedMillis.Valid || record.LastPresenceMillis.Int64 > observedMillis.Int64) {
+	presenceLatest := record.LastPresenceMillis.Valid && (!observedMillis.Valid || record.LastPresenceMillis.Int64 >= observedMillis.Int64)
+	if presenceLatest {
 		observedMillis = record.LastPresenceMillis
 	}
+	header := target + " — last seen: unknown"
 	if observedMillis.Valid {
-		lastObserved, err = util.FormatRFC1123(observedMillis.Int64, util.UnitMilliseconds, "UTC")
-		if err != nil {
-			return "", err
+		action := "messaging"
+		if presenceLatest {
+			action = ""
+			if record.LastPresenceEvent.Valid {
+				switch strings.ToUpper(record.LastPresenceEvent.String) {
+				case "JOINED":
+					action = "joining"
+				case "LEFT":
+					action = "leaving"
+				}
+			}
 		}
+		header = strings.TrimSpace(target+" — last seen "+action) + " · " + stamp(observedMillis.Int64)
 	}
-	if record.LastPresenceMillis.Valid && record.LastPresenceEvent.Valid {
-		stamp, err := util.FormatRFC1123(record.LastPresenceMillis.Int64, util.UnitMilliseconds, "UTC")
-		if err != nil {
-			return "", err
-		}
-		presence = record.LastPresenceEvent.String + " at " + stamp
+	lines := []string{header}
+	if !presenceLatest && record.LastPresenceMillis.Valid && record.LastPresenceEvent.Valid {
+		lines = append(lines, "Last presence: "+strings.ToLower(record.LastPresenceEvent.String)+" · "+stamp(record.LastPresenceMillis.Int64))
 	}
 	if record.LastMessageMillis.Valid && record.LastMessage.Valid {
-		stamp, err := util.FormatRFC1123(record.LastMessageMillis.Int64, util.UnitMilliseconds, "UTC")
-		if err != nil {
-			return "", err
+		label := "Last message"
+		if record.LastMessageMillis.Int64 != observedMillis.Int64 {
+			label += " · " + stamp(record.LastMessageMillis.Int64)
 		}
-		message = stamp + " — " + record.LastMessage.String
+		lines = append(lines, label+": "+record.LastMessage.String)
+	} else {
+		lines = append(lines, "No public messages found.")
 	}
-	return fmt.Sprintf("\n Nick|Trip: %s\n Last observed: %s\n Last presence event: %s\n Last public message: %s\n", target, lastObserved, presence, message), nil
+	return strings.Join(lines, "\n"), nil
 }
 
 func (s *UserService) RegisteredUsers(ctx context.Context) ([]repository.RegisteredUser, error) {

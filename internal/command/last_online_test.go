@@ -59,7 +59,7 @@ func TestLastOnlineCommandPassesRawMixedSelectorAndWhisper(t *testing.T) {
 	if queries.calls != 1 || queries.target != "@merc" {
 		t.Fatalf("calls=%d target=%q", queries.calls, queries.target)
 	}
-	if len(engine.chats) != 1 || engine.chats[0] != "alice|\n Nick|Trip: @merc\n Last observed: Thu, 1 Jan 1970 00:00:00 GMT\n Last presence event:  - \n Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello\n|true" {
+	if len(engine.chats) != 1 || engine.chats[0] != "alice|@merc — last seen messaging · 1 Jan 00:00 UTC\nLast message: hello|true" {
 		t.Fatalf("chats=%v", engine.chats)
 	}
 }
@@ -131,7 +131,7 @@ func TestLastOnlineAliasesDispatchAgainstRealH2AndRequireQueries(t *testing.T) {
 				t.Fatal(err)
 			}
 			listener.NewUserChatListener(engine).Notify(string(payload))
-			if len(engine.chats) != 1 || !contains(engine.chats[0], "\n Nick|Trip: "+target+"\n") || !contains(engine.chats[0], "Last public message: Thu, 1 Jan 1970 00:00:02 GMT — hello") {
+			if len(engine.chats) != 1 || !contains(engine.chats[0], target+" — last seen messaging · ") || !contains(engine.chats[0], "Last message: hello") {
 				t.Fatalf("%s chats=%v", alias, engine.chats)
 			}
 		}

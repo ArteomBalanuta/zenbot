@@ -12,6 +12,7 @@ import (
 	"zenbot/internal/profiling"
 	"zenbot/internal/relay"
 	"zenbot/internal/service"
+	"zenbot/internal/util"
 )
 
 type ResolveUserMetadata struct{}
@@ -95,8 +96,8 @@ func (DeliverPendingMail) Handle(ctx context.Context, c *Context) (bool, error) 
 		if err := ctx.Err(); err != nil {
 			return errors.Join(service.ErrMailSendNotStarted, err)
 		}
-		text := time.UnixMilli(m.CreatedOn).UTC().Format(time.RFC1123) + ".\n" + m.Owner + ": " + m.Message + "\n &nbsp; \n"
-		_, err := c.Engine.SendChatMessage(c.Message.Name, " new mail: \n "+text, m.IsWhisper)
+		text := "Mail from " + m.Owner + " · " + util.CompactTime(time.UnixMilli(m.CreatedOn), time.Now()) + "\n" + m.Message
+		_, err := c.Engine.SendChatMessage(c.Message.Name, text, m.IsWhisper)
 		return err
 	})
 	return true, err
