@@ -12,7 +12,7 @@ import (
 func TestAuditModerationDeleteAliasPreservesOtherRegisteredIdentity(t *testing.T) {
 	d := openTestDB(t)
 	seedIdentity(t, d, "alice", "shared-trip")
-	if err := d.RegisterNameByTrip("bob", "shared-trip"); err != nil {
+	if err := d.RegisterNameByTrip(context.Background(), "bob", "shared-trip"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := d.DeleteIdentityAuthorized(context.Background(), "alice")
@@ -35,7 +35,7 @@ func TestAuditModerationDeleteAliasPreservesOtherRegisteredIdentity(t *testing.T
 func TestAuditModerationDeleteTripPreservesOtherRegisteredIdentity(t *testing.T) {
 	d := openTestDB(t)
 	seedIdentity(t, d, "shared-name", "trip-a")
-	if err := d.RegisterTripByName("shared-name", "trip-b"); err != nil {
+	if err := d.RegisterTripByName(context.Background(), "shared-name", "trip-b"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := d.DeleteIdentityAuthorized(context.Background(), "trip-a")
@@ -67,7 +67,7 @@ func TestAuditModerationDeleteRejectsAmbiguousTripAndNameCollision(t *testing.T)
 	d := openTestDB(t)
 	seedIdentity(t, d, "alice", "Trip-A")
 	seedIdentity(t, d, "Trip-A", "trip-b")
-	if err := d.RegisterNameByTrip("bob", "Trip-A"); err != nil {
+	if err := d.RegisterNameByTrip(context.Background(), "bob", "Trip-A"); err != nil {
 		t.Fatal(err)
 	}
 	if result, err := d.DeleteIdentityAuthorized(context.Background(), "Trip-A"); err == nil || result != (repository.DeleteResult{}) {

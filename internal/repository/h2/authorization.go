@@ -12,38 +12,47 @@ import (
 
 // GrantTrip creates or updates the role associated with a trip.
 func (d *Database) GrantTrip(ctx context.Context, trip string, role model.Role) error {
-	trip = strings.TrimSpace(trip)
+	return d.GrantTrips(ctx, []string{trip}, role)
+}
+
+// GrantTrips validates every target before atomically applying the role to all
+// exact credentials. Repeated targets are written once.
+func (d *Database) GrantTrips(ctx context.Context, trips []string, role model.Role) error {
 	roleName, err := roleDatabaseName(role)
 	if err != nil {
 		return err
 	}
-	if trip == "" {
-		return fmt.Errorf("trip is required")
+	if len(trips) == 0 {
+		return fmt.Errorf("at least one trip is required")
 	}
-
-	tx, err := d.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
+	targets := make([]string, 0, len(trips))
+	seen := make(map[string]bool, len(trips))
+	for _, trip := range trips {
+		trip = strings.TrimSpace(trip)
+		if trip == "" || strings.Contains(trip, ",") {
+			return fmt.Errorf("each target must be a nonempty trip")
 		}
-	}()
-
-	var id int64
-	err = tx.QueryRowContext(ctx, "SELECT id FROM trips WHERE trip=$1", trip).Scan(&id)
-	switch err {
-	case nil:
-		_, err = tx.ExecContext(ctx, "UPDATE trips SET type=$1 WHERE id=$2", roleName, id)
-	case sql.ErrNoRows:
-		_, err = tx.ExecContext(ctx, "INSERT INTO trips(type,trip,created_on) VALUES($1,$2,$3)", roleName, trip, time.Now().UnixMilli())
+		if !seen[trip] {
+			seen[trip] = true
+			targets = append(targets, trip)
+		}
 	}
-	if err != nil {
-		return err
-	}
-	err = tx.Commit()
-	return err
+	return d.WithTx(ctx, func(tx *sql.Tx) error {
+		for _, trip := range targets {
+			var id int64
+			err := tx.QueryRowContext(ctx, "SELECT id FROM trips WHERE trip=$1", trip).Scan(&id)
+			switch err {
+			case nil:
+				_, err = tx.ExecContext(ctx, "UPDATE trips SET type=$1 WHERE id=$2", roleName, id)
+			case sql.ErrNoRows:
+				_, err = tx.ExecContext(ctx, "INSERT INTO trips(type,trip,created_on) VALUES($1,$2,$3)", roleName, trip, time.Now().UnixMilli())
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ResolveRole returns REGULAR for an unrecognized or blank trip.
@@ -69,7 +78,7 @@ func (d *Database) IsTripAuthorized(ctx context.Context, trip string, required m
 	trip = strings.TrimSpace(trip)
 	for _, configured := range configuredTrips {
 		configured = strings.TrimSpace(configured)
-		if strings.EqualFold(configured, "x") || strings.EqualFold(configured, trip) {
+		if configured == "x" || (trip != "" && configured == trip) {
 			return true, nil
 		}
 	}

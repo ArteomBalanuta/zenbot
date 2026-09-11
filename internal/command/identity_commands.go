@@ -32,40 +32,42 @@ func (c *registerCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, nil
 	}
 	s := userService(c.engine)
-	if s == nil {
+	if s == nil || s.Identity == nil {
 		return model.FAILED, fmt.Errorf("user service unavailable")
 	}
 	name, trip := strings.TrimSpace(a[0]), strings.TrimSpace(a[1])
-	n, err := s.IsNameRegistered(name)
+	n, err := s.IsNameRegistered(ctx, name)
 	if err != nil {
 		return model.FAILED, err
 	}
-	t, err := s.IsTripRegistered(trip)
+	t, err := s.IsTripRegistered(ctx, trip)
 	if err != nil {
 		return model.FAILED, err
 	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	var acknowledgment string
 	switch {
 	case !n && !t:
-		err = s.Register(name, trip, model.REGULAR)
-		if err == nil {
-			reply(&c.commandBase, "User has been registered successfully, now you can msg him by name: "+name)
-		}
+		err = s.Register(ctx, name, trip, model.REGULAR)
+		acknowledgment = "User has been registered successfully, now you can msg him by name: " + name
 	case !n:
-		err = s.RegisterNameByTrip(name, trip)
-		if err == nil {
-			reply(&c.commandBase, fmt.Sprintf("New name: %s, assigned to trip: %s", name, trip))
-		}
+		err = s.RegisterNameByTrip(ctx, name, trip)
+		acknowledgment = fmt.Sprintf("New name: %s, assigned to trip: %s", name, trip)
 	case !t:
-		err = s.RegisterTripByName(name, trip)
-		if err == nil {
-			reply(&c.commandBase, fmt.Sprintf("New trip: %s, assigned to user named: %s", trip, name))
-		}
+		err = s.RegisterTripByName(ctx, name, trip)
+		acknowledgment = fmt.Sprintf("New trip: %s, assigned to user named: %s", trip, name)
 	default:
 		reply(&c.commandBase, fmt.Sprintf("Name %s and trip %s are already registered.", name, trip))
 		return model.FAILED, nil
 	}
 	if err != nil {
 		reply(&c.commandBase, "Something went wrong")
+		return model.FAILED, err
+	}
+	// Registration is committed here, before attempting its acknowledgment.
+	if _, err := c.engine.SendChatMessage(c.message.Name, acknowledgment, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -87,10 +89,12 @@ func (c *authorizeCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, fmt.Errorf("security service unavailable")
 	}
 	trip := strings.TrimSpace(a[0])
-	if err := b.Security.AuthorizeTrip(trip); err != nil {
+	if err := b.Security.AuthorizeTripContext(ctx, trip); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, " authorized trip: "+trip)
+	if _, err := c.engine.SendChatMessage(c.message.Name, " authorized trip: "+trip, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -111,27 +115,34 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
-	if b == nil || b.Security == nil {
+	if b == nil || b.Security == nil || b.Security.Authorization == nil {
 		return model.FAILED, fmt.Errorf("security service unavailable")
 	}
 	target := strings.TrimSpace(a[0])
-	if strings.Contains(target, ",") {
-		trips := strings.Split(target, ",")
-		for len(trips) > 0 && trips[len(trips)-1] == "" {
-			trips = trips[:len(trips)-1]
+	trips := strings.Split(strings.TrimRight(target, ","), ",")
+	targets := make([]string, 0, len(trips))
+	seen := make(map[string]bool, len(trips))
+	for _, trip := range trips {
+		trip = strings.TrimSpace(trip)
+		if trip == "" {
+			return model.FAILED, fmt.Errorf("each target must be a nonempty trip")
 		}
-		for _, trip := range trips {
-			if err := b.Security.Authorization.GrantTrip(ctx, trip, role); err != nil {
-				return model.FAILED, err
-			}
+		if !seen[trip] {
+			seen[trip] = true
+			targets = append(targets, trip)
 		}
-		reply(&c.commandBase, fmt.Sprintf("\\n Granted new Roles: %s to trips: %v", roleName, trips))
-		return model.SUCCESSFUL, nil
 	}
-	if err := b.Security.Authorization.GrantTrip(ctx, target, role); err != nil {
+	if err := b.Security.Authorization.GrantTrips(ctx, targets, role); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, "\\n Granted new Role: "+roleName+" to trip: "+target)
+	// The entire role batch is committed here, before its acknowledgment.
+	acknowledgment := "\\n Granted new Role: " + roleName + " to trip: " + target
+	if strings.Contains(target, ",") {
+		acknowledgment = fmt.Sprintf("\\n Granted new Roles: %s to trips: %v", roleName, targets)
+	}
+	if _, err := c.engine.SendChatMessage(c.message.Name, acknowledgment, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 func parseRole(s string) (model.Role, bool) {
@@ -173,7 +184,7 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		n = 30
 	}
 	s := userService(c.engine)
-	if s == nil {
+	if s == nil || (s.GroupB == nil && s.Identity == nil) {
 		return model.FAILED, fmt.Errorf("user service unavailable")
 	}
 	var ms []repository.SaturnLastMessage
@@ -181,7 +192,7 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		ms, err = s.SaturnLastMessages(ctx, nil, strings.TrimSpace(a[0]), n)
 	} else {
 		var legacy []model.Message
-		legacy, err = s.LastMessages("", strings.TrimSpace(a[0]), n)
+		legacy, err = s.LastMessages(ctx, "", strings.TrimSpace(a[0]), n)
 		for _, m := range legacy {
 			ms = append(ms, repository.SaturnLastMessage{Name: m.Name, Trip: m.Trip, Message: m.Message, CreatedOn: m.CreatedOn})
 		}
@@ -199,7 +210,9 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		b.WriteString(m.Name + "#" + m.Trip + ": " + msg)
 		b.WriteString("\n")
 	}
-	reply(&c.commandBase, escapeJava(b.String()))
+	if _, err := c.engine.SendChatMessage(c.message.Name, escapeJava(b.String()), c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 func escapeJava(s string) string { return strconv.Quote(s)[1 : len(strconv.Quote(s))-1] }

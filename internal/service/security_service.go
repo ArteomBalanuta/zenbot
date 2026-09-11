@@ -4,15 +4,20 @@ import (
 	"context"
 	"log"
 	"strings"
+	"sync"
 	"zenbot/internal/config"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 )
 
 type SecurityService struct {
+	// Configured overrides are immutable after construction. Runtime grants
+	// belong to storage, or to runtimeAdmins when no repository is installed.
 	AdminTrips    []string
 	UserTrips     []string
 	Authorization repository.AuthorizationRepository
+	grantMu       sync.RWMutex
+	runtimeAdmins map[string]struct{}
 }
 
 // The variadic repository preserves the original constructor for callers that
@@ -32,22 +37,30 @@ func (s *SecurityService) AuthorizeUser(u *model.User) error {
 	return nil
 }
 func (s *SecurityService) AuthorizeTrip(trip string) error {
+	return s.AuthorizeTripContext(context.Background(), trip)
+}
+
+func (s *SecurityService) AuthorizeTripContext(ctx context.Context, trip string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	trip = strings.TrimSpace(trip)
 	if trip == "" {
 		return nil
 	}
 	if s.Authorization != nil {
-		if err := s.Authorization.GrantTrip(context.Background(), trip, model.ADMIN); err != nil {
+		if err := s.Authorization.GrantTrip(ctx, trip, model.ADMIN); err != nil {
 			log.Printf("authorize trip %q: %v", trip, err)
 			return err
 		}
+		return nil
 	}
-	for _, existing := range s.AdminTrips {
-		if existing == trip {
-			return nil
-		}
+	s.grantMu.Lock()
+	defer s.grantMu.Unlock()
+	if s.runtimeAdmins == nil {
+		s.runtimeAdmins = make(map[string]struct{})
 	}
-	s.AdminTrips = append(s.AdminTrips, trip)
+	s.runtimeAdmins[trip] = struct{}{}
 	return nil
 }
 
@@ -69,7 +82,7 @@ func (s *SecurityService) IsLifecycleAuthorized(u *model.User) bool {
 		return false
 	}
 	for _, trip := range s.UserTrips {
-		if strings.EqualFold(strings.TrimSpace(trip), "x") || strings.EqualFold(strings.TrimSpace(trip), strings.TrimSpace(u.Trip)) {
+		if strings.TrimSpace(trip) == "x" || (strings.TrimSpace(u.Trip) != "" && strings.TrimSpace(trip) == strings.TrimSpace(u.Trip)) {
 			return true
 		}
 	}
@@ -86,7 +99,7 @@ func (s *SecurityService) IsConfiguredUserTrip(trip string) bool {
 	}
 	for _, configured := range s.UserTrips {
 		configured = strings.TrimSpace(configured)
-		if strings.EqualFold(configured, "x") || strings.EqualFold(configured, trip) {
+		if configured == "x" || configured == trip {
 			return true
 		}
 	}
@@ -94,18 +107,27 @@ func (s *SecurityService) IsConfiguredUserTrip(trip string) bool {
 }
 
 func (s *SecurityService) IsAuthorizedContext(ctx context.Context, u *model.User, required model.Role) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if u == nil {
 		return false, nil
 	}
 	if s.Authorization != nil {
-		return s.Authorization.IsTripAuthorized(ctx, u.Trip, required, s.AdminTrips)
+		return s.Authorization.IsTripAuthorized(ctx, u.Trip, required, append([]string(nil), s.AdminTrips...))
 	}
 	for _, trip := range s.AdminTrips {
-		if strings.EqualFold(strings.TrimSpace(trip), "x") || strings.EqualFold(strings.TrimSpace(trip), strings.TrimSpace(u.Trip)) {
+		if strings.TrimSpace(trip) == "x" || (strings.TrimSpace(u.Trip) != "" && strings.TrimSpace(trip) == strings.TrimSpace(u.Trip)) {
 			return true, nil
 		}
 	}
+	s.grantMu.RLock()
+	_, granted := s.runtimeAdmins[strings.TrimSpace(u.Trip)]
+	s.grantMu.RUnlock()
+	if granted {
+		return true, nil
+	}
 	// Zenbot's established ordering is strongest (ADMIN) first; lower numeric
 	// roles therefore satisfy a command requiring a higher numeric threshold.
-	return model.TRUSTED <= required, nil
+	return model.REGULAR <= required, nil
 }

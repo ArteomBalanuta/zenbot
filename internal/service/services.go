@@ -128,23 +128,23 @@ func (s *UserService) NicksByTrip(ctx context.Context, trip string) ([]string, e
 func (s *UserService) BasicUserData(ctx context.Context, hash, trip string) (string, error) {
 	return s.Queries.BasicUserData(ctx, hash, trip)
 }
-func (s *UserService) IsNameRegistered(name string) (bool, error) {
-	return s.Identity.IsNameRegistered(name)
+func (s *UserService) IsNameRegistered(ctx context.Context, name string) (bool, error) {
+	return s.Identity.IsNameRegistered(ctx, name)
 }
-func (s *UserService) IsTripRegistered(trip string) (bool, error) {
-	return s.Identity.IsTripRegistered(trip)
+func (s *UserService) IsTripRegistered(ctx context.Context, trip string) (bool, error) {
+	return s.Identity.IsTripRegistered(ctx, trip)
 }
-func (s *UserService) Register(name, trip string, role model.Role) error {
-	return s.Identity.Register(name, trip, role)
+func (s *UserService) Register(ctx context.Context, name, trip string, role model.Role) error {
+	return s.Identity.Register(ctx, name, trip, role)
 }
-func (s *UserService) RegisterNameByTrip(name, trip string) error {
-	return s.Identity.RegisterNameByTrip(name, trip)
+func (s *UserService) RegisterNameByTrip(ctx context.Context, name, trip string) error {
+	return s.Identity.RegisterNameByTrip(ctx, name, trip)
 }
-func (s *UserService) RegisterTripByName(name, trip string) error {
-	return s.Identity.RegisterTripByName(name, trip)
+func (s *UserService) RegisterTripByName(ctx context.Context, name, trip string) error {
+	return s.Identity.RegisterTripByName(ctx, name, trip)
 }
-func (s *UserService) LastMessages(name, trip string, count int) ([]model.Message, error) {
-	return s.Identity.LastMessages(name, trip, count)
+func (s *UserService) LastMessages(ctx context.Context, name, trip string, count int) ([]model.Message, error) {
+	return s.Identity.LastMessages(ctx, name, trip, count)
 }
 
 func (s *UserService) SeenRecently(ctx context.Context, user *model.User) (string, error) {

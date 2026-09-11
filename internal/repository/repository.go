@@ -78,5 +78,6 @@ type AuditRepository interface {
 type AuthorizationRepository interface {
 	IsTripAuthorized(context.Context, string, model.Role, []string) (bool, error)
 	GrantTrip(context.Context, string, model.Role) error
+	GrantTrips(context.Context, []string, model.Role) error
 	ResolveRole(context.Context, string) (model.Role, error)
 }

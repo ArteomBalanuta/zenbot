@@ -156,7 +156,7 @@ func TestGroupBSaturnLastMessagesReturnsPublicRowsWithRowTripAndStableTies(t *te
 	if err != nil || len(nilName) != 2 || nilName[0].Message != "first-at-tie" || nilName[1].Message != "old" {
 		t.Fatalf("nullable name result=%+v err=%v", nilName, err)
 	}
-	public, err := d.LastMessages("alice", "trip-a", 5)
+	public, err := d.LastMessages(context.Background(), "alice", "trip-a", 5)
 	if err != nil || len(public) != 3 || public[0].Message != "second-at-tie" {
 		t.Fatalf("public=%+v err=%v", public, err)
 	}
@@ -192,7 +192,7 @@ func TestGroupBAuthorizedSelectorRejectsBlankMissingAndAmbiguousWithoutDelete(t 
 
 func seedIdentity(t *testing.T, d *Database, name, trip string) {
 	t.Helper()
-	if err := d.Register(name, trip, model.REGULAR); err != nil {
+	if err := d.Register(context.Background(), name, trip, model.REGULAR); err != nil {
 		t.Fatal(err)
 	}
 }

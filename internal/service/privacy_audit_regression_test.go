@@ -97,7 +97,7 @@ func TestUtilityAuditLastOnlineDoesNotRevealWhispers(t *testing.T) {
 			t.Errorf("private-only lastonline reply: %s", got)
 		}
 	}
-	public, err := db.LastMessages("target", "target-trip", 10)
+	public, err := db.LastMessages(context.Background(), "target", "target-trip", 10)
 	if err != nil || len(public) != 1 || public[0].Message != "public hello" {
 		t.Fatalf("public history=%+v err=%v", public, err)
 	}

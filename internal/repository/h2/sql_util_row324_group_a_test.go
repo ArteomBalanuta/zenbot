@@ -69,7 +69,7 @@ func TestGroupA_IdentityRegistrationContracts(t *testing.T) {
 	const tripsConstant = "INSERT_TRIPS"
 	const linkConstant = "INSERT_TRIP_NAME"
 	d := openTestDB(t)
-	if err := d.Register(" Alice ", " trip-a ", model.REGULAR); err != nil {
+	if err := d.Register(context.Background(), " Alice ", " trip-a ", model.REGULAR); err != nil {
 		t.Fatalf("%s/%s/%s: %v", namesConstant, tripsConstant, linkConstant, err)
 	}
 	var nameID, tripID, links int64
@@ -82,24 +82,24 @@ func TestGroupA_IdentityRegistrationContracts(t *testing.T) {
 	if err := d.DB.QueryRow("SELECT COUNT(*) FROM trip_names WHERE name_id=? AND trip_id=?", nameID, tripID).Scan(&links); err != nil || links != 1 {
 		t.Fatalf("link count=%d err=%v", links, err)
 	}
-	if err := d.RegisterNameByTrip("O'Neil", "TRIP-A"); err != nil {
+	if err := d.RegisterNameByTrip(context.Background(), "O'Neil", "trip-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RegisterTripByName("Alice", "trip-b"); err != nil {
+	if err := d.RegisterTripByName(context.Background(), "Alice", "trip-b"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ name, trip string }{{"", "trip-a"}, {"Bob", ""}} {
-		if err := d.RegisterNameByTrip(tc.name, tc.trip); err == nil {
+		if err := d.RegisterNameByTrip(context.Background(), tc.name, tc.trip); err == nil {
 			t.Fatalf("blank RegisterNameByTrip(%q,%q) succeeded", tc.name, tc.trip)
 		}
 	}
-	if err := d.RegisterTripByName("", "trip-c"); err == nil {
+	if err := d.RegisterTripByName(context.Background(), "", "trip-c"); err == nil {
 		t.Fatal("blank RegisterTripByName name succeeded")
 	}
-	if err := d.Register(" Alice ", "trip-c", model.REGULAR); err == nil {
+	if err := d.Register(context.Background(), " Alice ", "trip-c", model.REGULAR); err == nil {
 		t.Fatal("duplicate name succeeded")
 	}
-	if err := d.Register("Bob", "trip-a", model.REGULAR); err == nil {
+	if err := d.Register(context.Background(), "Bob", "trip-a", model.REGULAR); err == nil {
 		t.Fatal("duplicate trip succeeded")
 	}
 	if err := d.DB.QueryRow("SELECT COUNT(*) FROM names").Scan(&nameID); err != nil || nameID != 2 {

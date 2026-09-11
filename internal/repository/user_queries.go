@@ -54,10 +54,10 @@ type LastSeenRepository interface {
 // IdentityRepository is the persistence seam for registration and message
 // history. Implementations must make each mutating operation atomic.
 type IdentityRepository interface {
-	IsNameRegistered(string) (bool, error)
-	IsTripRegistered(string) (bool, error)
-	Register(string, string, model.Role) error
-	RegisterNameByTrip(string, string) error
-	RegisterTripByName(string, string) error
-	LastMessages(string, string, int) ([]model.Message, error)
+	IsNameRegistered(context.Context, string) (bool, error)
+	IsTripRegistered(context.Context, string) (bool, error)
+	Register(context.Context, string, string, model.Role) error
+	RegisterNameByTrip(context.Context, string, string) error
+	RegisterTripByName(context.Context, string, string) error
+	LastMessages(context.Context, string, string, int) ([]model.Message, error)
 }

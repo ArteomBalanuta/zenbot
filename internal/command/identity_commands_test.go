@@ -21,21 +21,25 @@ type identityFake struct {
 	lastCount    int
 }
 
-func (f *identityFake) IsNameRegistered(v string) (bool, error) { return f.names[v], f.err }
-func (f *identityFake) IsTripRegistered(v string) (bool, error) { return f.trips[v], f.err }
-func (f *identityFake) Register(n, t string, _ model.Role) error {
+func (f *identityFake) IsNameRegistered(_ context.Context, v string) (bool, error) {
+	return f.names[v], f.err
+}
+func (f *identityFake) IsTripRegistered(_ context.Context, v string) (bool, error) {
+	return f.trips[v], f.err
+}
+func (f *identityFake) Register(_ context.Context, n, t string, _ model.Role) error {
 	f.registered = append(f.registered, n+":"+t)
 	return f.mutationErr
 }
-func (f *identityFake) RegisterNameByTrip(n, t string) error {
+func (f *identityFake) RegisterNameByTrip(_ context.Context, n, t string) error {
 	f.registered = append(f.registered, n+":"+t)
 	return f.mutationErr
 }
-func (f *identityFake) RegisterTripByName(n, t string) error {
+func (f *identityFake) RegisterTripByName(_ context.Context, n, t string) error {
 	f.registered = append(f.registered, n+":"+t)
 	return f.mutationErr
 }
-func (f *identityFake) LastMessages(_, _ string, count int) ([]model.Message, error) {
+func (f *identityFake) LastMessages(_ context.Context, _, _ string, count int) ([]model.Message, error) {
 	f.lastCount = count
 	return f.messages, f.err
 }
@@ -72,6 +76,15 @@ func (f *authFake) GrantTrip(_ context.Context, t string, r model.Role) error {
 }
 func (f *authFake) ResolveRole(context.Context, string) (model.Role, error) {
 	return model.REGULAR, nil
+}
+
+func (f *authFake) GrantTrips(ctx context.Context, trips []string, role model.Role) error {
+	for _, trip := range trips {
+		if err := f.GrantTrip(ctx, trip, role); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type identityCommandEngine struct {

@@ -24,6 +24,7 @@ func (r *authRepo) IsTripAuthorized(_ context.Context, trip string, required mod
 	return r.role <= required, nil
 }
 func (r *authRepo) GrantTrip(context.Context, string, model.Role) error     { return r.err }
+func (r *authRepo) GrantTrips(context.Context, []string, model.Role) error  { return r.err }
 func (r *authRepo) ResolveRole(context.Context, string) (model.Role, error) { return r.role, nil }
 
 func TestSecurityUsesPersistedAuthorizationAndConfiguredWildcard(t *testing.T) {

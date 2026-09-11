@@ -11,18 +11,21 @@ import (
 	"zenbot/internal/repository"
 )
 
-func (d *Database) IsNameRegistered(name string) (bool, error) {
+func (d *Database) IsNameRegistered(ctx context.Context, name string) (bool, error) {
 	var n int
-	err := d.DB.QueryRow("SELECT COUNT(*) FROM names WHERE LOWER(name)=LOWER($1)", strings.TrimSpace(name)).Scan(&n)
+	err := d.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM names WHERE LOWER(name)=LOWER($1)", strings.TrimSpace(name)).Scan(&n)
+	if err == nil && n > 1 {
+		return false, fmt.Errorf("ambiguous registered name %q", name)
+	}
 	return n > 0, err
 }
-func (d *Database) IsTripRegistered(trip string) (bool, error) {
+func (d *Database) IsTripRegistered(ctx context.Context, trip string) (bool, error) {
 	var n int
-	err := d.DB.QueryRow("SELECT COUNT(*) FROM trips WHERE LOWER(trip)=LOWER($1)", strings.TrimSpace(trip)).Scan(&n)
+	err := d.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM trips WHERE trip=$1", strings.TrimSpace(trip)).Scan(&n)
 	return n > 0, err
 }
 
-func (d *Database) Register(name, trip string, role model.Role) error {
+func (d *Database) Register(ctx context.Context, name, trip string, role model.Role) error {
 	name, trip = strings.TrimSpace(name), strings.TrimSpace(trip)
 	roleName, err := roleDatabaseName(role)
 	if err != nil {
@@ -31,64 +34,71 @@ func (d *Database) Register(name, trip string, role model.Role) error {
 	if name == "" || trip == "" {
 		return fmt.Errorf("name and trip are required")
 	}
-	return d.WithTx(context.Background(), func(tx *sql.Tx) error {
+	return d.WithTx(ctx, func(tx *sql.Tx) error {
 		var nameID, tripID int64
-		if _, err := tx.Exec("INSERT INTO names(name,created_on) VALUES($1,$2)", name, time.Now().UnixMilli()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO names(name,created_on) VALUES($1,$2)", name, time.Now().UnixMilli()); err != nil {
 			return err
 		}
-		if err := tx.QueryRow("SELECT id FROM names WHERE name=$1", name).Scan(&nameID); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM names WHERE name=$1", name).Scan(&nameID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec("INSERT INTO trips(type,trip,created_on) VALUES($1,$2,$3)", roleName, trip, time.Now().UnixMilli()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO trips(type,trip,created_on) VALUES($1,$2,$3)", roleName, trip, time.Now().UnixMilli()); err != nil {
 			return err
 		}
-		if err := tx.QueryRow("SELECT id FROM trips WHERE trip=$1", trip).Scan(&tripID); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM trips WHERE trip=$1", trip).Scan(&tripID); err != nil {
 			return err
 		}
-		_, err := tx.Exec("INSERT INTO trip_names(trip_id,name_id) VALUES($1,$2)", tripID, nameID)
+		_, err := tx.ExecContext(ctx, "INSERT INTO trip_names(trip_id,name_id) VALUES($1,$2)", tripID, nameID)
 		return err
 	})
 }
 
-func (d *Database) RegisterNameByTrip(name, trip string) error {
+func (d *Database) RegisterNameByTrip(ctx context.Context, name, trip string) error {
 	name, trip = strings.TrimSpace(name), strings.TrimSpace(trip)
 	if name == "" || trip == "" {
 		return fmt.Errorf("name and trip are required")
 	}
-	return d.WithTx(context.Background(), func(tx *sql.Tx) error {
+	return d.WithTx(ctx, func(tx *sql.Tx) error {
 		var tripID int64
-		if err := tx.QueryRow("SELECT id FROM trips WHERE LOWER(trip)=LOWER($1)", trip).Scan(&tripID); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM trips WHERE trip=$1", trip).Scan(&tripID); err != nil {
 			return err
 		}
 		var nameID int64
-		if _, err := tx.Exec("INSERT INTO names(name,created_on) VALUES($1,$2)", name, time.Now().UnixMilli()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO names(name,created_on) VALUES($1,$2)", name, time.Now().UnixMilli()); err != nil {
 			return err
 		}
-		if err := tx.QueryRow("SELECT id FROM names WHERE name=$1", name).Scan(&nameID); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM names WHERE name=$1", name).Scan(&nameID); err != nil {
 			return err
 		}
-		_, err := tx.Exec("INSERT INTO trip_names(trip_id,name_id) VALUES($1,$2)", tripID, nameID)
+		_, err := tx.ExecContext(ctx, "INSERT INTO trip_names(trip_id,name_id) VALUES($1,$2)", tripID, nameID)
 		return err
 	})
 }
-func (d *Database) RegisterTripByName(name, trip string) error {
+func (d *Database) RegisterTripByName(ctx context.Context, name, trip string) error {
 	name, trip = strings.TrimSpace(name), strings.TrimSpace(trip)
 	if name == "" || trip == "" {
 		return fmt.Errorf("name and trip are required")
 	}
-	return d.WithTx(context.Background(), func(tx *sql.Tx) error {
+	return d.WithTx(ctx, func(tx *sql.Tx) error {
 		var nameID int64
-		if err := tx.QueryRow("SELECT id FROM names WHERE LOWER(name)=LOWER($1)", name).Scan(&nameID); err != nil {
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(id),0) FROM names WHERE LOWER(name)=LOWER($1)", name).Scan(&count, &nameID); err != nil {
 			return err
+		}
+		if count == 0 {
+			return sql.ErrNoRows
+		}
+		if count != 1 {
+			return fmt.Errorf("ambiguous registered name %q", name)
 		}
 		var tripID int64
-		if _, err := tx.Exec("INSERT INTO trips(type,trip,created_on) VALUES('REGULAR',$1,$2)", trip, time.Now().UnixMilli()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO trips(type,trip,created_on) VALUES('REGULAR',$1,$2)", trip, time.Now().UnixMilli()); err != nil {
 			return err
 		}
-		if err := tx.QueryRow("SELECT id FROM trips WHERE trip=$1", trip).Scan(&tripID); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM trips WHERE trip=$1", trip).Scan(&tripID); err != nil {
 			return err
 		}
-		_, err := tx.Exec("INSERT INTO trip_names(trip_id,name_id) VALUES($1,$2)", tripID, nameID)
+		_, err := tx.ExecContext(ctx, "INSERT INTO trip_names(trip_id,name_id) VALUES($1,$2)", tripID, nameID)
 		return err
 	})
 }
@@ -104,11 +114,11 @@ func (d *Database) LastSeen(ctx context.Context, target string) (repository.Last
 	return out, nil
 }
 
-func (d *Database) LastMessages(name, trip string, count int) ([]model.Message, error) {
+func (d *Database) LastMessages(ctx context.Context, name, trip string, count int) ([]model.Message, error) {
 	if count <= 0 {
 		count = 5
 	}
-	rows, err := d.DB.Query(fmt.Sprintf("SELECT id,trip,name,hash,message,created_on,channel FROM messages WHERE (name=$1 OR trip=$2) AND visibility='PUBLIC' AND message NOT IN ('LEFT','JOINED') ORDER BY created_on DESC,id DESC LIMIT %d", count), name, trip)
+	rows, err := d.DB.QueryContext(ctx, "SELECT id,trip,name,hash,message,created_on,channel FROM messages WHERE (name=$1 OR trip=$2) AND visibility='PUBLIC' AND message NOT IN ('LEFT','JOINED') ORDER BY created_on DESC,id DESC LIMIT $3", name, trip, fmt.Sprint(count))
 	if err != nil {
 		return nil, err
 	}

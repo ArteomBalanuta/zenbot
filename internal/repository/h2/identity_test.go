@@ -9,24 +9,24 @@ import (
 
 func TestIdentityRegistrationFourCasesAndAtomicDuplicateBehavior(t *testing.T) {
 	d := openTestDB(t)
-	if err := d.Register("Alice", "trip-a", model.REGULAR); err != nil {
+	if err := d.Register(context.Background(), "Alice", "trip-a", model.REGULAR); err != nil {
 		t.Fatal(err)
 	}
-	name, _ := d.IsNameRegistered("alice")
-	trip, _ := d.IsTripRegistered("TRIP-A")
+	name, _ := d.IsNameRegistered(context.Background(), "alice")
+	trip, _ := d.IsTripRegistered(context.Background(), "trip-a")
 	if !name || !trip {
 		t.Fatalf("registered identity missing: name=%v trip=%v", name, trip)
 	}
-	if err := d.RegisterNameByTrip("Bob", "trip-a"); err != nil {
+	if err := d.RegisterNameByTrip(context.Background(), "Bob", "trip-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RegisterTripByName("Alice", "trip-b"); err != nil {
+	if err := d.RegisterTripByName(context.Background(), "Alice", "trip-b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Register("Alice", "trip-c", model.REGULAR); err == nil {
+	if err := d.Register(context.Background(), "Alice", "trip-c", model.REGULAR); err == nil {
 		t.Fatal("duplicate name unexpectedly succeeded")
 	}
-	if err := d.Register("Carol", "trip-a", model.REGULAR); err == nil {
+	if err := d.Register(context.Background(), "Carol", "trip-a", model.REGULAR); err == nil {
 		t.Fatal("duplicate trip unexpectedly succeeded")
 	}
 	var links int
@@ -51,14 +51,14 @@ func TestLastMessagesOrderingFilteringLimitAndEscapingData(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := d.LastMessages("", "trip", 2)
+	got, err := d.LastMessages(context.Background(), "", "trip", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].Message != `new \"quoted\"` || got[1].Message != "old" {
 		t.Fatalf("messages=%v", got)
 	}
-	got, err = d.LastMessages("alice", "", 5)
+	got, err = d.LastMessages(context.Background(), "alice", "", 5)
 	if err != nil || len(got) != 2 || got[0].Message != "name-match" || got[1].Message != "old" {
 		t.Fatalf("name filter=%v err=%v", got, err)
 	}
@@ -73,7 +73,7 @@ func TestLastMessagesExcludesWhispersAndUsesIDAsTieBreaker(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := d.LastMessages("", "trip", 2)
+	got, err := d.LastMessages(context.Background(), "", "trip", 2)
 	if err != nil || len(got) != 2 || got[0].Message != "public-second" || got[1].Message != "public-first" {
 		t.Fatalf("got=%v err=%v", got, err)
 	}
@@ -97,10 +97,10 @@ func TestLastSeenExcludesPresenceAndReturnsLatestMessageAndJoin(t *testing.T) {
 
 func TestRegistrationRollsBackPartialInsert(t *testing.T) {
 	d := openTestDB(t)
-	if err := d.Register("Alice", "trip", model.REGULAR); err != nil {
+	if err := d.Register(context.Background(), "Alice", "trip", model.REGULAR); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Register("Bob", "trip", model.REGULAR); err == nil {
+	if err := d.Register(context.Background(), "Bob", "trip", model.REGULAR); err == nil {
 		t.Fatal("duplicate trip unexpectedly succeeded")
 	}
 	var names, trips, links int
