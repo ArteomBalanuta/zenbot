@@ -170,7 +170,7 @@ func (s *commandEngineStub) LogCommand(_ context.Context, record model.CommandAu
 }
 func (s *commandEngineStub) RemoveIfAfk(_ *model.User)                 {}
 func (s *commandEngineStub) NotifyAfkIfMentioned(_ *model.ChatMessage) {}
-func (s *commandEngineStub) RegisterCommand(c common.Command) {
+func (s *commandEngineStub) RegisterCommand(c common.Command) error {
 	if s.commands == nil {
 		s.commands = map[string]common.CommandMetadata{}
 	}
@@ -179,6 +179,7 @@ func (s *commandEngineStub) RegisterCommand(c common.Command) {
 			return c.NewInstance(s, m)
 		}}
 	}
+	return nil
 }
 func (s *commandEngineStub) GetEnabledCommands() *map[string]common.CommandMetadata {
 	return &s.commands

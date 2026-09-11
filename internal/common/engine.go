@@ -38,7 +38,7 @@ type Engine interface {
 
 	SetName(n string)
 
-	RegisterCommand(c Command)
+	RegisterCommand(c Command) error
 	GetEnabledCommands() *map[string]CommandMetadata
 
 	SetOnlineSetListener(l Listener)

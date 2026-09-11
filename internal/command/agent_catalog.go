@@ -1,6 +1,8 @@
 package command
 
 import (
+	"fmt"
+
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/commandgateway"
 	commandcatalog "zenbot/internal/command/catalog"
@@ -9,16 +11,19 @@ import (
 
 // AgentCommandDefinitions returns the command registry entries that may be
 // exposed as agent tools. Command names and aliases remain owned by RegisterAll.
-func AgentCommandDefinitions() []common.CommandDefinition {
+func AgentCommandDefinitions() ([]common.CommandDefinition, error) {
+	if catalogError != nil {
+		return nil, catalogError
+	}
 	definitions := make([]common.CommandDefinition, 0, len(commandcatalog.AgentEntries()))
 	for _, entry := range commandcatalog.AgentEntries() {
 		definition, ok := commandDefinitionFor(entry.Canonical)
-		if ok {
-			definition.Aliases = append([]string(nil), definition.Aliases...)
-			definitions = append(definitions, definition)
+		if !ok {
+			return nil, fmt.Errorf("missing agent command definition %q", entry.Canonical)
 		}
+		definitions = append(definitions, definition)
 	}
-	return definitions
+	return definitions, nil
 }
 
 // AgentCommandDefinition resolves one canonical command from the reviewed

@@ -18,13 +18,14 @@ type textDispatchEngine struct {
 	requests []snapshot.RoomSnapshotRequest
 }
 
-func (e *textDispatchEngine) RegisterCommand(c common.Command) {
+func (e *textDispatchEngine) RegisterCommand(c common.Command) error {
 	if e.commands == nil {
 		e.commands = map[string]common.CommandMetadata{}
 	}
 	for _, alias := range c.GetAliases() {
 		e.commands[alias] = common.CommandMetadata{Alias: alias, Command: func(m *model.ChatMessage) common.Command { return c.NewInstance(e, m) }}
 	}
+	return nil
 }
 func (e *textDispatchEngine) IsUserAuthorized(_ *model.User, role *model.Role) bool {
 	e.authorizationCalls++

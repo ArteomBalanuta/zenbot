@@ -26,7 +26,7 @@ type supportRelayRegistrationEngine struct {
 	*recordingSupportRelay
 }
 
-func (e *supportRelayRegistrationEngine) RegisterCommand(command common.Command) {
+func (e *supportRelayRegistrationEngine) RegisterCommand(command common.Command) error {
 	if e.commands == nil {
 		e.commands = map[string]common.CommandMetadata{}
 	}
@@ -35,6 +35,7 @@ func (e *supportRelayRegistrationEngine) RegisterCommand(command common.Command)
 			return command.NewInstance(e, message)
 		}}
 	}
+	return nil
 }
 
 func TestSupportRelayAliasesAreUnregisteredWithoutCapability(t *testing.T) {
@@ -128,7 +129,7 @@ type deniedSupportRelayEngine struct {
 }
 
 func (*deniedSupportRelayEngine) IsUserAuthorized(*model.User, *model.Role) bool { return false }
-func (e *deniedSupportRelayEngine) RegisterCommand(command common.Command) {
+func (e *deniedSupportRelayEngine) RegisterCommand(command common.Command) error {
 	if e.commands == nil {
 		e.commands = map[string]common.CommandMetadata{}
 	}
@@ -137,6 +138,7 @@ func (e *deniedSupportRelayEngine) RegisterCommand(command common.Command) {
 			return command.NewInstance(e, message)
 		}}
 	}
+	return nil
 }
 
 func TestSupportRelayDispatchUsesNormalUserAuthorizationWithoutCallerReply(t *testing.T) {

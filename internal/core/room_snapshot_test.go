@@ -76,7 +76,7 @@ func (c *captureRegistrationCommand) NewInstance(engine common.Engine, _ *model.
 }
 
 func TestCredentialedMasterPreservesWrapperCapabilitiesWhenRegisteringCommands(t *testing.T) {
-	engine := &EngineImpl{Type: model.MASTER, EnabledCommands: map[string]common.CommandMetadata{}}
+	engine := &EngineImpl{Type: model.MASTER}
 	engine.InstallRoomSnapshotCoordinator(snapshot.NewRoomSnapshotCoordinator(snapshot.SessionFactoryFunc(func(snapshot.RoomSnapshotRequest, snapshot.SnapshotSink) (snapshot.Session, error) {
 		return &roomSnapshotSessionStub{id: "configured-master"}, nil
 	}), nil, func(payload string) (snapshot.Snapshot, error) { return snapshot.Parse(payload, false) }, time.Second))

@@ -20,11 +20,11 @@ type registrationCountingEngine struct {
 	counts map[string]int
 }
 
-func (e *registrationCountingEngine) RegisterCommand(command common.Command) {
+func (e *registrationCountingEngine) RegisterCommand(command common.Command) error {
 	for _, alias := range command.GetAliases() {
 		e.counts[alias]++
 	}
-	e.commandEngineStub.RegisterCommand(command)
+	return e.commandEngineStub.RegisterCommand(command)
 }
 
 func TestRegisterUserUtilitiesRegistersEachAliasOnce(t *testing.T) {

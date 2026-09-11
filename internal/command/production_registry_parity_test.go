@@ -61,7 +61,11 @@ func TestEveryPublicSaturnCommandRequiresRegularRole(t *testing.T) {
 		"note": {}, "notes": {}, "ping": {}, "users": {}, "say": {}, "sub": {}, "time": {},
 		"unsub": {}, "version": {}, "weather": {},
 	}
-	for _, definition := range catalog() {
+	definitions, err := catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range definitions {
 		if _, ok := public[definition.Canonical]; ok && definition.Role != model.REGULAR {
 			t.Errorf("%s role=%v, want REGULAR", definition.Canonical, definition.Role)
 		}

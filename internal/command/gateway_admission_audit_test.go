@@ -327,7 +327,7 @@ func TestGatewayAdmissionAuditMissingResolvedHostHidden(t *testing.T) {
 }
 
 func TestGatewayAdmissionAuditSourceSnapshotConfigurationIsRequired(t *testing.T) {
-	master := &core.EngineImpl{Type: model.MASTER, EnabledCommands: map[string]common.CommandMetadata{}}
+	master := &core.EngineImpl{Type: model.MASTER}
 	engine := core.BindCredentialedRoomSnapshotMaster(master)
 	if err := RegisterUserUtilities(engine); err != nil {
 		t.Fatal(err)

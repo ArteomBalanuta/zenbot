@@ -30,7 +30,7 @@ func (e *finalCatalogIntegrationEngine) IsUserAuthorized(*model.User, *model.Rol
 	return e.authorized
 }
 
-func (e *finalCatalogIntegrationEngine) RegisterCommand(command common.Command) {
+func (e *finalCatalogIntegrationEngine) RegisterCommand(command common.Command) error {
 	if e.commands == nil {
 		e.commands = map[string]common.CommandMetadata{}
 	}
@@ -43,6 +43,7 @@ func (e *finalCatalogIntegrationEngine) RegisterCommand(command common.Command) 
 			},
 		}
 	}
+	return nil
 }
 
 func TestSQLRestartShutdownFinalCatalogIntegration(t *testing.T) {

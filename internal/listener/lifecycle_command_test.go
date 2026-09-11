@@ -89,7 +89,7 @@ func (e *lifecycleCommandEngine) GetActiveUserByName(name string) *model.User {
 	}
 	return nil
 }
-func (e *lifecycleCommandEngine) RegisterCommand(c common.Command) {
+func (e *lifecycleCommandEngine) RegisterCommand(c common.Command) error {
 	for _, alias := range c.GetAliases() {
 		registered := c
 		e.commands[strings.ToLower(alias)] = common.CommandMetadata{
@@ -99,6 +99,7 @@ func (e *lifecycleCommandEngine) RegisterCommand(c common.Command) {
 			},
 		}
 	}
+	return nil
 }
 func (e *lifecycleCommandEngine) IsUserAuthorized(*model.User, *model.Role) bool { return e.allowed }
 func (e *lifecycleCommandEngine) SendChatMessage(string, string, bool) (string, error) {

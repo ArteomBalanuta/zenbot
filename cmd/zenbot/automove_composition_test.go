@@ -32,7 +32,7 @@ func TestNewAutoMoveProductionOptionsSharesOneStateAndRegistersController(t *tes
 	if err := command.RegisterUserUtilitiesWithDirectAgent(master, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := master.EnabledCommands["automove"]; !ok {
+	if _, ok := (*master.GetEnabledCommands())["automove"]; !ok {
 		t.Fatal("fully composed master did not register automove controller command")
 	}
 }

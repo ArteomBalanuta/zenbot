@@ -131,7 +131,7 @@ func (e *dbzDispatchEngine) NotifyAfkIfMentioned(*model.ChatMessage) {
 	panic("unexpected engine NotifyAfkIfMentioned")
 }
 func (e *dbzDispatchEngine) RemoveIfAfk(*model.User) { panic("unexpected engine RemoveIfAfk") }
-func (e *dbzDispatchEngine) RegisterCommand(c common.Command) {
+func (e *dbzDispatchEngine) RegisterCommand(c common.Command) error {
 	for _, alias := range c.GetAliases() {
 		registered := c
 		e.commands[strings.ToLower(alias)] = common.CommandMetadata{
@@ -141,6 +141,7 @@ func (e *dbzDispatchEngine) RegisterCommand(c common.Command) {
 			},
 		}
 	}
+	return nil
 }
 func (e *dbzDispatchEngine) IsUserAuthorized(_ *model.User, role *model.Role) bool {
 	return role != nil && e.allowed[*role]

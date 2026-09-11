@@ -47,18 +47,34 @@ type CommandMetadata struct {
 }
 
 func BuildCommand(alias string, e Engine, msg *model.ChatMessage) Command {
-	commands := *e.GetEnabledCommands()
+	if indexed, ok := e.(interface {
+		LookupCommand(string) (CommandMetadata, bool)
+	}); ok {
+		command, exists := indexed.LookupCommand(alias)
+		if exists && command.Command != nil {
+			return command.Command(msg)
+		}
+		return nil
+	}
+	snapshot := e.GetEnabledCommands()
+	if snapshot == nil {
+		return nil
+	}
+	commands := *snapshot
 	command, exists := commands[strings.ToLower(strings.TrimSpace(alias))]
 	if !exists {
 		wanted := commandAnagramKey(alias)
 		for candidate, metadata := range commands {
 			if commandAnagramKey(candidate) == wanted {
+				// Map-only engines cannot prove that two aliases share an owner.
+				if exists {
+					return nil
+				}
 				command, exists = metadata, true
-				break
 			}
 		}
 	}
-	if !exists {
+	if !exists || command.Command == nil {
 		log.Println("Unknown command")
 	} else {
 		log.Println("Returning command: ", alias)

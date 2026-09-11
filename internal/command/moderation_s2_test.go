@@ -203,13 +203,14 @@ type noModerationOperationsEngine struct {
 }
 
 func (s *noModerationOperationsEngine) ServiceBundle() *service.Bundle { return s.bundle }
-func (s *noModerationOperationsEngine) RegisterCommand(c common.Command) {
+func (s *noModerationOperationsEngine) RegisterCommand(c common.Command) error {
 	if s.commands == nil {
 		s.commands = map[string]common.CommandMetadata{}
 	}
 	for _, alias := range c.GetAliases() {
 		s.commands[alias] = common.CommandMetadata{Alias: alias}
 	}
+	return nil
 }
 
 func TestRegisterUserUtilitiesDoesNotExposeS2AuthorizeWithoutModerationCapability(t *testing.T) {

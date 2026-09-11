@@ -119,6 +119,9 @@ func RegisterUserUtilities(e common.Engine) error {
 // RegisterUserUtilitiesWithDirectAgent registers the concrete utility commands
 // and, when supplied, the composition-root direct l submitter.
 func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgentSubmitter) error {
+	if catalogError != nil {
+		return fmt.Errorf("Saturn command catalog: %w", catalogError)
+	}
 	canonicals := []string{"help", "crashcourse", "say", "afk", "list", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub", "memory", "dbzhelp", "msgchannel"}
 	canonicals = append(canonicals, "captcha", "authorize", "deauthorize", "lock", "overflow", "ban", "kick", "unban", "unbanall", "mute", "unmute", "color", "flair", "nuke", "resurrect", "prefix")
 	if _, ok := e.(common.AutoMoveController); ok {
@@ -141,10 +144,14 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgent
 		if !ok {
 			return fmt.Errorf("missing Saturn utility definition %q", canonical)
 		}
-		e.RegisterCommand(&legacyAdapter{engine: e, def: def})
+		if err := e.RegisterCommand(&legacyAdapter{engine: e, def: def}); err != nil {
+			return fmt.Errorf("register Saturn command %q: %w", canonical, err)
+		}
 	}
 	if definition, ok := directLDefinition(submitter); ok {
-		e.RegisterCommand(&legacyAdapter{engine: e, def: definition})
+		if err := e.RegisterCommand(&legacyAdapter{engine: e, def: definition}); err != nil {
+			return fmt.Errorf("register direct l command: %w", err)
+		}
 	}
 	return nil
 }

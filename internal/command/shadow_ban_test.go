@@ -131,13 +131,14 @@ type shadowBanStorageOnlyEngine struct {
 }
 
 func (e *shadowBanStorageOnlyEngine) ServiceBundle() *service.Bundle { return e.bundle }
-func (e *shadowBanStorageOnlyEngine) RegisterCommand(c common.Command) {
+func (e *shadowBanStorageOnlyEngine) RegisterCommand(c common.Command) error {
 	if e.commands == nil {
 		e.commands = map[string]common.CommandMetadata{}
 	}
 	for _, alias := range c.GetAliases() {
 		e.commands[alias] = common.CommandMetadata{}
 	}
+	return nil
 }
 
 func TestRegisterUserUtilitiesDoesNotExposeShadowBanCommandsWithoutTypedKick(t *testing.T) {

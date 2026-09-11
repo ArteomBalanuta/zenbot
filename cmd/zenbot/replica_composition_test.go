@@ -86,12 +86,12 @@ func TestReplicaRegistrationOmitsUnavailableControllers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, alias := range []string{"replica", "bot", "agent", "replicaoff", "offline", "botoff", "agentoff", "replicastatus", "status", "ws", "wsay", "wsa", "wsayanon", "anonsay", "automove", "restart", "shutdown", "nuke", "resurrect"} {
-		if _, exists := e.EnabledCommands[alias]; exists {
+		if _, exists := (*e.GetEnabledCommands())[alias]; exists {
 			t.Errorf("unconfigured command %q registered", alias)
 		}
 	}
 	for _, alias := range []string{"say", "prefix"} {
-		if _, exists := e.EnabledCommands[alias]; !exists {
+		if _, exists := (*e.GetEnabledCommands())[alias]; !exists {
 			t.Errorf("local command %q missing", alias)
 		}
 	}

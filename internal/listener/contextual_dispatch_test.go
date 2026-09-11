@@ -28,10 +28,11 @@ func (e *contextualResultEngine) SendChatMessage(string, string, bool) (string, 
 	e.chats++
 	return "", e.replyErr
 }
-func (e *contextualResultEngine) RegisterCommand(c common.Command) {
+func (e *contextualResultEngine) RegisterCommand(c common.Command) error {
 	for _, alias := range c.GetAliases() {
 		e.commands[alias] = common.CommandMetadata{Alias: alias, Command: func(m *model.ChatMessage) common.Command { return c.NewInstance(e, m) }}
 	}
+	return nil
 }
 func (e *contextualResultEngine) LogCommand(ctx context.Context, record model.CommandAuditRecord) (int64, error) {
 	e.auditCtx = ctx

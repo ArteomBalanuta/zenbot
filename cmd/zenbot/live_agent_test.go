@@ -176,8 +176,9 @@ type liveAgentRegistrationEngine struct {
 	commands []common.Command
 }
 
-func (e *liveAgentRegistrationEngine) RegisterCommand(command common.Command) {
+func (e *liveAgentRegistrationEngine) RegisterCommand(command common.Command) error {
 	e.commands = append(e.commands, command)
+	return nil
 }
 
 func (e *liveAgentRegistrationEngine) hasAlias(alias string) bool {

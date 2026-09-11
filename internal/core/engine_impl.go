@@ -78,7 +78,7 @@ type EngineImpl struct {
 	SecurityService *service.SecurityService
 	Services        *service.Bundle
 
-	EnabledCommands      map[string]common.CommandMetadata
+	commands             common.RuntimeCommandRegistry
 	usersMu              sync.RWMutex
 	afkMu                sync.RWMutex
 	subscribersMu        sync.RWMutex
@@ -906,28 +906,21 @@ func (e *EngineImpl) Unlock() {
 	e.SendRawMessage(`{ "cmd": "unlockroom" }`)
 }
 
-func (e *EngineImpl) RegisterCommand(c common.Command) {
-	e.registerCommandFor(c, e)
+func (e *EngineImpl) RegisterCommand(c common.Command) error {
+	return e.registerCommandFor(c, e)
 }
 
-func (e *EngineImpl) registerCommandFor(c common.Command, commandEngine common.Engine) {
-	aliases := c.GetAliases()
-	var constructorFn = func(msg *model.ChatMessage) common.Command {
-		return c.NewInstance(commandEngine, msg)
-	}
+func (e *EngineImpl) registerCommandFor(c common.Command, commandEngine common.Engine) error {
+	return e.commands.Register(c, commandEngine)
+}
 
-	for _, alias := range aliases {
-		e.EnabledCommands[strings.ToLower(strings.TrimSpace(alias))] = common.CommandMetadata{
-			Alias:   alias,
-			Command: constructorFn,
-		}
-	}
-
-	fmt.Printf("Registered command with aliases: %v\n", aliases)
+func (e *EngineImpl) LookupCommand(alias string) (common.CommandMetadata, bool) {
+	return e.commands.Lookup(alias)
 }
 
 func (e *EngineImpl) GetEnabledCommands() *map[string]common.CommandMetadata {
-	return &e.EnabledCommands
+	snapshot := e.commands.Snapshot()
+	return &snapshot
 }
 
 func (e *EngineImpl) SetOnlineSetListener(l common.Listener) {

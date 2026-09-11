@@ -29,8 +29,8 @@ func (e *EngineImpl) SubmitRoomSnapshot(request snapshot.RoomSnapshotRequest) er
 // composition and deliberately not implemented by EngineImpl itself.
 type credentialedRoomSnapshotMaster struct{ *EngineImpl }
 
-func (e *credentialedRoomSnapshotMaster) RegisterCommand(command common.Command) {
-	e.EngineImpl.registerCommandFor(command, e)
+func (e *credentialedRoomSnapshotMaster) RegisterCommand(command common.Command) error {
+	return e.EngineImpl.registerCommandFor(command, e)
 }
 
 // BindCredentialedRoomSnapshotMaster returns a command-facing engine view that

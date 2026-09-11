@@ -8,7 +8,10 @@ import (
 )
 
 func TestAgentCommandDefinitionsCoverCatalogWithoutRecursiveOrExcludedCommands(t *testing.T) {
-	definitions := AgentCommandDefinitions()
+	definitions, err := AgentCommandDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := make(map[string]bool, len(definitions))
 	for _, definition := range definitions {
 		if got[definition.Canonical] {
@@ -16,7 +19,11 @@ func TestAgentCommandDefinitionsCoverCatalogWithoutRecursiveOrExcludedCommands(t
 		}
 		got[definition.Canonical] = true
 	}
-	for _, definition := range catalog() {
+	all, err := catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range all {
 		_, excluded := map[string]bool{"l": true, "mine": true, "whiskey": true, "ws": true, "wsa": true}[definition.Canonical]
 		if got[definition.Canonical] == excluded {
 			t.Fatalf("agent catalog inclusion for %q = %v, excluded=%v", definition.Canonical, got[definition.Canonical], excluded)

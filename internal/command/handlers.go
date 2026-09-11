@@ -594,12 +594,11 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 	}
 }
 func commandDefinitionFor(alias string) (common.CommandDefinition, bool) {
-	for _, d := range catalog() {
-		for _, a := range append([]string{d.Canonical}, d.Aliases...) {
-			if strings.EqualFold(a, alias) {
-				return d, true
-			}
-		}
+	if catalogError != nil {
+		return common.CommandDefinition{}, false
+	}
+	if d, ok := validatedCatalog.Lookup(alias); ok {
+		return d, true
 	}
 	if strings.EqualFold(alias, "unlock") || strings.EqualFold(alias, "unlockroom") {
 		return def("unlock", []string{"unlock", "unlockroom"}, model.MODERATOR), true

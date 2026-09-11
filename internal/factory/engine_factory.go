@@ -40,7 +40,7 @@ type EngineOptions struct {
 func NewEngine(etype model.EngineType, c *config.Config, repo repository.Repository) common.Engine {
 	e, err := NewEngineWithOptions(etype, c, repo, EngineOptions{Transport: transport.Config{URL: c.WebsocketUrl}, ListenerProfile: core.Permanent})
 	if err != nil {
-		return &core.EngineImpl{Type: etype, Channel: c.Channel, Name: c.Name, Prefix: c.CmdPrefix, Password: c.Password, EngineWg: new(sync.WaitGroup), OutMessageQueue: make(chan string, 256), ActiveUsers: map[*model.User]struct{}{}, AfkUsers: map[*model.User]string{}, EnabledCommands: map[string]common.CommandMetadata{}}
+		return &core.EngineImpl{Type: etype, Channel: c.Channel, Name: c.Name, Prefix: c.CmdPrefix, Password: c.Password, EngineWg: new(sync.WaitGroup), OutMessageQueue: make(chan string, 256), ActiveUsers: map[*model.User]struct{}{}, AfkUsers: map[*model.User]string{}}
 	}
 	return e
 }
@@ -62,7 +62,7 @@ func NewEngineWithOptions(etype model.EngineType, c *config.Config, repo reposit
 		opts.Transport.Profiler = opts.Profiler
 	}
 	e := core.NewEngineImpl(&core.EngineImpl{Type: etype, Prefix: c.CmdPrefix, Channel: c.Channel, Name: c.Name, Password: c.Password,
-		EngineWg: new(sync.WaitGroup), EnabledCommands: make(map[string]common.CommandMetadata), OutMessageQueue: make(chan string, 256),
+		EngineWg: new(sync.WaitGroup), OutMessageQueue: make(chan string, 256),
 		ActiveUsers: make(map[*model.User]struct{}), AfkUsers: make(map[*model.User]string), Transport: transport.NewConnection(opts.Transport), Profile: opts.ListenerProfile, LifecycleErrors: opts.LifecycleErrors, CommandProfiler: opts.Profiler}, opts.HostRelay)
 	e.InstallRoomSnapshotCoordinator(opts.SnapshotCoordinator)
 	if opts.ListenerProfile == core.Permanent {

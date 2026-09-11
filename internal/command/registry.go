@@ -234,30 +234,45 @@ func (c *saturnCommand) NewInstance(e common.Engine, m *model.ChatMessage) commo
 	return newCommand(c.canonical, c.aliases, c.role, e, m)
 }
 func def(name string, aliases []string, role model.Role) common.CommandDefinition {
-	return common.CommandDefinition{Canonical: name, Aliases: aliases, Role: role, New: func(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
+	aliases = append([]string(nil), aliases...)
+	return common.CommandDefinition{Canonical: name, Aliases: append([]string(nil), aliases...), Role: role, New: func(e common.Engine, m *model.ChatMessage) common.SaturnCommand {
 		if name == "sub" || name == "unsub" {
-			return newSubscriptionCommand(name, aliases, role, e, m)
+			return newSubscriptionCommand(name, append([]string(nil), aliases...), role, e, m)
 		}
-		return newCommand(name, aliases, role, e, m)
+		return newCommand(name, append([]string(nil), aliases...), role, e, m)
 	}}
 }
 
-func catalog() []common.CommandDefinition {
-	r := common.NewSaturnCommandRegistry()
-	_ = RegisterAll(r)
-	return r.Definitions()
+var validatedCatalog, catalogError = materializeCatalog(commandcatalog.Entries())
+
+func catalog() ([]common.CommandDefinition, error) {
+	if catalogError != nil {
+		return nil, catalogError
+	}
+	return validatedCatalog.Definitions(), nil
 }
 
 // RegisterAll materializes handlers from the dependency-neutral reviewed catalog.
 func RegisterAll(r *common.SaturnCommandRegistry) error {
-	for _, entry := range commandcatalog.Entries() {
+	definitions, err := catalog()
+	if err != nil {
+		return err
+	}
+	return r.RegisterDefinitions(definitions)
+}
+
+func materializeCatalog(entries []commandcatalog.Entry) (*common.SaturnCommandRegistry, error) {
+	r := common.NewSaturnCommandRegistry()
+	definitions := make([]common.CommandDefinition, 0, len(entries))
+	for _, entry := range entries {
 		d := def(entry.Canonical, entry.Aliases, entry.Role)
 		if entry.Canonical == "crashcourse" {
 			d = howToDefinition()
 		}
-		if err := r.Register(d); err != nil {
-			return err
-		}
+		definitions = append(definitions, d)
 	}
-	return r.Validate()
+	if err := r.RegisterDefinitions(definitions); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
