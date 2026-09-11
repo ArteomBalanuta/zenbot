@@ -2,7 +2,7 @@ package core
 
 import "testing"
 
-func TestSubscriptionSetIsIdempotentAndUnsubscribeIsCaseInsensitive(t *testing.T) {
+func TestSubscriptionSetUsesNormalizedExactTripCredentials(t *testing.T) {
 	e := &EngineImpl{}
 	if !e.SubscribeTrip(" Trip-A ") {
 		t.Fatal("first subscribe should succeed")
@@ -10,16 +10,28 @@ func TestSubscriptionSetIsIdempotentAndUnsubscribeIsCaseInsensitive(t *testing.T
 	if e.SubscribeTrip("Trip-A") {
 		t.Fatal("duplicate subscribe should be idempotent")
 	}
-	if !e.IsSubscribedTrip("trip-a") {
-		t.Fatal("subscription lookup should be case-insensitive")
+	if e.IsSubscribedTrip("trip-a") {
+		t.Fatal("case-variant trip read another credential's subscription")
 	}
-	if !e.UnsubscribeTrip("TRIP-A") {
-		t.Fatal("matching unsubscribe should succeed")
+	if e.UnsubscribeTrip("TRIP-A") {
+		t.Fatal("case-variant trip removed another credential's subscription")
 	}
-	if e.UnsubscribeTrip("trip-a") {
+	if !e.SubscribeTrip("trip-a") || e.SubscribeTrip("trip-a") {
+		t.Fatal("distinct case-variant credential did not retain exact duplicate semantics")
+	}
+	if !e.UnsubscribeTrip("trip-a") {
+		t.Fatal("case-variant credential failed to remove its own subscription")
+	}
+	if !e.IsSubscribedTrip(" Trip-A ") {
+		t.Fatal("removing case-variant credential removed exact subscription")
+	}
+	if !e.UnsubscribeTrip(" Trip-A ") {
+		t.Fatal("trimmed exact unsubscribe should succeed")
+	}
+	if e.UnsubscribeTrip("Trip-A") {
 		t.Fatal("second unsubscribe should fail")
 	}
-	if e.IsSubscribedTrip("trip-a") {
+	if e.IsSubscribedTrip("Trip-A") {
 		t.Fatal("unsubscription should suppress notifications")
 	}
 }

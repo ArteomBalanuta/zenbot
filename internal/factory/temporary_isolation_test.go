@@ -30,7 +30,12 @@ func TestTemporaryOnlineSetIsolatedFromPermanentEngineState(t *testing.T) {
 	if len(*users) != 1 {
 		t.Fatalf("temporary active users changed: %v", *users)
 	}
-	if _, ok := (*users)[original]; !ok {
-		t.Fatal("temporary engine lost original active user")
+	for user := range *users {
+		if user == original {
+			t.Fatal("temporary active snapshot exposed the engine-owned user pointer")
+		}
+		if user.Name != original.Name || user.Trip != original.Trip {
+			t.Fatalf("temporary engine user = %#v, want %#v", user, original)
+		}
 	}
 }

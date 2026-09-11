@@ -80,6 +80,7 @@ type EngineImpl struct {
 
 	EnabledCommands      map[string]common.CommandMetadata
 	usersMu              sync.RWMutex
+	afkMu                sync.RWMutex
 	subscribersMu        sync.RWMutex
 	subscribers          map[string]struct{}
 	runtimeMu            sync.Mutex
@@ -524,14 +525,18 @@ func (e *EngineImpl) AddActiveUser(joined *model.User) {
 	if joined == nil {
 		return
 	}
+	owned := *joined
 	e.usersMu.Lock()
 	defer e.usersMu.Unlock()
+	if e.ActiveUsers == nil {
+		e.ActiveUsers = make(map[*model.User]struct{})
+	}
 	for u := range e.ActiveUsers {
-		if model.IdentityKey(u.Trip, u.Hash, u.Name) == model.IdentityKey(joined.Trip, joined.Hash, joined.Name) {
+		if model.IdentityKey(u.Trip, u.Hash, u.Name) == model.IdentityKey(owned.Trip, owned.Hash, owned.Name) {
 			delete(e.ActiveUsers, u)
 		}
 	}
-	e.ActiveUsers[joined] = struct{}{}
+	e.ActiveUsers[&owned] = struct{}{}
 }
 
 func (e *EngineImpl) SubscribeTrip(trip string) bool {
@@ -555,11 +560,9 @@ func (e *EngineImpl) UnsubscribeTrip(trip string) bool {
 	trip = strings.TrimSpace(trip)
 	e.subscribersMu.Lock()
 	defer e.subscribersMu.Unlock()
-	for current := range e.subscribers {
-		if strings.EqualFold(current, trip) {
-			delete(e.subscribers, current)
-			return true
-		}
+	if _, exists := e.subscribers[trip]; exists {
+		delete(e.subscribers, trip)
+		return true
 	}
 	return false
 }
@@ -567,12 +570,8 @@ func (e *EngineImpl) UnsubscribeTrip(trip string) bool {
 func (e *EngineImpl) IsSubscribedTrip(trip string) bool {
 	e.subscribersMu.RLock()
 	defer e.subscribersMu.RUnlock()
-	for current := range e.subscribers {
-		if strings.EqualFold(current, strings.TrimSpace(trip)) {
-			return true
-		}
-	}
-	return false
+	_, exists := e.subscribers[strings.TrimSpace(trip)]
+	return exists
 }
 
 func (e *EngineImpl) GetSubscribedTrips() []string {
@@ -600,38 +599,81 @@ func (e *EngineImpl) RemoveActiveUser(left *model.User) {
 }
 
 func (e *EngineImpl) GetAfkUsers() *map[*model.User]string {
-	return &e.AfkUsers
+	e.afkMu.RLock()
+	defer e.afkMu.RUnlock()
+	snapshot := make(map[*model.User]string, len(e.AfkUsers))
+	for user, reason := range e.AfkUsers {
+		copy := *user
+		snapshot[&copy] = reason
+	}
+	return &snapshot
 }
 
 func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
-	e.AfkUsers[u] = reason
-	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", u.Name, u.Trip, reason)
+	if u == nil {
+		return
+	}
+	owned := *u
+	e.afkMu.Lock()
+	if e.AfkUsers == nil {
+		e.AfkUsers = make(map[*model.User]string)
+	}
+	identity := model.IdentityKey(owned.Trip, owned.Hash, owned.Name)
+	for current := range e.AfkUsers {
+		if model.IdentityKey(current.Trip, current.Hash, current.Name) == identity {
+			delete(e.AfkUsers, current)
+		}
+	}
+	e.AfkUsers[&owned] = reason
+	e.afkMu.Unlock()
+	log.Printf("Added Afk User: %s, Trip: %s, Reason: %s", owned.Name, owned.Trip, reason)
 }
 
 func (e *EngineImpl) RenameAfkUser(before, after string) {
+	before = strings.TrimSpace(before)
+	after = strings.TrimSpace(after)
+	e.afkMu.Lock()
+	defer e.afkMu.Unlock()
 	for user := range e.AfkUsers {
-		if strings.EqualFold(user.Name, strings.TrimSpace(before)) {
-			user.Name = strings.TrimSpace(after)
+		if strings.EqualFold(user.Name, before) {
+			user.Name = after
 		}
 	}
 }
 
 func (e *EngineImpl) RemoveIfAfk(u *model.User) {
+	if u == nil {
+		return
+	}
+	name, trip := u.Name, u.Trip
+	removed := false
+	e.afkMu.Lock()
 	for user := range e.AfkUsers {
-		if (user.Name == u.Name) || (u.Trip != "" && user.Trip == u.Trip) {
+		if user.Name == name || (trip != "" && user.Trip == trip) {
 			delete(e.AfkUsers, user)
-			log.Printf("Removed Afk user %s", u.Name)
-			e.SendChatMessage(u.Name, " is not afk anymore - welcome back.", false)
+			removed = true
 			break
 		}
+	}
+	e.afkMu.Unlock()
+	if removed {
+		log.Printf("Removed Afk user %s", name)
+		_, _ = e.SendChatMessage(name, " is not afk anymore - welcome back.", false)
 	}
 }
 
 // TODO: improve to mention users by checking against trip of the mentioned user
 func (e *EngineImpl) NotifyAfkIfMentioned(m *model.ChatMessage) {
-	for a, reason := range e.AfkUsers {
-		if strings.Contains(m.Text, a.Trip) || strings.Contains(m.Text, a.Name) {
-			e.SendChatMessage(m.Name, fmt.Sprintf(" user: %s is afk, reason: %s", a.Name, reason), false)
+	if m == nil {
+		return
+	}
+	text, author := m.Text, m.Name
+	snapshot := e.GetAfkUsers()
+	for user, reason := range *snapshot {
+		mentionedTrip := user.Trip != "" && strings.Contains(text, user.Trip)
+		mentionedName := user.Name != "" && strings.Contains(text, user.Name)
+		if mentionedTrip || mentionedName {
+			_, _ = e.SendChatMessage(author, fmt.Sprintf(" user: %s is afk, reason: %s", user.Name, reason), false)
 		}
 	}
 }
@@ -641,7 +683,8 @@ func (e *EngineImpl) GetActiveUserByName(name string) *model.User {
 	defer e.usersMu.RUnlock()
 	for u := range e.ActiveUsers {
 		if strings.EqualFold(u.Name, strings.TrimSpace(name)) {
-			return u
+			copy := *u
+			return &copy
 		}
 	}
 	return nil
@@ -679,7 +722,14 @@ func (e *EngineImpl) IsManagedBotName(name string) bool {
 }
 
 func (e *EngineImpl) GetActiveUsers() *map[*model.User]struct{} {
-	return &e.ActiveUsers
+	e.usersMu.RLock()
+	defer e.usersMu.RUnlock()
+	snapshot := make(map[*model.User]struct{}, len(e.ActiveUsers))
+	for user := range e.ActiveUsers {
+		copy := *user
+		snapshot[&copy] = struct{}{}
+	}
+	return &snapshot
 }
 
 // ActiveUserNames returns a read-safe immutable active-user snapshot.

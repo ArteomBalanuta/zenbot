@@ -180,7 +180,7 @@ func TestUserJoinedListenerRunsAutoMoveLastAfterExistingJoinEffects(t *testing.T
 	}
 }
 
-func TestUserJoinedListenerWhispersExactDataToAllCaseInsensitiveSubscribersOnly(t *testing.T) {
+func TestUserJoinedListenerWhispersExactDataToExactTripSubscribersOnly(t *testing.T) {
 	q := &subscriptionQueryStub{data: `Hashes: \nhash-joined \nNicks: \nnick-joined \n`}
 	e := &core.EngineImpl{
 		ActiveUsers:     map[*model.User]struct{}{},
@@ -189,20 +189,17 @@ func TestUserJoinedListenerWhispersExactDataToAllCaseInsensitiveSubscribersOnly(
 		Services:        &service.Bundle{Users: &service.UserService{Queries: q}},
 	}
 	e.SubscribeTrip("TRIP-A")
-	e.AddActiveUser(&model.User{Name: "sub-one", Trip: "trip-a"})
-	e.AddActiveUser(&model.User{Name: "sub-two", Trip: "TrIp-A"})
+	e.AddActiveUser(&model.User{Name: "case-variant", Trip: "TrIp-A"})
 	e.AddActiveUser(&model.User{Name: "other", Trip: "trip-b"})
 
-	joined, _ := json.Marshal(&model.User{Name: "joined", Hash: "hash-joined", Trip: "Trip-A"})
+	joined, _ := json.Marshal(&model.User{Name: "joined", Hash: "hash-joined", Trip: "TRIP-A"})
 	NewUserJoinedListener(e).Notify(string(joined))
 	if q.calls != 1 {
 		t.Fatalf("BasicUserData calls=%d, want 1", q.calls)
 	}
-	got := []string{<-e.OutMessageQueue, <-e.OutMessageQueue, <-e.OutMessageQueue}
+	got := []string{<-e.OutMessageQueue}
 	want := map[string]bool{
-		`{ "cmd": "chat", "text": "/whisper @sub-one  -\n\nHashes: \nhash-joined \nNicks: \nnick-joined \n"}`: true,
-		`{ "cmd": "chat", "text": "/whisper @sub-two  -\n\nHashes: \nhash-joined \nNicks: \nnick-joined \n"}`: true,
-		`{ "cmd": "chat", "text": "/whisper @joined  -\n\nHashes: \nhash-joined \nNicks: \nnick-joined \n"}`:  true,
+		`{ "cmd": "chat", "text": "/whisper @joined  -\n\nHashes: \nhash-joined \nNicks: \nnick-joined \n"}`: true,
 	}
 	for _, payload := range got {
 		if !want[payload] {
@@ -215,7 +212,12 @@ func TestUserJoinedListenerWhispersExactDataToAllCaseInsensitiveSubscribersOnly(
 	default:
 	}
 
-	e.UnsubscribeTrip("trip-a")
+	if e.UnsubscribeTrip("trip-a") {
+		t.Fatal("case-variant trip removed another credential's subscription")
+	}
+	if !e.UnsubscribeTrip("TRIP-A") {
+		t.Fatal("exact trip failed to unsubscribe")
+	}
 	NewUserJoinedListener(e).Notify(string(joined))
 	select {
 	case extra := <-e.OutMessageQueue:
