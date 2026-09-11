@@ -36,7 +36,7 @@ func (s *ActivityService) Stats(ctx context.Context, trip string) (string, error
 	for _, stat := range stats {
 		rows = append(rows, []string{stat.Trip, stat.DayOfWeek, stat.Hour, stat.ProbabilityPercentage})
 	}
-	return "\\n```Text\\n" + generateSaturnTable([]string{"TRIP", "DAY_OF_WEEK", "HOUR", "PROBABILITY_PERCENTAGE"}, rows) + "\\n ```", nil
+	return "\n```Text\n" + generateSaturnTable([]string{"TRIP", "DAY_OF_WEEK", "HOUR", "PROBABILITY_PERCENTAGE"}, rows) + "\n ```", nil
 }
 
 func generateSaturnTable(headers []string, rows [][]string) string {

@@ -8,6 +8,9 @@ type Engine interface {
 
 	DispatchMessage(jsonMessage string)
 	SendRawMessage(message string)
+	// Chat payloads and returned receipts are plain Unicode text. Real LF,
+	// literal backslash+n, quotes and controls remain distinct. Implementations
+	// serialize exactly once at the JSON protocol boundary; callers never escape.
 	SendChatMessage(author, message string, IsWhisper bool) (string, error)
 	SendWhisperMessage(author, payload string) (string, error)
 	SendAddressedMessage(author, payload string, whisper bool) (string, error)

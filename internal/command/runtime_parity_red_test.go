@@ -123,7 +123,7 @@ func TestRuntimeParityUsersUsesGroupB(t *testing.T) {
 
 func TestRuntimeParityMailDirectoryPreservesSaturnEscapedNewlines(t *testing.T) {
 	got := formatSaturnRegisteredUsers([]repository.SaturnRegisteredUser{{Name: "Merc", Trip: "trip"}})
-	if got != "Merc trip\\n" {
+	if got != "Merc trip\n" {
 		t.Fatalf("directory=%q, want Saturn escaped newline", got)
 	}
 }

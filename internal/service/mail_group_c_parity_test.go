@@ -30,7 +30,7 @@ func seedMailRecipient(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestMailGroupCQueueSerializesResolvedTripsAndEscapedPayload(t *testing.T) {
+func TestMailGroupCQueuePersistsResolvedTripsAndPlainPayload(t *testing.T) {
 	db := openMailGroupCDB(t)
 	seedMailRecipient(t, db)
 
@@ -43,7 +43,7 @@ func TestMailGroupCQueueSerializesResolvedTripsAndEscapedPayload(t *testing.T) {
 	if err := db.QueryRow("SELECT owner,receiver,message,status,is_whisper,created_on FROM mail").Scan(&owner, &receiver, &message, &status, &whisper, &createdOn); err != nil {
 		t.Fatal(err)
 	}
-	if owner != "alice#origin" || receiver != "trip-a,trip-b" || message != `quote \"x\"\nline ` || status != "PENDING" || whisper != "true" || createdOn <= 0 {
+	if owner != "alice#origin" || receiver != "trip-a,trip-b" || message != "quote \"x\"\nline " || status != "PENDING" || whisper != "true" || createdOn <= 0 {
 		t.Fatalf("mail owner=%q receiver=%q message=%q status=%q whisper=%q createdOn=%d", owner, receiver, message, status, whisper, createdOn)
 	}
 }

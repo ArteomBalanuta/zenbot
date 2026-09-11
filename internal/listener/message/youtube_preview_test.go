@@ -34,7 +34,7 @@ func TestYoutubePreviewHandlerPublishesPreviewForAuthor(t *testing.T) {
 
 	next, err := (YoutubePreview{}).Handle(context.Background(), &Context{Engine: engine, Message: &model.ChatMessage{Name: "alice", Text: "https://youtu.be/id"}})
 
-	if err != nil || !next || engine.author != "alice" || engine.text != "Title: Video\\n![Video](https://i.ytimg.com/vi/id/hqdefault.jpg)" {
+	if err != nil || !next || engine.author != "alice" || engine.text != "Title: Video\n![Video](https://i.ytimg.com/vi/id/hqdefault.jpg)" {
 		t.Fatalf("next=%v err=%v author=%q text=%q", next, err, engine.author, engine.text)
 	}
 }

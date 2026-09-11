@@ -37,7 +37,7 @@ func TestActivityCommandPreservesAliasesRoleFirstArgumentAndWhisper(t *testing.T
 	if repo.calls != 1 || repo.target != "trip" {
 		t.Fatalf("calls=%d target=%q", repo.calls, repo.target)
 	}
-	if len(engine.chats) != 1 || engine.chats[0] != "alice|Stats: \\n\\n```Text\\n\n\n+--------+----------------+--------+--------------------------+\n|  TRIP  |  DAY_OF_WEEK   |  HOUR  |  PROBABILITY_PERCENTAGE  |\n+--------+----------------+--------+--------------------------+\n|  trip  |     Sunday     |   1    |          100.0           |\n+--------+----------------+--------+--------------------------+\n\n\\n ```|true" {
+	if len(engine.chats) != 1 || engine.chats[0] != "alice|Stats: \n\n```Text\n\n\n+--------+----------------+--------+--------------------------+\n|  TRIP  |  DAY_OF_WEEK   |  HOUR  |  PROBABILITY_PERCENTAGE  |\n+--------+----------------+--------+--------------------------+\n|  trip  |     Sunday     |   1    |          100.0           |\n+--------+----------------+--------+--------------------------+\n\n\n ```|true" {
 		t.Fatalf("chats=%v", engine.chats)
 	}
 }

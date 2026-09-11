@@ -39,6 +39,8 @@ type UserQueryRepository interface {
 	// trip, latest first with a stable exact-name tie-break; it is not ownership.
 	NicksByTrip(context.Context, string) ([]string, error)
 	BasicUserData(context.Context, string, string) (string, error)
+	// LastOnline accepts a raw nickname-or-trip selector: normalize the name
+	// predicate once, preserve the exact trip, and reject ambiguous matches.
 	LastOnline(context.Context, string) (LastOnlineRecord, error)
 }
 
@@ -50,6 +52,7 @@ type RecentPresenceRepository interface {
 
 // LastSeenRepository keeps the legacy method name with the same public facts.
 type LastSeenRepository interface {
+	// LastSeen follows the same raw mixed-selector contract as LastOnline.
 	LastSeen(context.Context, string) (LastOnlineRecord, error)
 }
 

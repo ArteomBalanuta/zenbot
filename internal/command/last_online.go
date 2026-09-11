@@ -16,17 +16,16 @@ func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc"); err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n Example: "+c.engine.GetPrefix()+"lastseen merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
 	target := strings.TrimSpace(arguments[0])
-	if strings.HasPrefix(target, "@") {
-		target = strings.TrimSpace(strings.TrimPrefix(target, "@"))
-	}
-	if target == "" {
-		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc"); err != nil {
+	// This is a nickname OR trip selector. The repository normalizes only
+	// the nickname predicate while preserving the exact opaque trip operand.
+	if target == "" || target == "@" {
+		if err := replyContext(ctx, &c.commandBase, "\n Example: "+c.engine.GetPrefix()+"lastseen merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil

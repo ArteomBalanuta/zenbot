@@ -41,7 +41,7 @@ func (s *lastOnlineCommandQueriesStub) LastOnline(_ context.Context, target stri
 	return s.record, s.err
 }
 
-func TestLastOnlineCommandUsesFirstNormalizedArgumentAndWhisper(t *testing.T) {
+func TestLastOnlineCommandPassesRawMixedSelectorAndWhisper(t *testing.T) {
 	queries := &lastOnlineCommandQueriesStub{record: repository.LastOnlineRecord{
 		Found:             true,
 		LastMessage:       sql.NullString{String: "hello", Valid: true},
@@ -56,10 +56,10 @@ func TestLastOnlineCommandUsesFirstNormalizedArgumentAndWhisper(t *testing.T) {
 	if err != nil || status != model.SUCCESSFUL {
 		t.Fatalf("status=%v err=%v", status, err)
 	}
-	if queries.calls != 1 || queries.target != "merc" {
+	if queries.calls != 1 || queries.target != "@merc" {
 		t.Fatalf("calls=%d target=%q", queries.calls, queries.target)
 	}
-	if len(engine.chats) != 1 || engine.chats[0] != "alice|\\n Nick|Trip: merc\\n Last observed: Thu, 1 Jan 1970 00:00:00 GMT\\n Last presence event:  - \\n Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello\\n|true" {
+	if len(engine.chats) != 1 || engine.chats[0] != "alice|\n Nick|Trip: @merc\n Last observed: Thu, 1 Jan 1970 00:00:00 GMT\n Last presence event:  - \n Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello\n|true" {
 		t.Fatalf("chats=%v", engine.chats)
 	}
 }
@@ -74,7 +74,7 @@ func TestLastOnlineCommandMissingTargetRepliesWithUsageWithoutQuery(t *testing.T
 		if err != nil || status != model.FAILED {
 			t.Fatalf("%q status=%v err=%v", text, status, err)
 		}
-		if len(engine.chats) != 1 || engine.chats[0] != "alice|\\n Example: !lastseen merc|false" {
+		if len(engine.chats) != 1 || engine.chats[0] != "alice|\n Example: !lastseen merc|false" {
 			t.Fatalf("%q chats=%v", text, engine.chats)
 		}
 	}
@@ -123,15 +123,17 @@ func TestLastOnlineAliasesDispatchAgainstRealH2AndRequireQueries(t *testing.T) {
 			t.Fatalf("missing alias %q", alias)
 		}
 	}
-	for _, alias := range []string{"lastseen", "seen"} {
-		engine.chats = nil
-		payload, err := json.Marshal(model.ChatMessage{Name: "alice", Trip: "trip-a", Text: "!" + alias + " merc"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		listener.NewUserChatListener(engine).Notify(string(payload))
-		if len(engine.chats) != 1 || !contains(engine.chats[0], "\\n Nick|Trip: merc\\n") || !contains(engine.chats[0], "Last public message: Thu, 1 Jan 1970 00:00:02 GMT — hello") {
-			t.Fatalf("%s chats=%v", alias, engine.chats)
+	for _, alias := range []string{"lastonline", "seen", "last", "online", "lastseen"} {
+		for _, target := range []string{"merc", "@merc"} {
+			engine.chats = nil
+			payload, err := json.Marshal(model.ChatMessage{Name: "alice", Trip: "trip-a", Text: "!" + alias + " " + target})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener.NewUserChatListener(engine).Notify(string(payload))
+			if len(engine.chats) != 1 || !contains(engine.chats[0], "\n Nick|Trip: "+target+"\n") || !contains(engine.chats[0], "Last public message: Thu, 1 Jan 1970 00:00:02 GMT — hello") {
+				t.Fatalf("%s chats=%v", alias, engine.chats)
+			}
 		}
 	}
 }

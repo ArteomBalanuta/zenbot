@@ -60,7 +60,7 @@ func (l *UserJoinedListener) shareUserInfo(joined *model.User) {
 		if !l.e.IsSubscribedTrip(active.Trip) {
 			continue
 		}
-		_, _ = l.e.SendAddressedMessage(active.Name, " -\\n\\n"+data, true)
+		_, _ = l.e.SendAddressedMessage(active.Name, " -\n\n"+data, true)
 	}
 }
 

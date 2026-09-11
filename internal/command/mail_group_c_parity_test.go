@@ -74,7 +74,7 @@ func TestMailGroupCParityUnknownReceiverDirectory(t *testing.T) {
 	if got := executeMailGroupCCommand(t, e, "mail", " unknown message"); got != model.FAILED {
 		t.Fatalf("unknown-receiver status=%s", got)
 	}
-	want := "alice|User you specified is not registered. Please use a name from provided list to send a message to respective trip. \\\\nMerc trip-a\\n|true"
+	want := "alice|User you specified is not registered. Please use a name from provided list to send a message to respective trip. \nMerc trip-a\n|true"
 	if len(e.chats) != 1 || e.chats[0] != want {
 		t.Fatalf("unknown-receiver chats=%q want=%q", e.chats, want)
 	}
@@ -95,7 +95,7 @@ func TestMailGroupCParitySuccessAcknowledgementAndQueuedPayload(t *testing.T) {
 	if err := db.QueryRow("SELECT owner,receiver,message,status,is_whisper FROM mail").Scan(&owner, &receiver, &message, &status, &whisper); err != nil {
 		t.Fatal(err)
 	}
-	if owner != "alice#origin" || receiver != "trip-a" || message != "quote \\\"x\\\" line " || status != "PENDING" || whisper != "true" {
+	if owner != "alice#origin" || receiver != "trip-a" || message != "quote \"x\" line " || status != "PENDING" || whisper != "true" {
 		t.Fatalf("queued mail owner=%q receiver=%q message=%q status=%q whisper=%q", owner, receiver, message, status, whisper)
 	}
 }

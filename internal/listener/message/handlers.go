@@ -95,8 +95,8 @@ func (DeliverPendingMail) Handle(ctx context.Context, c *Context) (bool, error) 
 		if err := ctx.Err(); err != nil {
 			return errors.Join(service.ErrMailSendNotStarted, err)
 		}
-		text := time.UnixMilli(m.CreatedOn).UTC().Format(time.RFC1123) + ".\\n" + m.Owner + ": " + m.Message + "\\n &nbsp; \\n"
-		_, err := c.Engine.SendChatMessage(c.Message.Name, " new mail: \\n "+text, m.IsWhisper)
+		text := time.UnixMilli(m.CreatedOn).UTC().Format(time.RFC1123) + ".\n" + m.Owner + ": " + m.Message + "\n &nbsp; \n"
+		_, err := c.Engine.SendChatMessage(c.Message.Name, " new mail: \n "+text, m.IsWhisper)
 		return err
 	})
 	return true, err

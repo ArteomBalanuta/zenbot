@@ -264,7 +264,9 @@ func (w weatherPayload) format(area string) (string, error) {
 	}
 	code := metricUnavailable
 	if w.Current.WeatherCode != nil {
-		icons := map[int]string{0: "☀️", 1: "🌤️", 2: "⛅", 3: "☁️", 45: "🌫️", 48: "🌫️", 51: "🌦️", 53: "🌦️", 55: "🌧️", 61: "🌧️", 63: "🌧️", 65: "🌧️", 71: "🌨️", 73: "🌨️", 75: "❄️", 80: "🌦️", 81: "🌧️", 82: "🌧️", 95: "⛈️", 96: "⛈️", 99: "⛈️"}
+		// Preserve Saturn's WmoWeatherInterpCodes mapping, including freezing
+		// precipitation and snow codes omitted in the original Go port.
+		icons := map[int]string{0: "🌤️", 1: "🌤️", 2: "🌥️", 3: "☁️", 45: "🌫️", 48: "😶‍🌫️", 51: "🌦️", 53: "🌧️", 55: "🌧️", 56: "🌧️", 57: "🌧️", 61: "🌦️", 63: "🌧️", 65: "🌧️", 66: "🌧️", 67: "🌧️", 71: "❄️", 73: "❄️", 75: "❄️", 77: "❄️", 80: "🚿", 81: "🚿", 82: "🚿", 85: "🚿", 86: "❄️", 95: "⛈️", 96: "⛈️", 99: "⛈️"}
 		if icon, ok := icons[*w.Current.WeatherCode]; ok {
 			code = icon
 		}
@@ -287,7 +289,7 @@ func (w weatherPayload) format(area string) (string, error) {
 		"Soil temp 18cm: " + metricAt(w.HourlyRaw.SoilTemp, hour, w.HourlyUnitsRaw.SoilTemp),
 		"Soil moist 3-9cm: " + metricAt(w.HourlyRaw.SoilMoist, hour, w.HourlyUnitsRaw.SoilMoist),
 	}
-	return alignLiteralLines(lines, true), nil
+	return alignTextLines(lines, true), nil
 }
 
 type TimeService struct {
@@ -452,5 +454,5 @@ func (s *TimeService) Get(ctx context.Context, location string) (string, error) 
 		return "", err
 	}
 	lines = append(lines, "day length: "+length)
-	return fmt.Sprintf("\\n Time: **%s, %s** \\n ", location, r.Country) + alignLiteralLines(lines, false), nil
+	return fmt.Sprintf("\n Time: **%s, %s** \n ", location, r.Country) + alignTextLines(lines, false), nil
 }

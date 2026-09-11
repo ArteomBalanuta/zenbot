@@ -12,6 +12,7 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 var (
@@ -33,8 +34,9 @@ func (s *MailService) Queue(ctx context.Context, message, owner, receiver string
 // QueueResolved persists pending mail and returns the resolved recipient trips
 // used by Saturn's scheduling acknowledgement.
 func (s *MailService) QueueResolved(ctx context.Context, message, owner, receiver string, whisper bool) (string, error) {
-	receiver = strings.TrimPrefix(strings.TrimSpace(receiver), "@")
-	if receiver == "" {
+	receiver = strings.TrimSpace(receiver)
+	nick, err := util.NormalizeNickTarget(&receiver)
+	if err != nil {
 		return "", ErrMailReceiverBlank
 	}
 	// An exact registered trip takes precedence over a nickname with the same
@@ -43,7 +45,7 @@ func (s *MailService) QueueResolved(ctx context.Context, message, owner, receive
 		WHERE t.trip=$2 OR (NOT EXISTS (SELECT 1 FROM trips WHERE trip=$2) AND EXISTS (
 			SELECT 1 FROM trip_names tn INNER JOIN names n ON tn.name_id=n.id
 			WHERE tn.trip_id=t.id AND LOWER(n.name)=$1
-		)) ORDER BY t.trip`, strings.ToLower(receiver), receiver)
+		)) ORDER BY t.trip`, strings.ToLower(nick), receiver)
 	if e != nil {
 		return "", e
 	}
@@ -68,9 +70,7 @@ func (s *MailService) QueueResolved(ctx context.Context, message, owner, receive
 	if message != "" {
 		message += " "
 	}
-	escapedMessage, _ := json.Marshal(message)
-	message = string(escapedMessage[1 : len(escapedMessage)-1])
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES($1,$2,$3,'PENDING',$4,$5)`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper)); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper,text_encoding) VALUES($1,$2,$3,'PENDING',$4,$5,'PLAIN')`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper)); err != nil {
 		return "", err
 	}
 	common.RecordCommittedMutation(ctx)
@@ -95,7 +95,7 @@ func (s *MailService) Pending(ctx context.Context, receiver, trip string) ([]mod
 	if strings.TrimSpace(trip) == "" || strings.Contains(trip, ",") {
 		return nil, nil
 	}
-	rows, e := s.DB.QueryContext(ctx, `SELECT id,owner,receiver,message,status,created_on,is_whisper FROM mail WHERE status='PENDING' AND NOT EXISTS (SELECT 1 FROM mail_delivery d WHERE d.mail_id=mail.id AND d.recipient_trip=$1 AND d.state<>'PENDING') AND LOCATE(',' || $1 || ',', ',' || receiver || ',') > 0 ORDER BY id`, trip)
+	rows, e := s.DB.QueryContext(ctx, `SELECT id,owner,receiver,message,status,created_on,is_whisper,text_encoding FROM mail WHERE status='PENDING' AND NOT EXISTS (SELECT 1 FROM mail_delivery d WHERE d.mail_id=mail.id AND d.recipient_trip=$1 AND d.state<>'PENDING') AND LOCATE(',' || $1 || ',', ',' || receiver || ',') > 0 ORDER BY id`, trip)
 	if e != nil {
 		return nil, e
 	}
@@ -103,9 +103,20 @@ func (s *MailService) Pending(ctx context.Context, receiver, trip string) ([]mod
 	var out []model.Mail
 	for rows.Next() {
 		var m model.Mail
-		var w string
-		if e = rows.Scan(&m.ID, &m.Owner, &m.Receiver, &m.Message, &m.Status, &m.CreatedOn, &w); e != nil {
+		var w, encoding string
+		if e = rows.Scan(&m.ID, &m.Owner, &m.Receiver, &m.Message, &m.Status, &m.CreatedOn, &w, &encoding); e != nil {
 			return nil, e
+		}
+		// Old Go and Saturn writers persist JSON string contents without quotes.
+		// Decode only rows tagged with that contract; never sniff backslashes.
+		switch encoding {
+		case "JSON_STRING":
+			if err := json.Unmarshal([]byte(`"`+m.Message+`"`), &m.Message); err != nil {
+				return nil, fmt.Errorf("mail %d has invalid legacy text encoding", m.ID)
+			}
+		case "PLAIN":
+		default:
+			return nil, fmt.Errorf("mail %d has unsupported text encoding", m.ID)
 		}
 		m.IsWhisper = strings.EqualFold(w, "true")
 		out = append(out, m)
@@ -137,8 +148,7 @@ func (s *NoteService) List(ctx context.Context, trip string) ([]string, error) {
 		if e = rows.Scan(&n); e != nil {
 			return nil, e
 		}
-		b, _ := json.Marshal(n)
-		o = append(o, string(b[1:len(b)-1]))
+		o = append(o, n)
 	}
 	return o, rows.Err()
 }

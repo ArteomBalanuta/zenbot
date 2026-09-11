@@ -29,7 +29,7 @@ func (c *activityCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	text := "Stats: \\n" + result
+	text := "Stats: \n" + result
 	if err := observeAndReply(ctx, &c.commandBase, text, activityWhisper(c.message)); err != nil {
 		return model.FAILED, err
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 const (
@@ -47,10 +48,14 @@ func (d *Database) DeleteIdentityAuthorized(ctx context.Context, nameOrTrip stri
 	if value == "" {
 		return repository.DeleteResult{}, fmt.Errorf("identity selector must match exactly one registered user")
 	}
+	nameTarget, err := util.NormalizeNickTarget(&value)
+	if err != nil {
+		return repository.DeleteResult{}, err
+	}
 	ctx = withSaturnAuthorization(ctx)
 	var result repository.DeleteResult
-	err := d.WithTx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT n.name,t.trip FROM trip_names tn JOIN names n ON n.id=tn.name_id JOIN trips t ON t.id=tn.trip_id WHERE LOWER(n.name)=LOWER($1) OR t.trip=$2`, value, value)
+	err = d.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT n.name,t.trip FROM trip_names tn JOIN names n ON n.id=tn.name_id JOIN trips t ON t.id=tn.trip_id WHERE LOWER(n.name)=LOWER($1) OR t.trip=$2`, nameTarget, value)
 		if err != nil {
 			return err
 		}

@@ -207,8 +207,8 @@ func TestReplicaStatusExactReplyForNoneAndSortedChannels(t *testing.T) {
 		name, want string
 		channels   []string
 	}{
-		{"none", "Host room:programming, replicas active: 0 \\nServing channels: none", []string{}},
-		{"sorted", "Host room:programming, replicas active: 2 \\nServing channels: a, z", []string{"z", "a"}},
+		{"none", "Host room:programming, replicas active: 0 \nServing channels: none", []string{}},
+		{"sorted", "Host room:programming, replicas active: 2 \nServing channels: a, z", []string{"z", "a"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &replicaRegistrationEngine{commandEngineStub: &commandEngineStub{}, fakeRC: fakeRC{channels: tc.channels}}

@@ -89,7 +89,7 @@ func TestPublicHistoryIndependentFactsBothServicePaths(t *testing.T) {
 					continue
 				}
 				for _, want := range []string{"Last observed: Thu, 1 Jan 1970 " + tc.observed + " GMT", "Last presence event: " + tc.presence, "Last public message: " + tc.message} {
-					if !strings.Contains(got, want+`\n`) {
+					if !strings.Contains(got, want+"\n") {
 						t.Errorf("reply=%q missing fact %q", got, want)
 					}
 				}

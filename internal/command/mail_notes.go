@@ -39,7 +39,7 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 			if listErr != nil {
 				return model.FAILED, errors.Join(e, listErr)
 			}
-			if err := replyContext(ctx, &c.commandBase, "User you specified is not registered. Please use a name from provided list to send a message to respective trip. \\\\n"+formatSaturnRegisteredUsers(users)); err != nil {
+			if err := replyContext(ctx, &c.commandBase, "User you specified is not registered. Please use a name from provided list to send a message to respective trip. \n"+formatSaturnRegisteredUsers(users)); err != nil {
 				return model.FAILED, errors.Join(e, err)
 			}
 		} else {
@@ -56,7 +56,7 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 func formatSaturnRegisteredUsers(users []repository.SaturnRegisteredUser) string {
 	var directory strings.Builder
 	for _, user := range users {
-		directory.WriteString(user.Name + " " + user.Trip + "\\n")
+		directory.WriteString(user.Name + " " + user.Trip + "\n")
 	}
 	return directory.String()
 }
@@ -107,7 +107,7 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, nil
 	}
 	if strings.TrimSpace(c.message.Trip) == "" {
-		if err := replyContext(ctx, &c.commandBase, "\\n Set your trip first. Example: "+c.engine.GetPrefix()+"notes"); err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n Set your trip first. Example: "+c.engine.GetPrefix()+"notes"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
@@ -129,7 +129,7 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e != nil {
 		return model.FAILED, e
 	}
-	text := "'s notes: \\n ```Text \\n" + fmt.Sprint(ns) + "\\n```"
+	text := "'s notes: \n ```Text \n" + fmt.Sprint(ns) + "\n```"
 	if err := observeAndReply(ctx, &c.commandBase, text, true); err != nil {
 		return model.FAILED, err
 	}

@@ -37,7 +37,7 @@ func TestMailAndNotesPersistenceParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != `quote \"x\"` {
+	if len(got) != 1 || got[0] != `quote "x"` {
 		t.Fatalf("notes=%v", got)
 	}
 	if err := n.Clear(context.Background(), "trip-a"); err != nil {

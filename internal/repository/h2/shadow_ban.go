@@ -10,6 +10,7 @@ import (
 
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 func (d *Database) PersistShadowBanSelector(ctx context.Context, name, reason string) error {
@@ -162,9 +163,9 @@ func (d *Database) RemoveShadowBanBySourceTarget(ctx context.Context, target str
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	nameTarget := target
-	if strings.HasPrefix(nameTarget, "@") {
-		nameTarget = strings.TrimSpace(nameTarget[1:])
+	nameTarget, err := util.NormalizeNickTarget(&target)
+	if err != nil {
+		return 0, err
 	}
 	result, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users WHERE name=$1 OR trip=$2 OR hash=$3`, nameTarget, target, base64.StdEncoding.EncodeToString([]byte(target)))
 	if err != nil {

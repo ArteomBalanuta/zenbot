@@ -21,7 +21,7 @@ func TestBasicUserDataUsesTripOrHashAndRendersSaturnPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(data, "Hashes: \\n") || !strings.Contains(data, "Nicks: \\n") || !strings.HasSuffix(data, " \\n") {
+	if !strings.HasPrefix(data, "Hashes: \n") || !strings.Contains(data, "Nicks: \n") || !strings.HasSuffix(data, " \n") {
 		t.Fatalf("payload=%q", data)
 	}
 	for _, want := range []string{"hash-a", "hash-b", "nick-a", "nick-b"} {
@@ -44,7 +44,7 @@ func TestBasicUserDataUsesTripOrHashAndRendersSaturnPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if missing != "Hashes: \\n \\nNicks: \\n \\n" {
+	if missing != "Hashes: \n \nNicks: \n \n" {
 		t.Fatalf("absent payload=%q", missing)
 	}
 }

@@ -31,6 +31,8 @@ func CanonicalNick(raw *string) (string, error) {
 	return strings.ToLower(value), nil
 }
 
+// SameNick compares two raw nickname selectors, not trusted source identities.
+// A canonical source nickname may itself begin with @ and must remain literal.
 func SameNick(left, right *string) bool {
 	if left == nil || right == nil {
 		return false

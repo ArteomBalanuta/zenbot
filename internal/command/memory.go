@@ -28,7 +28,7 @@ func (c *memoryCommand) Execute(ctx context.Context) (model.Status, error) {
 }
 
 func formatMemoryReport(stats runtime.MemStats) string {
-	return fmt.Sprintf("Go Alloc: %d MiB \\nGo HeapIdle: %d MiB \\nGo HeapSys: %d MiB \\nGo Sys: %d MiB \\n",
+	return fmt.Sprintf("Go Alloc: %d MiB \nGo HeapIdle: %d MiB \nGo HeapSys: %d MiB \nGo Sys: %d MiB \n",
 		stats.Alloc/memoryMiB,
 		stats.HeapIdle/memoryMiB,
 		stats.HeapSys/memoryMiB,

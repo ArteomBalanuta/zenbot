@@ -120,7 +120,7 @@ func TestMsgChannelRemoteRequest(t *testing.T) {
 	if request.WorkflowID != "0123456789abcdef" || request.SourceChannel != "programming" || request.TargetChannel != "other?" || !request.Whisper || request.Author != "alice" || request.ReplyMessage == "" {
 		t.Fatalf("request=%+v", request)
 	}
-	if request.RemoteMessage != "image ![](https://example.test/image.png)\\n anonymous mail from: ?programming" {
+	if request.RemoteMessage != "image ![](https://example.test/image.png)\n anonymous mail from: ?programming" {
 		t.Fatalf("message=%q", request.RemoteMessage)
 	}
 }
@@ -242,7 +242,7 @@ func TestMsgChannelLocalDelivery(t *testing.T) {
 			name:  "literal image marker puts provenance after rendered body",
 			alias: "msgchannel",
 			text:  "!msgchannel programming image ![](https://example.test/image.png)   ",
-			want:  "alice |image ![](https://example.test/image.png)\\n anonymous mail from: ?programming|false",
+			want:  "alice |image ![](https://example.test/image.png)\n anonymous mail from: ?programming|false",
 		},
 	}
 

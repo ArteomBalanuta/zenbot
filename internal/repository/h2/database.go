@@ -51,7 +51,7 @@ type Database struct {
 	Server Server
 }
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 type processServer struct {
 	cfg      Config
@@ -378,6 +378,11 @@ func bootstrap(ctx context.Context, db *sql.DB) error {
 	}
 	if err = upgradeTripRoleConstraint(ctx, tx); err != nil {
 		return err
+	}
+	// Existing Go and Saturn mail rows use JSON string contents. New Go writes
+	// explicitly opt into PLAIN; the default keeps legacy writers identifiable.
+	if _, err = tx.ExecContext(ctx, `ALTER TABLE mail ADD COLUMN IF NOT EXISTS text_encoding VARCHAR NOT NULL DEFAULT 'JSON_STRING'`); err != nil {
+		return fmt.Errorf("H2 mail text encoding upgrade: %w", err)
 	}
 	var version int
 	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&version); err != nil {

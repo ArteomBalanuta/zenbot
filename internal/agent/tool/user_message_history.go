@@ -10,6 +10,7 @@ import (
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/tool/contract"
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 const userMessageHistoryName = "user_message_history"
@@ -48,10 +49,8 @@ func (t UserMessageHistory) Execute(ctx context.Context, agent api.Context, args
 	if err := json.Unmarshal(args, &input); err != nil {
 		return contract.Result{}, fmt.Errorf("invalid user message history arguments")
 	}
-	nick := strings.TrimSpace(input.Nick)
-	nick = strings.TrimPrefix(nick, "@")
-	nick = strings.TrimSpace(nick)
-	if nick == "" || len([]rune(nick)) > 100 {
+	nick, err := util.NormalizeNickTarget(&input.Nick)
+	if err != nil || len([]rune(nick)) > 100 {
 		return contract.Result{}, fmt.Errorf("invalid user message history nick")
 	}
 	limit := input.Limit

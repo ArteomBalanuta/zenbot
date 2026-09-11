@@ -128,12 +128,12 @@ func TestUserChatListenerSQLRepliesWithSaturnASCIIH2Goldens(t *testing.T) {
 		{
 			name:  "row includes column names and null",
 			query: "SELECT 7 AS \"ID\", CAST(NULL AS VARCHAR) AS \"NOTE\"",
-			want:  "\\n```Text\\n\\n\\n+------+--------+\\n|  id  |  note  |\\n+------+--------+\\n|  7   |  null  |\\n+------+--------+\\n\\n\\n ```",
+			want:  "\n```Text\n\n\n+------+--------+\n|  id  |  note  |\n+------+--------+\n|  7   |  null  |\n+------+--------+\n\n\n ```",
 		},
 		{
 			name:  "zero rows retains table",
 			query: "SELECT 7 AS \"ID\", CAST(NULL AS VARCHAR) AS \"NOTE\" WHERE FALSE",
-			want:  "\\n```Text\\n\\n\\n+------+--------+\\n|  id  |  note  |\\n+------+--------+\\n+------+--------+\\n\\n\\n ```",
+			want:  "\n```Text\n\n\n+------+--------+\n|  id  |  note  |\n+------+--------+\n+------+--------+\n\n\n ```",
 		},
 	} {
 		for _, whisper := range []bool{false, true} {
@@ -145,7 +145,7 @@ func TestUserChatListenerSQLRepliesWithSaturnASCIIH2Goldens(t *testing.T) {
 				}
 				listener.NewUserChatListener(engine).Notify(string(message))
 
-				want := "alice|Result: \\n" + tc.want + "|" + boolString(whisper)
+				want := "alice|Result: \n" + tc.want + "|" + boolString(whisper)
 				if len(engine.chats) != 1 || engine.chats[0] != want {
 					t.Fatalf("replies=%q, want one exact reply %q", engine.chats, want)
 				}
@@ -227,7 +227,7 @@ func TestUserChatListenerSQLRepliesWithSaturnUnicodeControlH2Golden(t *testing.T
 		t.Fatal(err)
 	}
 	query := "SELECT STRINGDECODE('\\uD83D\\uDE00') AS emoji, 'quote' || CHAR(34) || ' slash' || CHAR(92) || ' tab' || CHAR(9) || 'ctrl' || CHAR(1) || 'cr' || CHAR(13) || 'nl' || CHAR(10) AS text"
-	wantTable := `\n` + "```" + `Text\n\n\n+----------+----------------------------------+\n|  emoji   |               text               |\n+----------+----------------------------------+\n|    \uD83D\uDE00    |  quote\" slash\\ tab` + string('\\') + `tctrl\u0001cr\rnl\n   |\n+----------+----------------------------------+\n\n\n ` + "```"
+	wantTable := "\n```Text\n\n\n+----------+----------------------------------+\n|  emoji   |               text               |\n+----------+----------------------------------+\n|    😀    |  quote\" slash\\ tab\tctrl\u0001cr\rnl\n   |\n+----------+----------------------------------+\n\n\n ```"
 
 	for _, whisper := range []bool{false, true} {
 		t.Run("whisper="+boolString(whisper), func(t *testing.T) {
@@ -238,7 +238,7 @@ func TestUserChatListenerSQLRepliesWithSaturnUnicodeControlH2Golden(t *testing.T
 			}
 			listener.NewUserChatListener(engine).Notify(string(message))
 
-			want := "alice|Result: \\n" + wantTable + "|" + boolString(whisper)
+			want := "alice|Result: \n" + wantTable + "|" + boolString(whisper)
 			if len(engine.chats) != 1 || engine.chats[0] != want {
 				t.Fatalf("replies=%q, want one exact reply %q", engine.chats, want)
 			}

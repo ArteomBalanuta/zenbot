@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -60,8 +59,8 @@ func TestModeratorReadAuditMessagesTruncateWithoutSplittingUTF8(t *testing.T) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, engine.chats)
 	}
 	parts := strings.SplitN(engine.chats[0], "|", 3)
-	body, err := strconv.Unquote("\"" + parts[1] + "\"")
-	if err != nil || !utf8.ValidString(body) {
+	body := parts[1]
+	if !utf8.ValidString(body) {
 		t.Fatalf("history truncation corrupted UTF-8: body=%q err=%v", body, err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 type commandBase struct {
@@ -183,17 +184,14 @@ func (c *infoUserCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) == 0 {
-		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"info merc"); err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n Example: "+c.engine.GetPrefix()+"info merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	target := strings.TrimSpace(a[0])
-	if strings.HasPrefix(target, "@") {
-		target = strings.TrimSpace(strings.TrimPrefix(target, "@"))
-	}
-	if target == "" {
-		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"info merc"); err != nil {
+	target, err := util.NormalizeNickTarget(&a[0])
+	if err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n Example: "+c.engine.GetPrefix()+"info merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
@@ -206,7 +204,7 @@ func (c *infoUserCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 	}
 	if user == nil {
-		if err := replyContext(ctx, &c.commandBase, "\\n target with nick:  "+target+" not found!"); err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n target with nick:  "+target+" not found!"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil

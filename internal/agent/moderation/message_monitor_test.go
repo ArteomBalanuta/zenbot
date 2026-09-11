@@ -11,7 +11,7 @@ import (
 func TestMessageMonitorNormalizesAndExcludesBeforeState(t *testing.T) {
 	now := time.Unix(1000, 0)
 	m := NewMessageMonitor(MessageConfig{Enabled: true, BurstCount: 2, BurstWindow: time.Second, RepeatedCount: 2, RepeatedWindow: time.Second, SecondBreachWindow: time.Second, PostKickWindow: time.Second, ActionCooldown: time.Millisecond}, func() time.Time { return now }, func(x model.ChatMessage) bool { return x.Trip == "admin" })
-	for _, msg := range []model.ChatMessage{{Name: "a", Hash: "h", Text: "x", Whisper: true}, {Name: "a", Hash: "h", Text: "x", Trip: "admin"}, {Name: "a", Hash: "h", Text: " \\n\t "}, {Text: "x"}} {
+	for _, msg := range []model.ChatMessage{{Name: "a", Hash: "h", Text: "x", Whisper: true}, {Name: "a", Hash: "h", Text: "x", Trip: "admin"}, {Name: "a", Hash: "h", Text: " \n\t "}, {Text: "x"}} {
 		if got := m.OnMessage(msg); len(got) != 0 {
 			t.Fatalf("excluded message decisions=%#v", got)
 		}
@@ -19,7 +19,7 @@ func TestMessageMonitorNormalizesAndExcludesBeforeState(t *testing.T) {
 	if len(m.messages) != 0 || len(m.offences) != 0 || len(m.actions) != 0 {
 		t.Fatalf("excluded input retained monitor state: %#v", m)
 	}
-	if got := m.OnMessage(model.ChatMessage{Name: "a", Hash: "h", Text: " A\\n\tB "}); len(got) != 0 {
+	if got := m.OnMessage(model.ChatMessage{Name: "a", Hash: "h", Text: " A\n\tB "}); len(got) != 0 {
 		t.Fatalf("first message decisions=%#v", got)
 	}
 	if got := m.OnMessage(model.ChatMessage{Name: "a", Hash: "h", Text: "a b"}); len(got) != 1 || got[0].Action != Mute {
@@ -84,4 +84,17 @@ func TestMessageMonitorUsesInclusiveWindowsAndIsRaceSafe(t *testing.T) {
 		go func() { defer wg.Done(); m.OnMessage(msg) }()
 	}
 	wg.Wait()
+}
+
+func TestMessageMonitorDoesNotConflateLiteralEscapeWithNewline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	m := NewMessageMonitor(MessageConfig{Enabled: true, BurstCount: 99, BurstWindow: time.Second, RepeatedCount: 2, RepeatedWindow: time.Second, ActionCooldown: time.Millisecond}, func() time.Time { return now }, nil)
+	for _, text := range []string{"A\nB", `A\nB`} {
+		if got := m.OnMessage(model.ChatMessage{Name: "merc", Hash: "h", Text: text}); len(got) != 0 {
+			t.Fatalf("distinct text %q triggered moderation: %+v", text, got)
+		}
+	}
+	if got := m.OnMessage(model.ChatMessage{Name: "merc", Hash: "h", Text: "a\tb"}); len(got) != 1 || got[0].Action != Mute {
+		t.Fatalf("actual whitespace variants must still count as repeated: %+v", got)
+	}
 }

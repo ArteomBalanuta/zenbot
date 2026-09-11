@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"unicode/utf16"
 
 	"zenbot/internal/common"
 )
@@ -48,45 +47,10 @@ func (r *SupportReplicaRelay) RelayToSupport(ctx context.Context, request common
 		}, message)
 	}
 	if request.Anonymous {
-		message = "anon_from_hc: " + escapeJava(message)
+		message = "anon_from_hc: " + message
 	} else {
-		message = request.Author + ": " + escapeJava(message)
+		message = request.Author + ": " + message
 	}
 	_, err := support.SendChatMessage("", message, false)
 	return err
-}
-
-func escapeJava(value string) string {
-	var out strings.Builder
-	for _, char := range value {
-		switch char {
-		case '\\':
-			out.WriteString(`\\`)
-		case '"':
-			out.WriteString(`\"`)
-		case '\b':
-			out.WriteString(`\b`)
-		case '\f':
-			out.WriteString(`\f`)
-		case '\n':
-			out.WriteString(`\n`)
-		case '\r':
-			out.WriteString(`\r`)
-		case '\t':
-			out.WriteString(`\t`)
-		default:
-			if char < 0x20 || char > 0x7f {
-				if char > 0xffff {
-					for _, unit := range utf16.Encode([]rune{char}) {
-						fmt.Fprintf(&out, `\u%04X`, unit)
-					}
-				} else {
-					fmt.Fprintf(&out, `\u%04X`, char)
-				}
-			} else {
-				out.WriteRune(char)
-			}
-		}
-	}
-	return out.String()
 }

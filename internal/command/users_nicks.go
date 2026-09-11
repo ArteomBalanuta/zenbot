@@ -36,7 +36,7 @@ func (c *usersCommand) Execute(ctx context.Context) (model.Status, error) {
 			return model.FAILED, err
 		}
 	}
-	text := "Users: \\n" + formatRegisteredUsers(users)
+	text := "Users: \n" + formatRegisteredUsers(users)
 	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
@@ -98,18 +98,18 @@ func formatRegisteredUsers(users []repository.RegisteredUser) string {
 		return strings.Repeat(" ", padding) + value + extra + strings.Repeat(" ", padding)
 	}
 	var b strings.Builder
-	b.WriteString("\\n\\n")
+	b.WriteString("\n\n")
 	b.WriteString(line())
-	b.WriteString("\\n")
+	b.WriteString("\n")
 	b.WriteString("|" + cell("TRIP", widthTrip) + "|" + cell("NAME", widthName) + "|")
-	b.WriteString("\\n")
+	b.WriteString("\n")
 	b.WriteString(line())
 	for _, user := range users {
-		b.WriteString("\\n")
+		b.WriteString("\n")
 		b.WriteString("|" + cell(user.Trip, widthTrip) + "|" + cell(user.Name, widthName) + "|")
 	}
-	b.WriteString("\\n")
+	b.WriteString("\n")
 	b.WriteString(line())
-	b.WriteString("\\n\\n")
+	b.WriteString("\n\n")
 	return b.String()
 }

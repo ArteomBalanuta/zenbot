@@ -26,15 +26,14 @@ func TestHelpUsesExactSaturnPayloadAndForcedWhisper(t *testing.T) {
 	}
 	want := strings.Join([]string{
 		fmtHelp(helpHeader, "!"), alignHelp(adminCommands),
-		`         \n Moderator commands:\n`, alignHelp(moderatorCommands),
-		`         \n User commands:\n`, alignHelp(userCommands),
+		"         \n Moderator commands:\n", alignHelp(moderatorCommands),
+		"         \n User commands:\n", alignHelp(userCommands),
 		fmtHelp(helpExamples, "!", "!", "!", "!", "!", "!"),
 	}, "")
-	want = strings.ReplaceAll(want, `\\n`, `\n`)
 	if got := e.chats[0]; got != "alice|"+want+"|true" {
 		t.Fatalf("help payload mismatch: got %q, want %q", got, "alice|"+want+"|true")
 	}
-	if strings.Contains("/whisper @alice "+strings.ReplaceAll(want, `\\n`, "\\n"), ".\\n") {
+	if strings.Contains("/whisper @alice "+want, ".\n") {
 		t.Fatal("forced whisper contains legacy dot separator")
 	}
 }
@@ -104,7 +103,7 @@ func TestRegisteredHelpListsPublicMsgChannelOnceInUserCommands(t *testing.T) {
 
 func TestAlignHelpProcessesActualNewlinesAndPreservesNonCommandRows(t *testing.T) {
 	input := "\u9577\u547d\u4ee4 - first\nx - second\n\nExample: !x\n"
-	want := "\u9577\u547d\u4ee4 - first\\nx \u2009\u2009- second\\n\\nExample: !x\\n"
+	want := "\u9577\u547d\u4ee4 - first\nx \u2009\u2009- second\n\nExample: !x\n"
 	if got := alignHelp(input); got != want {
 		t.Fatalf("alignHelp() = %q, want %q", got, want)
 	}

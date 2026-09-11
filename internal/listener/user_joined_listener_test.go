@@ -66,7 +66,7 @@ func (r *recordingPresenceRepository) LogPresence(string, string, string, string
 }
 
 func TestUserJoinedListenerNotifiesSubscribersAboutUnrelatedJoiningIdentity(t *testing.T) {
-	q := &subscriptionQueryStub{data: `Hashes: \nhash-joined \nNicks: \nnick-joined \n`}
+	q := &subscriptionQueryStub{data: "Hashes: \nhash-joined \nNicks: \nnick-joined \n"}
 	e := &core.EngineImpl{
 		ActiveUsers:     map[*model.User]struct{}{},
 		OutMessageQueue: make(chan string, 2),
@@ -192,7 +192,7 @@ func TestUserJoinedListenerRunsAutoMoveLastAfterExistingJoinEffects(t *testing.T
 }
 
 func TestUserJoinedListenerWhispersExactDataToExactTripSubscribersOnly(t *testing.T) {
-	q := &subscriptionQueryStub{data: `Hashes: \nhash-joined \nNicks: \nnick-joined \n`}
+	q := &subscriptionQueryStub{data: "Hashes: \nhash-joined \nNicks: \nnick-joined \n"}
 	e := &core.EngineImpl{
 		ActiveUsers:     map[*model.User]struct{}{},
 		OutMessageQueue: make(chan string, 4),

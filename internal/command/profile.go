@@ -44,19 +44,19 @@ func executeAppearance(ctx context.Context, base *commandBase, kind, example str
 	}
 	arguments := args(base.message)
 	if len(arguments) < 2 {
-		if err := replyContext(ctx, base, "\\n Example: "+base.engine.GetPrefix()+kind+" merc "+example); err != nil {
+		if err := replyContext(ctx, base, "\n Example: "+base.engine.GetPrefix()+kind+" merc "+example); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	target, err := activeModerationTarget(base.engine, arguments[0])
+	nick, err := util.NormalizeNickTarget(&arguments[0])
 	if err != nil {
 		if err := replyContext(ctx, base, base.engine.GetPrefix()+kind+" merc "+example); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	nick, _ := util.NormalizeNickTarget(&arguments[0])
+	target := activeModerationTargetByCanonicalName(base.engine, nick)
 	if target == nil {
 		if err := replyContext(ctx, base, "User "+nick+" is not in the room, "+kind+" was not applied."); err != nil {
 			return model.FAILED, err
@@ -71,7 +71,7 @@ func executeAppearance(ctx context.Context, base *commandBase, kind, example str
 		return model.FAILED, err
 	}
 	if kind == "flair" {
-		if err := replyContext(ctx, base, "\\n Flair request sent; server application is unconfirmed."); err != nil {
+		if err := replyContext(ctx, base, "\n Flair request sent; server application is unconfirmed."); err != nil {
 			return model.FAILED, err
 		}
 	}

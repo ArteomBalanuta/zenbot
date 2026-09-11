@@ -94,38 +94,9 @@ func (s *UserService) LastOnline(ctx context.Context, target string) (string, er
 		if err != nil {
 			return "", err
 		}
-		message = stamp + " — " + escapeJSON(record.LastMessage.String)
+		message = stamp + " — " + record.LastMessage.String
 	}
-	return fmt.Sprintf("\\n Nick|Trip: %s\\n Last observed: %s\\n Last presence event: %s\\n Last public message: %s\\n", target, lastObserved, presence, message), nil
-}
-
-func escapeJSON(value string) string {
-	var escaped strings.Builder
-	for _, character := range value {
-		switch character {
-		case '\\':
-			escaped.WriteString("\\\\")
-		case '"':
-			escaped.WriteString("\\\"")
-		case '\b':
-			escaped.WriteString("\\b")
-		case '\f':
-			escaped.WriteString("\\f")
-		case '\n':
-			escaped.WriteString("\\n")
-		case '\r':
-			escaped.WriteString("\\r")
-		case '	':
-			escaped.WriteString(`	`)
-		default:
-			if character < 0x20 {
-				fmt.Fprintf(&escaped, "\\u%04x", character)
-			} else {
-				escaped.WriteRune(character)
-			}
-		}
-	}
-	return escaped.String()
+	return fmt.Sprintf("\n Nick|Trip: %s\n Last observed: %s\n Last presence event: %s\n Last public message: %s\n", target, lastObserved, presence, message), nil
 }
 
 func (s *UserService) RegisteredUsers(ctx context.Context) ([]repository.RegisteredUser, error) {
@@ -202,7 +173,7 @@ func (s *UserService) SeenRecently(ctx context.Context, user *model.User) (strin
 	if len(aliases) == 0 {
 		return "", nil
 	}
-	return fmt.Sprintf("\\n @%s, has been seen as: _%s_ recently. \\n", user.Name, strings.Join(aliases, ", ")), nil
+	return fmt.Sprintf("\n @%s, has been seen as: _%s_ recently. \n", user.Name, strings.Join(aliases, ", ")), nil
 }
 
 func (s *UserService) DeleteIdentity(ctx context.Context, nameOrTrip string) (repository.DeleteResult, error) {
@@ -253,7 +224,7 @@ func (s *PingService) Ping(ctx context.Context) (time.Duration, error) {
 	return time.Since(st), nil
 }
 
-func alignLiteralLines(lines []string, prepend bool) string {
+func alignTextLines(lines []string, prepend bool) string {
 	maxWidth := 0
 	for _, line := range lines {
 		key, _, found := strings.Cut(line, ":")
@@ -280,7 +251,7 @@ func alignLiteralLines(lines []string, prepend bool) string {
 		}
 		output.WriteByte(':')
 		output.WriteString(value)
-		output.WriteString(`\n`)
+		output.WriteByte('\n')
 	}
 	return output.String()
 }
@@ -338,7 +309,7 @@ func (s *YouTubeService) Preview(ctx context.Context, message string) (string, b
 	if strings.TrimSpace(metadata.Title) == "" {
 		return "", true, fmt.Errorf("YouTube metadata title is blank")
 	}
-	preview := fmt.Sprintf("Title: %s\\n![%s](https://i.ytimg.com/vi/%s/hqdefault.jpg)", metadata.Title, metadata.Title, videoID)
+	preview := fmt.Sprintf("Title: %s\n![%s](https://i.ytimg.com/vi/%s/hqdefault.jpg)", metadata.Title, metadata.Title, videoID)
 	return preview, true, nil
 }
 
@@ -368,20 +339,26 @@ func extractYouTubeID(message string) string {
 }
 
 func (s *SearchService) Search(ctx context.Context, q string) (string, error) {
-	if s.HTTP == nil {
-		s.HTTP = &http.Client{Timeout: 10 * time.Second}
-	}
+	client := utilityHTTPClient(s.HTTP)
 	ep := s.Endpoint
 	if ep == "" {
 		ep = "https://api.duckduckgo.com/"
 	}
-	u := ep + "?q=" + strings.ReplaceAll(q, " ", "%20") + "&format=json&pretty=1"
-	req, e := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	u, err := utilityURL(ep)
+	if err != nil {
+		return "", err
+	}
+	query := u.Query()
+	query.Set("q", q)
+	query.Set("format", "json")
+	query.Set("pretty", "1")
+	u.RawQuery = query.Encode()
+	req, e := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if e != nil {
 		return "", e
 	}
 	req.Header.Set("User-Agent", "Firefox 59.9.0, HC")
-	r, e := s.HTTP.Do(req)
+	r, e := client.Do(req)
 	if e != nil {
 		return "", e
 	}
@@ -393,7 +370,7 @@ func (s *SearchService) Search(ctx context.Context, q string) (string, error) {
 	if r.StatusCode != http.StatusOK {
 		return `Please pay for the service requested.`, nil
 	}
-	return strings.ReplaceAll(strings.ReplaceAll(string(b), `"`, `\\"`), "\n", `\\n`), nil
+	return string(b), nil
 }
 
 type SCPService struct {

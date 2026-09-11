@@ -67,7 +67,7 @@ func (c *msgChannelCommand) Execute(ctx context.Context) (model.Status, error) {
 func msgChannelBody(channel, message string) string {
 	body := "anonymous mail from: ?" + channel + " message: " + message
 	if strings.Contains(message, "![](") {
-		return message + "\\n anonymous mail from: ?" + channel
+		return message + "\n anonymous mail from: ?" + channel
 	}
 	return body
 }

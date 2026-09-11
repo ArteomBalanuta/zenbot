@@ -156,7 +156,8 @@ func messagePrincipal(message model.ChatMessage) (string, string) {
 	return principal, "nick:" + strings.ToLower(principal)
 }
 func normalizeMessage(text string) string {
-	text = strings.ReplaceAll(strings.ReplaceAll(text, `\n`, " "), "\n", " ")
+	// Fold actual whitespace for repetition matching; literal backslash+n is
+	// message content, not an encoded line break.
 	return strings.Join(strings.FieldsFunc(strings.ToLower(strings.TrimSpace(text)), unicode.IsSpace), " ")
 }
 func pruneMessages(values []timedMessage, now time.Time, window time.Duration) []timedMessage {

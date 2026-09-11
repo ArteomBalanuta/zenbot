@@ -38,7 +38,7 @@ func TestSubscriptionSetUsesNormalizedExactTripCredentials(t *testing.T) {
 
 func TestSendAddressedMessageRendersForcedWhisperPayloadExactly(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
-	payload := ` -\n\nHashes: \nh1 \nNicks: \nn1 \n`
+	payload := " -\n\nHashes: \nh1 \nNicks: \nn1 \n"
 	got, err := e.SendAddressedMessage("alice", payload, true)
 	if err != nil {
 		t.Fatal(err)

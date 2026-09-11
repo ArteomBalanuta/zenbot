@@ -23,8 +23,8 @@ func TestSqlUtilRow324GroupCNotesParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list trip-a notes: %v", err)
 	}
-	if len(list) != 1 || list[0] != `quote: \"; backslash: \\; newline:\nsecond line` {
-		t.Fatalf("trip-a notes = %q, want exactly one JSON-escaped note", list)
+	if len(list) != 1 || list[0] != tripANote {
+		t.Fatalf("trip-a notes = %q, want exactly one plain-text note", list)
 	}
 
 	var count int

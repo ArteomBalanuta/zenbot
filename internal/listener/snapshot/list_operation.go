@@ -88,7 +88,7 @@ func orderedUniqueUsers(users []*model.User) []*model.User {
 
 func formatUsers(ordered []*model.User) string {
 	var output strings.Builder
-	output.WriteString(`\nUsers online: \n`)
+	output.WriteString("\nUsers online: \n")
 	for _, user := range ordered {
 		trip := user.Trip
 		if trip == "" {
@@ -99,8 +99,8 @@ func formatUsers(ordered []*model.User) string {
 		output.WriteString(trip)
 		output.WriteString(" - ")
 		output.WriteString(user.Name)
-		output.WriteString(`\n`)
+		output.WriteByte('\n')
 	}
-	output.WriteString(`\n`)
+	output.WriteByte('\n')
 	return output.String()
 }

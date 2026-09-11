@@ -17,13 +17,12 @@ func (c *helpCommand) Execute(ctx context.Context) (model.Status, error) {
 	payload := strings.Join([]string{
 		fmtHelp(helpHeader, c.engine.GetPrefix()),
 		alignHelp(adminCommands),
-		`         \n Moderator commands:\n`,
+		"         \n Moderator commands:\n",
 		alignHelp(moderatorCommands),
-		`         \n User commands:\n`,
+		"         \n User commands:\n",
 		alignHelp(userCommands),
 		fmtHelp(helpExamples, c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix(), c.engine.GetPrefix()),
 	}, "")
-	payload = strings.ReplaceAll(payload, "\\\\n", "\\n")
 	observeCommandData(&c.commandBase, commandTextObservation{Text: payload}, true)
 	if _, err := c.engine.SendWhisperMessage(c.message.Name, payload); err != nil {
 		return model.FAILED, err
@@ -61,7 +60,7 @@ func alignHelp(output string) string {
 			b.WriteString(line)
 		}
 		if n < len(lines)-1 {
-			b.WriteString(`\n`)
+			b.WriteByte('\n')
 		}
 	}
 	return b.String()

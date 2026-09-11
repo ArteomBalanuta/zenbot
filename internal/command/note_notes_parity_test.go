@@ -85,7 +85,7 @@ func TestNotesParityListPurgeClearAndInvalidArguments(t *testing.T) {
 	if got := executeNotesParityCommand(t, e, "notes", "", ""); got != model.FAILED {
 		t.Fatalf("no-trip status=%s", got)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "alice|\\n Set your trip first. Example: !notes|false" {
+	if len(e.chats) != 1 || e.chats[0] != "alice|\n Set your trip first. Example: !notes|false" {
 		t.Fatalf("no-trip chats=%q", e.chats)
 	}
 
@@ -93,7 +93,7 @@ func TestNotesParityListPurgeClearAndInvalidArguments(t *testing.T) {
 	if got := executeNotesParityCommand(t, e, "notes", "trip", ""); got != model.SUCCESSFUL {
 		t.Fatalf("list status=%s", got)
 	}
-	wantList := "alice|'s notes: \\n ```Text \\n[quote \\\"line\\nbackslash\\\\]\\n```|true"
+	wantList := "alice|'s notes: \n ```Text \n[quote \"line\nbackslash\\]\n```|true"
 	if len(e.chats) != 1 || e.chats[0] != wantList {
 		t.Fatalf("list chats=%q want=%q", e.chats, wantList)
 	}

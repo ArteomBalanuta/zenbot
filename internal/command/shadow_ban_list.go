@@ -30,7 +30,7 @@ func (c *shadowBanListCommand) Execute(ctx context.Context) (model.Status, error
 		}
 		return model.SUCCESSFUL, nil
 	}
-	text = "Banned hashes, trips, names: \\n" + formatShadowBanRecords(records)
+	text = "Banned hashes, trips, names: \n" + formatShadowBanRecords(records)
 	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}
@@ -44,7 +44,7 @@ func formatShadowBanRecords(records []repository.ShadowBanRecord) string {
 		if trip == "" {
 			trip = "------"
 		}
-		fmt.Fprintf(&out, "%s - %s - %s\\n", record.Hash, trip, record.Name)
+		fmt.Fprintf(&out, "%s - %s - %s\n", record.Hash, trip, record.Name)
 	}
 	return out.String()
 }

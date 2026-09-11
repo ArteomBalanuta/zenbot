@@ -164,7 +164,7 @@ func TestShadowBanListRendersDecodedRecordsAndNoBans(t *testing.T) {
 	engine := newShadowBanEngine(repo, nil)
 	definition, _ := commandDefinitionFor("banlist")
 	status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!banlist", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.chats, []string{"mod|Banned hashes, trips, names: \\nhash - ------ - nick\\n|true"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.chats, []string{"mod|Banned hashes, trips, names: \nhash - ------ - nick\n|true"}) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, engine.chats)
 	}
 

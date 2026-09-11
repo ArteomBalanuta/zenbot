@@ -32,7 +32,7 @@ func TestUsersAndNicksDispatchAgainstRealH2(t *testing.T) {
 		text  string
 		want  string
 	}{
-		{"whitelist", "!whitelist", "Users: \\n"},
+		{"whitelist", "!whitelist", "Users: \n"},
 		{"t2n", "!t2n  trip-a", "merc"},
 	} {
 		engine.chats = nil

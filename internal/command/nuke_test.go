@@ -80,7 +80,7 @@ func TestNukeCommandRejectsMissingRoomWithExactUsage(t *testing.T) {
 	if err != nil || status != model.FAILED {
 		t.Fatalf("status=%v err=%v", status, err)
 	}
-	if len(engine.requests) != 0 || len(engine.chats) != 1 || engine.chats[0] != "moderator|\\n Example: !nuke hotlinks|true" {
+	if len(engine.requests) != 0 || len(engine.chats) != 1 || engine.chats[0] != "moderator|\n Example: !nuke hotlinks|true" {
 		t.Fatalf("requests=%v chats=%v", engine.requests, engine.chats)
 	}
 }
@@ -139,7 +139,7 @@ func TestNukeCommandSubmitsNormalizedRemoteSnapshotWithoutImmediateReply(t *test
 	status, err := definition.New(engine, &model.ChatMessage{
 		Name:      "moderator",
 		Channel:   "source-room",
-		Text:      "!nuke @hotlinks",
+		Text:      "!nuke ?hotlinks",
 		IsWhisper: true,
 	}).Execute(context.Background())
 	if err != nil || status != model.SUCCESSFUL {

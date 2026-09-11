@@ -27,7 +27,7 @@ func TestActivityServiceRendersSaturnTablePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "\\n```Text\\n\n\n+----------+----------------+--------+--------------------------+\n|   TRIP   |  DAY_OF_WEEK   |  HOUR  |  PROBABILITY_PERCENTAGE  |\n+----------+----------------+--------+--------------------------+\n|  Trip-A  |     Sunday     |   1    |           50.0           |\n+----------+----------------+--------+--------------------------+\n\n\\n ```"
+	want := "\n```Text\n\n\n+----------+----------------+--------+--------------------------+\n|   TRIP   |  DAY_OF_WEEK   |  HOUR  |  PROBABILITY_PERCENTAGE  |\n+----------+----------------+--------+--------------------------+\n|  Trip-A  |     Sunday     |   1    |           50.0           |\n+----------+----------------+--------+--------------------------+\n\n\n ```"
 	if got != want {
 		t.Fatalf("payload=%q, want %q", got, want)
 	}

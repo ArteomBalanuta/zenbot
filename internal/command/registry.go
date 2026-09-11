@@ -128,7 +128,7 @@ func (c *replicaStatusCommand) Execute(ctx context.Context) (model.Status, error
 	if serving == "" {
 		serving = "none"
 	}
-	text := fmt.Sprintf("Host room:%s, replicas active: %d \\nServing channels: %s", c.engine.GetChannel(), len(channels), serving)
+	text := fmt.Sprintf("Host room:%s, replicas active: %d \nServing channels: %s", c.engine.GetChannel(), len(channels), serving)
 	if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 		return model.FAILED, err
 	}

@@ -63,10 +63,10 @@ func TestTimeGetUsesSingleSeparatorsAndThinSpaceAlignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(got, `\n\n`) {
+	if strings.Contains(got, "\n\n") {
 		t.Fatalf("time output contains blank formatted rows: %q", got)
 	}
-	parts := strings.Split(got, `\n`)
+	parts := strings.Split(got, "\n")
 	if len(parts) != 16 || parts[0] != "" || !strings.HasPrefix(parts[2], " today") || parts[len(parts)-1] != "" {
 		t.Fatalf("time framing=%q", got)
 	}
@@ -78,7 +78,7 @@ func TestTimeGetUsesSingleSeparatorsAndThinSpaceAlignment(t *testing.T) {
 }
 
 func nonEmptyLiteralLines(value string) []string {
-	parts := strings.Split(value, `\n`)
+	parts := strings.Split(value, "\n")
 	lines := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part != "" {
@@ -111,7 +111,7 @@ func TestSearchUsesDuckDuckGoCompatibleEndpoint(t *testing.T) {
 	}))
 	defer srv.Close()
 	got, e := (&SearchService{HTTP: srv.Client(), Endpoint: srv.URL}).Search(context.Background(), "a b")
-	if e != nil || got != `{\\"AbstractText\\":\\"answer\\"}` {
+	if e != nil || got != `{"AbstractText":"answer"}` {
 		t.Fatalf("got %q err %v", got, e)
 	}
 }
@@ -135,7 +135,7 @@ func TestYouTubePreviewExtractsSupportedLinksAndFormatsMetadata(t *testing.T) {
 		if err != nil || !found {
 			t.Fatalf("message=%q found=%v err=%v", message, found, err)
 		}
-		want := "Title: A title\\n![A title](https://i.ytimg.com/vi/abc123/hqdefault.jpg)"
+		want := "Title: A title\n![A title](https://i.ytimg.com/vi/abc123/hqdefault.jpg)"
 		if preview != want {
 			t.Fatalf("preview=%q, want %q", preview, want)
 		}

@@ -63,7 +63,7 @@ func TestAccessParityTracer2AliasesGrantAndWhisperExactReply(t *testing.T) {
 			if len(auth.granted) != 1 || auth.granted[0] != "target:Admin" {
 				t.Fatalf("grants=%v", auth.granted)
 			}
-			want := "admin|\\n Granted new Role: ADMIN to trip: target|true"
+			want := "admin|\n Granted new Role: ADMIN to trip: target|true"
 			if len(e.chats) != 1 || e.chats[0] != want {
 				t.Fatalf("chats=%v want=%q", e.chats, want)
 			}
@@ -79,7 +79,7 @@ func TestAccessParityTracer3InputFailuresMatchSaturn(t *testing.T) {
 		auth := &authFake{}
 		e := accessParityEngine(auth)
 		status, err := (&accessCommand{commandBase: commandBase{engine: e, message: message}}).Execute(context.Background())
-		want := "admin|\\n Set your trip first. Example: !grant 8Wotmg ADMIN|false"
+		want := "admin|\n Set your trip first. Example: !grant 8Wotmg ADMIN|false"
 		if status != model.FAILED || err != nil || len(auth.granted) != 0 || len(e.chats) != 1 || e.chats[0] != want {
 			t.Fatalf("message=%+v status=%v err=%v grants=%v chats=%v", message, status, err, auth.granted, e.chats)
 		}
@@ -97,7 +97,7 @@ func TestAccessParityTracer4CommaTargetsPersistRequestedRole(t *testing.T) {
 	e := accessParityEngine(auth)
 	status, err := (&accessCommand{commandBase: commandBase{engine: e, message: &model.ChatMessage{Name: "admin", Trip: "admin-trip", Text: "!access first,second, ADMIN"}}}).Execute(context.Background())
 	wantGrants := []string{"first:Admin", "second:Admin"}
-	wantReply := "admin|\\n Granted new Roles: ADMIN to trips: [first second]|false"
+	wantReply := "admin|\n Granted new Roles: ADMIN to trips: [first second]|false"
 	if status != model.SUCCESSFUL || err != nil || len(auth.granted) != len(wantGrants) || len(e.chats) != 1 || e.chats[0] != wantReply {
 		t.Fatalf("status=%v err=%v grants=%v chats=%v", status, err, auth.granted, e.chats)
 	}

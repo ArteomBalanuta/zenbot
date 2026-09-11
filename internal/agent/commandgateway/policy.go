@@ -5,6 +5,7 @@ import (
 
 	"zenbot/internal/agent/api"
 	commandcatalog "zenbot/internal/command/catalog"
+	"zenbot/internal/util"
 )
 
 // RequiredCapability is shared by command admission and tool descriptors.
@@ -39,5 +40,6 @@ func TargetAllowed(caller api.Context, command, arguments string) bool {
 	if len(fields) == 0 {
 		return false
 	}
-	return strings.EqualFold(strings.TrimPrefix(fields[0], "@"), *target)
+	nick, err := util.NormalizeNickTarget(&fields[0])
+	return err == nil && strings.EqualFold(nick, *target)
 }

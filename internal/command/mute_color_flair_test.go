@@ -124,7 +124,7 @@ func TestColorAndFlairRequireActiveCaseInsensitiveTarget(t *testing.T) {
 		name, command, operation, absent, success string
 	}{
 		{"color", "color", "color:Merc:00ff00", "User merc is not in the room, color was not applied.", ""},
-		{"flair", "flair", "flair:Merc:trusted", "User merc is not in the room, flair was not applied.", "\\n Flair request sent; server application is unconfirmed."},
+		{"flair", "flair", "flair:Merc:trusted", "User merc is not in the room, flair was not applied.", "\n Flair request sent; server application is unconfirmed."},
 	} {
 		t.Run(tc.name+" absent", func(t *testing.T) {
 			engine := activeEngine(nil)

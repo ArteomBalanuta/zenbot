@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
@@ -25,19 +24,7 @@ func activeModerationTarget(engine common.Engine, raw string) (*model.User, erro
 	if err != nil {
 		return nil, err
 	}
-	if user := engine.GetActiveUserByName(nick); user != nil {
-		return user, nil
-	}
-	users := engine.GetActiveUsers()
-	if users == nil {
-		return nil, nil
-	}
-	for user := range *users {
-		if user != nil && strings.EqualFold(user.Name, nick) {
-			return user, nil
-		}
-	}
-	return nil, nil
+	return activeModerationTargetByCanonicalName(engine, nick), nil
 }
 
 type muteCommand struct{ commandBase }
@@ -53,14 +40,14 @@ func (c *muteCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.FAILED, nil
 	}
-	target, err := activeModerationTarget(c.engine, arguments[0])
+	nick, err := util.NormalizeNickTarget(&arguments[0])
 	if err != nil {
 		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"mute merc"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	nick, _ := util.NormalizeNickTarget(&arguments[0])
+	target := activeModerationTargetByCanonicalName(c.engine, nick)
 	if target == nil {
 		if err := replyContext(ctx, &c.commandBase, nick+" is not in the room"); err != nil {
 			return model.FAILED, err

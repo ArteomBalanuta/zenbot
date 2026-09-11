@@ -12,6 +12,7 @@ import (
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
+	"zenbot/internal/util"
 )
 
 func userService(e common.Engine) *service.UserService {
@@ -39,7 +40,11 @@ func (c *registerCommand) Execute(ctx context.Context) (model.Status, error) {
 	if s == nil || s.Identity == nil {
 		return model.FAILED, fmt.Errorf("user service unavailable")
 	}
-	name, trip := strings.TrimSpace(a[0]), strings.TrimSpace(a[1])
+	name, err := util.NormalizeNickTarget(&a[0])
+	if err != nil {
+		return model.FAILED, err
+	}
+	trip := strings.TrimSpace(a[1])
 	n, err := s.IsNameRegistered(ctx, name)
 	if err != nil {
 		return model.FAILED, err
@@ -116,7 +121,7 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) != 2 || strings.TrimSpace(c.message.Trip) == "" {
-		if err := replyContext(ctx, &c.commandBase, "\\n Set your trip first. Example: "+c.engine.GetPrefix()+"grant 8Wotmg ADMIN"); err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n Set your trip first. Example: "+c.engine.GetPrefix()+"grant 8Wotmg ADMIN"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
@@ -149,9 +154,9 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	// The entire role batch is committed here, before its acknowledgment.
 	common.RecordCommittedMutation(ctx)
-	acknowledgment := "\\n Granted new Role: " + roleName + " to trip: " + target
+	acknowledgment := "\n Granted new Role: " + roleName + " to trip: " + target
 	if strings.Contains(target, ",") {
-		acknowledgment = fmt.Sprintf("\\n Granted new Roles: %s to trips: %v", roleName, targets)
+		acknowledgment = fmt.Sprintf("\n Granted new Roles: %s to trips: %v", roleName, targets)
 	}
 	if err := replyContext(ctx, &c.commandBase, acknowledgment); err != nil {
 		return model.FAILED, err
@@ -233,7 +238,7 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 		b.WriteString(m.Name + "#" + m.Trip + ": " + msg)
 		b.WriteString("\n")
 	}
-	if err := observeAndReply(ctx, &c.commandBase, escapeJava(b.String()), whisper); err != nil {
+	if err := observeAndReply(ctx, &c.commandBase, b.String(), whisper); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -256,5 +261,3 @@ func truncateUTF8Bytes(value string, limit int) string {
 	}
 	return value[:boundary] + "..."
 }
-
-func escapeJava(s string) string { return strconv.Quote(s)[1 : len(strconv.Quote(s))-1] }

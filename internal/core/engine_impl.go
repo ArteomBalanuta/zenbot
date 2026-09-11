@@ -18,6 +18,7 @@ import (
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
 	"zenbot/internal/transport"
+	"zenbot/internal/util"
 )
 
 type EngineTransport interface {
@@ -500,38 +501,28 @@ func (e *EngineImpl) SendRawMessage(message string) {
 }
 
 func (e *EngineImpl) SendChatMessage(author, message string, IsWhisper bool) (string, error) {
-	if author != "" {
-		message = normalizeChatText(message)
-	}
 	if author != "" && IsWhisper {
 		message = "/whisper @" + author + " .\n" + message
 	} else if author != "" {
 		message = "@" + author + " " + message
 	}
 
-	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
+	chatPayload := util.CommandWithValue("chat", "text", message)
 	return message, e.sendOutbound(chatPayload)
 }
 
-func normalizeChatText(message string) string {
-	message = strings.ReplaceAll(message, "\r\n", "\n")
-	message = strings.ReplaceAll(message, "\r", "\n")
-	return strings.ReplaceAll(message, `\n`, "\n")
-}
-
 func (e *EngineImpl) SendWhisperMessage(author, payload string) (string, error) {
-	message := "/whisper @" + author + " " + strings.ReplaceAll(payload, `\n`, "\n")
-	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
+	message := "/whisper @" + author + " " + payload
+	chatPayload := util.CommandWithValue("chat", "text", message)
 	return message, e.sendOutbound(chatPayload)
 }
 
 func (e *EngineImpl) SendAddressedMessage(author, payload string, whisper bool) (string, error) {
-	payload = normalizeChatText(payload)
 	message := "@" + author + " " + payload
 	if whisper {
 		message = "/whisper @" + author + " " + payload
 	}
-	chatPayload := fmt.Sprintf(`{ "cmd": "chat", "text": "%s"}`, escapeJSON(message))
+	chatPayload := util.CommandWithValue("chat", "text", message)
 	return message, e.sendOutbound(chatPayload)
 }
 
@@ -964,17 +955,4 @@ func (e *EngineImpl) IsUserAuthorized(u *model.User, r *model.Role) bool {
 		return false
 	}
 	return e.SecurityService.IsAuthorized(u, r)
-}
-
-func escapeJSON(input string) string {
-	escaped, _ := json.Marshal(input)
-	// Remove the surrounding quotes
-	s := string(escaped[1 : len(escaped)-1])
-
-	// Restore specific whitespace characters
-	s = strings.ReplaceAll(s, `\n`, "\\n")
-	s = strings.ReplaceAll(s, `\t`, "\\t")
-	s = strings.ReplaceAll(s, `\r`, "\\r")
-
-	return s
 }

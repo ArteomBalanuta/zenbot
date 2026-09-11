@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zenbot/internal/repository"
+	"zenbot/internal/util"
 )
 
 const (
@@ -26,8 +27,8 @@ const (
 	selectLastOnline = `SELECT message, created_on, event_type, name_match, trip_match, differing FROM (
 		SELECT observations.*,
 			MAX(CASE WHEN name = $1 THEN 1 ELSE 0 END) OVER () AS name_match,
-			MAX(CASE WHEN trip = $1 THEN 1 ELSE 0 END) OVER () AS trip_match,
-			MAX(CASE WHEN name = $1 AND trip = $1 THEN 0 ELSE 1 END) OVER () AS differing,
+			MAX(CASE WHEN trip = $2 THEN 1 ELSE 0 END) OVER () AS trip_match,
+			MAX(CASE WHEN name = $1 AND trip = $2 THEN 0 ELSE 1 END) OVER () AS differing,
 			ROW_NUMBER() OVER (
 				PARTITION BY CASE WHEN event_type IS NOT NULL THEN 1 WHEN message IS NOT NULL THEN 0 ELSE 2 END
 				ORDER BY created_on DESC, source_rank DESC, id DESC, event_type DESC
@@ -39,7 +40,7 @@ const (
 			UNION ALL
 			SELECT id, name, trip, CAST(NULL AS VARCHAR), created_on, 1 AS source_rank, UPPER(event_type)
 			FROM user_presence_log WHERE LOWER(event_type) IN ('joined', 'left')
-		) observations WHERE name = $1 OR trip = $1
+		) observations WHERE name = $1 OR trip = $2
 	) ranked WHERE fact_rank = 1`
 	selectUserTrips           = `SELECT trip FROM trips WHERE type = 'USER';`
 	selectRecentPresenceNames = `SELECT name, MAX(created_on) AS last_seen FROM (
@@ -134,7 +135,12 @@ func (d *Database) RecentPresenceNames(ctx context.Context, hash, trip string, a
 
 func (d *Database) LastOnline(ctx context.Context, target string) (repository.LastOnlineRecord, error) {
 	var record repository.LastOnlineRecord
-	rows, err := d.DB.QueryContext(ctx, selectLastOnline, target)
+	target = strings.TrimSpace(target)
+	nick, err := util.NormalizeNickTarget(&target)
+	if err != nil {
+		return record, err
+	}
+	rows, err := d.DB.QueryContext(ctx, selectLastOnline, nick, target)
 	if err != nil {
 		return repository.LastOnlineRecord{}, err
 	}
@@ -192,5 +198,5 @@ func (d *Database) BasicUserData(ctx context.Context, hash, trip string) (string
 		sort.Strings(out)
 		return strings.Join(out, ",")
 	}
-	return fmt.Sprintf("Hashes: \\n%s \\nNicks: \\n%s \\n", join(hashes), join(nicks)), nil
+	return fmt.Sprintf("Hashes: \n%s \nNicks: \n%s \n", join(hashes), join(nicks)), nil
 }

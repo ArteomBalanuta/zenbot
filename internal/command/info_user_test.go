@@ -57,7 +57,7 @@ func TestInfoUserCommandMissingAndNotFoundMatchSaturn(t *testing.T) {
 	if err != nil || status != model.FAILED {
 		t.Fatalf("missing status=%v err=%v", status, err)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "author|\\n Example: !info merc|true" {
+	if len(e.chats) != 1 || e.chats[0] != "author|\n Example: !info merc|true" {
 		t.Fatalf("missing chat=%q", e.chats)
 	}
 
@@ -66,7 +66,7 @@ func TestInfoUserCommandMissingAndNotFoundMatchSaturn(t *testing.T) {
 	if err != nil || status != model.FAILED {
 		t.Fatalf("not-found status=%v err=%v", status, err)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "author|\\n target with nick:  nobody not found!|true" {
+	if len(e.chats) != 1 || e.chats[0] != "author|\n target with nick:  nobody not found!|true" {
 		t.Fatalf("not-found chat=%q", e.chats)
 	}
 }

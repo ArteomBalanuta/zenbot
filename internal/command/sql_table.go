@@ -1,15 +1,14 @@
 package command
 
 import (
-	"fmt"
 	"strings"
 	"unicode/utf16"
 
 	"zenbot/internal/service"
 )
 
-// renderSaturnSQLTable mirrors Saturn's TableGenerator followed by
-// StringEscapeUtils.escapeJava around SQLServiceImpl's exact fence wrapper.
+// renderSaturnSQLTable preserves Saturn's table layout as plain display text.
+// The chat boundary owns JSON escaping, including control and Unicode text.
 func renderSaturnSQLTable(table service.SQLTable) string {
 	widths := make([]int, len(table.Columns))
 	for i, header := range table.Columns {
@@ -79,36 +78,7 @@ func renderSaturnSQLTable(table service.SQLTable) string {
 	out.WriteByte('\n')
 	out.WriteString(border())
 	out.WriteString("\n\n")
-	return escapeSaturnJava("\n```Text\n" + out.String() + "\n ```")
+	return "\n```Text\n" + out.String() + "\n ```"
 }
 
 func javaUTF16Length(value string) int { return len(utf16.Encode([]rune(value))) }
-
-func escapeSaturnJava(value string) string {
-	var out strings.Builder
-	for _, unit := range utf16.Encode([]rune(value)) {
-		switch unit {
-		case '\b':
-			out.WriteString(`\b`)
-		case '\n':
-			out.WriteString(`\n`)
-		case '\t':
-			out.WriteString(`\t`)
-		case '\f':
-			out.WriteString(`\f`)
-		case '\r':
-			out.WriteString(`\r`)
-		case '\\':
-			out.WriteString(`\\`)
-		case '"':
-			out.WriteString(`\"`)
-		default:
-			if unit < 0x20 || unit > 0x7f {
-				out.WriteString(fmt.Sprintf(`\u%04X`, unit))
-			} else {
-				out.WriteRune(rune(unit))
-			}
-		}
-	}
-	return out.String()
-}

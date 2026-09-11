@@ -195,7 +195,7 @@ func TestAccessCommandCommaTargetsUseRequestedRoleAndJavaSplitSemantics(t *testi
 	d, _ := commandDefinitionFor("grant")
 	status, err := d.New(e, &model.ChatMessage{Name: "mod", Trip: "invoker", Text: "!grant first,second, ADMIN"}).Execute(context.Background())
 	wantGrants := []string{"first:Admin", "second:Admin"}
-	wantReply := "mod|\\n Granted new Roles: ADMIN to trips: [first second]|false"
+	wantReply := "mod|\n Granted new Roles: ADMIN to trips: [first second]|false"
 	if status != model.SUCCESSFUL || err != nil || len(auth.granted) != len(wantGrants) || len(e.chats) != 1 || e.chats[0] != wantReply {
 		t.Fatalf("status=%v err=%v grants=%v chats=%v", status, err, auth.granted, e.chats)
 	}
@@ -232,12 +232,12 @@ func TestAccessCommandStopsCommaTargetGrantOnPersistenceFailure(t *testing.T) {
 	}
 }
 
-func TestMessagesCommandEscapesQuotesAndTruncatesBytes(t *testing.T) {
+func TestMessagesCommandPreservesQuotesAndNewlines(t *testing.T) {
 	ids := &identityFake{names: map[string]bool{}, trips: map[string]bool{}, messages: []model.Message{{Name: "alice", Trip: "trip", Message: "quote \"x\""}}}
 	e := newIdentityEngine(ids, &authFake{})
 	d, _ := commandDefinitionFor("lastmessages")
 	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!lastmessages trip 1"}).Execute(context.Background())
-	want := `mod|\nalice#trip: quote \"x\"\n|false`
+	want := "mod|\nalice#trip: quote \"x\"\n|false"
 	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 || e.chats[0] != want {
 		t.Fatalf("status=%v err=%v chats=%q", status, err, e.chats)
 	}
@@ -249,7 +249,7 @@ func TestMessagesCommandRendersReturnedGroupBRowTrip(t *testing.T) {
 	e.bundle.Users.GroupB = &groupBHistoryFake{messages: []repository.SaturnLastMessage{{Name: "alice", Trip: "stored-trip", Message: "message"}}}
 	d, _ := commandDefinitionFor("lastmessages")
 	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!lastmessages requested-trip 1"}).Execute(context.Background())
-	want := `mod|\nalice#stored-trip: message\n|false`
+	want := "mod|\nalice#stored-trip: message\n|false"
 	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 || e.chats[0] != want {
 		t.Fatalf("status=%v err=%v chats=%q", status, err, e.chats)
 	}
@@ -353,7 +353,7 @@ func TestMessagesCommandUTF8ByteBudgetPreservesExactAndSupplementaryRunes(t *tes
 			e := newIdentityEngine(ids, &authFake{})
 			d, _ := commandDefinitionFor("messages")
 			status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 1"}).Execute(context.Background())
-			want := `mod|\nalice#trip: ` + tc.want + `\n|false`
+			want := "mod|\nalice#trip: " + tc.want + "\n|false"
 			if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 || e.chats[0] != want {
 				t.Fatalf("status=%v err=%v chat=%q want=%q", status, err, e.chats, want)
 			}
@@ -378,7 +378,7 @@ func TestLastOnlineRendersPersistedLastSeen(t *testing.T) {
 	if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
-	if got := e.chats[0]; !strings.Contains(got, "Nick|Trip: merc") || !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || !strings.Contains(got, "world") || !strings.Contains(got, "Last observed: Thu, 1 Jan 1970 00:00:00 GMT") {
+	if got := e.chats[0]; !strings.Contains(got, "Nick|Trip: @merc") || !strings.Contains(got, "Last public message: Thu, 1 Jan 1970 00:00:00 GMT — hello") || !strings.Contains(got, "world") || !strings.Contains(got, "Last observed: Thu, 1 Jan 1970 00:00:00 GMT") {
 		t.Fatalf("unexpected last-online response %q", got)
 	}
 }
@@ -392,7 +392,7 @@ func TestLastOnlineUsesSourceAliasesAndUsageInsteadOfCatalogPlaceholder(t *testi
 			t.Fatalf("%s definition=%+v ok=%v", alias, d, ok)
 		}
 		status, err := d.New(e, &model.ChatMessage{Name: "alice", Text: "!" + alias}).Execute(context.Background())
-		want := "alice|\\n Example: !lastseen merc|false"
+		want := "alice|\n Example: !lastseen merc|false"
 		if status != model.FAILED || err != nil || len(e.chats) != 1 || e.chats[0] != want {
 			t.Fatalf("%s status=%v err=%v chats=%v want=%q", alias, status, err, e.chats, want)
 		}

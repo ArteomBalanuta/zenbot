@@ -71,16 +71,13 @@ func TestTextPreservationDispatchNoteMailAndRemoteMessage(t *testing.T) {
 		base.users["alice"].Trip = "trip"
 		engine := &textDispatchEngine{commandEngineStub: base, allow: true}
 		dispatchExactText(t, engine, "send", "@Merc   "+want)
-		var encoded, decoded string
-		if err := db.QueryRow("SELECT message FROM mail").Scan(&encoded); err != nil {
+		var stored string
+		if err := db.QueryRow("SELECT message FROM mail").Scan(&stored); err != nil {
 			t.Fatal(err)
 		}
-		if err := json.Unmarshal([]byte(`"`+encoded+`"`), &decoded); err != nil {
-			t.Fatal(err)
-		}
-		// Mail storage adds its existing trailing separator and escapes JSON once.
-		if decoded != want+" " {
-			t.Fatalf("decoded mail=%q want=%q", decoded, want+" ")
+		// Mail storage adds its existing trailing separator, but never escapes text.
+		if stored != want+" " {
+			t.Fatalf("stored mail=%q want=%q", stored, want+" ")
 		}
 	})
 	t.Run("remote message", func(t *testing.T) {

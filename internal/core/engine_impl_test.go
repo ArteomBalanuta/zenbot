@@ -7,9 +7,9 @@ import (
 	"zenbot/internal/relay"
 )
 
-func TestSendWhisperMessageNormalizesNewlinesAndEnqueuesEscapedJSON(t *testing.T) {
+func TestSendWhisperMessagePreservesNewlinesAndEnqueuesEscapedJSON(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
-	got, err := e.SendWhisperMessage("alice", `first\nsecond`)
+	got, err := e.SendWhisperMessage("alice", "first\nsecond")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,43 +33,43 @@ func TestSendWhisperMessageHasNoDotSeparator(t *testing.T) {
 	}
 }
 
-func TestSendChatMessageNormalizesLiteralAndPlatformNewlines(t *testing.T) {
+func TestSendChatMessagePreservesLiteralAndPlatformNewlines(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
 	got, err := e.SendChatMessage("alice", "first\\nsecond\r\nthird\rfourth", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "@alice first\nsecond\nthird\nfourth"
+	want := "@alice first\\nsecond\r\nthird\rfourth"
 	if got != want {
 		t.Fatalf("returned=%q, want %q", got, want)
 	}
-	if queued := <-e.OutMessageQueue; queued != `{ "cmd": "chat", "text": "@alice first\nsecond\nthird\nfourth"}` {
+	if queued := <-e.OutMessageQueue; queued != `{ "cmd": "chat", "text": "@alice first\\nsecond\r\nthird\rfourth"}` {
 		t.Fatalf("queued=%q", queued)
 	}
 }
 
-func TestSendAddressedMessageNormalizesAndFormatsPublicOutput(t *testing.T) {
+func TestSendAddressedMessagePreservesAndFormatsPublicOutput(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
 	got, err := e.SendAddressedMessage("alice", "first\r\nsecond\\nthird", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "@alice first\nsecond\nthird"
+	want := "@alice first\r\nsecond\\nthird"
 	if got != want {
 		t.Fatalf("returned=%q, want %q", got, want)
 	}
-	if queued := <-e.OutMessageQueue; queued != `{ "cmd": "chat", "text": "@alice first\nsecond\nthird"}` {
+	if queued := <-e.OutMessageQueue; queued != `{ "cmd": "chat", "text": "@alice first\r\nsecond\\nthird"}` {
 		t.Fatalf("queued=%q", queued)
 	}
 }
 
-func TestSendAddressedMessageNormalizesAndFormatsWhisperOutput(t *testing.T) {
+func TestSendAddressedMessagePreservesAndFormatsWhisperOutput(t *testing.T) {
 	e := &EngineImpl{OutMessageQueue: make(chan string, 1)}
 	got, err := e.SendAddressedMessage("alice", "first\\nsecond", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/whisper @alice first\nsecond" {
+	if got != "/whisper @alice first\\nsecond" {
 		t.Fatalf("returned=%q", got)
 	}
 }

@@ -26,7 +26,7 @@ func TestSupportRelayRendersEscapesAndSendsOnlyToManagedSupport(t *testing.T) {
 	if err := json.Unmarshal([]byte(<-support.OutMessageQueue), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if want := `alice: say! \"\\\\ line\n\t\u0001 `; payload.Text != want {
+	if want := "alice: say! \"\\\\ line\n\t\u0001 "; payload.Text != want {
 		t.Fatalf("text=%q, want %q", payload.Text, want)
 	}
 	if err := relay.RelayToSupport(context.Background(), common.SupportRelayRequest{Author: "alice", Trip: "other", Anonymous: true, Arguments: []string{"say!", "<tag>", "😀"}}); err != nil {

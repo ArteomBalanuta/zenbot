@@ -132,7 +132,7 @@ func TestUnmuteUsesSourceHashProtocol(t *testing.T) {
 func TestColorAndFlairRequireActiveUserAndUseSourcePayloads(t *testing.T) {
 	for _, tc := range []struct{ text, raw, reply string }{
 		{"!color @Merc 00ff00", `{"cmd":"forcecolor","color":"00ff00","nick":"Merc"}`, ""},
-		{"!flair Merc trusted", `{"cmd":"forceflair","flair":"trusted","nick":"Merc"}`, "mod|\\n Flair request sent; server application is unconfirmed.|false"},
+		{"!flair Merc trusted", `{"cmd":"forceflair","flair":"trusted","nick":"Merc"}`, "mod|\n Flair request sent; server application is unconfirmed.|false"},
 	} {
 		e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc"}}}
 		canonical := "color"
@@ -220,7 +220,7 @@ func TestShadowBanListRendersSourceShape(t *testing.T) {
 	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("banlist")
 	status, err := d.New(e, moderationMessage("!banlist", true)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Banned hashes, trips, names: \\nraw - ------ - offline\\n|true"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Banned hashes, trips, names: \nraw - ------ - offline\n|true"}) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
 }

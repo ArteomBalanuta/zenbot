@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"strings"
 
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
@@ -19,14 +18,14 @@ func (c *nukeCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks"); err != nil {
+		if err := replyContext(ctx, &c.commandBase, "\n Example: "+c.engine.GetPrefix()+"nuke hotlinks"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
 	}
-	target := strings.ReplaceAll(arguments[0], "@", "")
-	if target == "" {
-		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks"); err != nil {
+	target, valid := rawRoomSelector(arguments[0])
+	if !valid {
+		if err := replyContext(ctx, &c.commandBase, "\n Example: "+c.engine.GetPrefix()+"nuke hotlinks"); err != nil {
 			return model.FAILED, err
 		}
 		return model.FAILED, nil
