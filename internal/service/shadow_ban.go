@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
@@ -20,22 +19,11 @@ func (s *ShadowBanService) Matches(ctx context.Context, user *model.User) (bool,
 	if user == nil {
 		return false, nil
 	}
-	records, err := s.List(ctx)
+	r, err := s.repository()
 	if err != nil {
 		return false, err
 	}
-	for _, record := range records {
-		if strings.TrimSpace(user.Trip) != "" && user.Trip == record.Trip {
-			return true, nil
-		}
-		if user.Name != "" && user.Name == record.Name {
-			return true, nil
-		}
-		if user.Hash != "" && user.Hash == record.Hash {
-			return true, nil
-		}
-	}
-	return false, nil
+	return r.HasShadowBanMatch(ctx, user.Trip, user.Name, user.Hash)
 }
 
 func (s *ShadowBanService) repository() (repository.ShadowBanCommandRepository, error) {

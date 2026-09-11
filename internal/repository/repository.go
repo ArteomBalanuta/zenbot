@@ -49,6 +49,9 @@ type ShadowBanRecord struct {
 type ShadowBanCommandRepository interface {
 	PersistShadowBanRecord(context.Context, ShadowBanRecord) error
 	ListShadowBans(context.Context) ([]ShadowBanRecord, error)
+	// HasShadowBanMatch compares nonblank trip, name and raw hash values only
+	// against their own columns, without decoding unrelated stored records.
+	HasShadowBanMatch(ctx context.Context, trip, name, hash string) (bool, error)
 	RemoveShadowBanBySourceTarget(context.Context, string) (int64, error)
 	RemoveAllShadowBans(context.Context) (int64, error)
 }

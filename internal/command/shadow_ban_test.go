@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"zenbot/internal/common"
@@ -40,6 +41,21 @@ func (s *shadowBanRepositoryStub) ListShadowBans(context.Context) ([]repository.
 		return nil, s.err
 	}
 	return append([]repository.ShadowBanRecord(nil), s.records...), nil
+}
+
+func (s *shadowBanRepositoryStub) HasShadowBanMatch(ctx context.Context, trip, name, hash string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if s.err != nil {
+		return false, s.err
+	}
+	for _, record := range s.records {
+		if (strings.TrimSpace(trip) != "" && trip == record.Trip) || (strings.TrimSpace(name) != "" && name == record.Name) || (strings.TrimSpace(hash) != "" && hash == record.Hash) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (s *shadowBanRepositoryStub) RemoveShadowBanBySourceTarget(_ context.Context, target string) (int64, error) {
 	if s.err != nil {

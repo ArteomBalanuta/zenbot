@@ -94,6 +94,17 @@ func (r *shadowBanJoinRepository) PersistShadowBanRecord(context.Context, reposi
 func (r *shadowBanJoinRepository) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
 	return append([]repository.ShadowBanRecord(nil), r.records...), nil
 }
+func (r *shadowBanJoinRepository) HasShadowBanMatch(ctx context.Context, trip, name, hash string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	for _, record := range r.records {
+		if (strings.TrimSpace(trip) != "" && trip == record.Trip) || (strings.TrimSpace(name) != "" && name == record.Name) || (strings.TrimSpace(hash) != "" && hash == record.Hash) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (r *shadowBanJoinRepository) RemoveShadowBanBySourceTarget(context.Context, string) (int64, error) {
 	return 0, nil
 }

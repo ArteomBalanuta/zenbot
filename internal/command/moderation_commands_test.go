@@ -264,6 +264,17 @@ func (f *shadowManagementFake) PersistShadowBanRecord(_ context.Context, record 
 func (f *shadowManagementFake) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
 	return f.rows, nil
 }
+func (f *shadowManagementFake) HasShadowBanMatch(ctx context.Context, trip, name, hash string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	for _, record := range f.rows {
+		if (strings.TrimSpace(trip) != "" && trip == record.Trip) || (strings.TrimSpace(name) != "" && name == record.Name) || (strings.TrimSpace(hash) != "" && hash == record.Hash) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (f *shadowManagementFake) RemoveShadowBanBySourceTarget(context.Context, string) (int64, error) {
 	return 1, nil
 }

@@ -86,6 +86,30 @@ func (d *Database) PersistShadowBanRecord(ctx context.Context, record repository
 	return err
 }
 
+// HasShadowBanMatch tests exact identities without decoding stored hashes.
+// Blank inputs bind NULL so they cannot match empty or missing identity fields.
+func (d *Database) HasShadowBanMatch(ctx context.Context, trip, name, hash string) (bool, error) {
+	if d == nil || d.DB == nil {
+		return false, fmt.Errorf("shadow-ban database is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	nonblank := func(value string) any {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		return value
+	}
+	var encodedHash any
+	if strings.TrimSpace(hash) != "" {
+		encodedHash = base64.StdEncoding.EncodeToString([]byte(hash))
+	}
+	var matched bool
+	err := d.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM banned_users WHERE trip=$1 OR name=$2 OR hash=$3)`, nonblank(trip), nonblank(name), encodedHash).Scan(&matched)
+	return matched, err
+}
+
 // ListShadowBans reads Saturn's banned_users rows and decodes the stored
 // base64 hash at the repository boundary.
 func (d *Database) ListShadowBans(ctx context.Context) ([]repository.ShadowBanRecord, error) {
