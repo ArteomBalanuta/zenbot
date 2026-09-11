@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"zenbot/internal/common"
 	"zenbot/internal/model"
@@ -171,16 +172,22 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) < 2 {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"lastmessages g0KY09 3")
+		if _, err := c.send(ctx, "Example: "+c.engine.GetPrefix()+"lastmessages g0KY09 3"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(a[1]))
-	if err != nil {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"lastmessages g0KY09 3")
+	if err != nil || n <= 0 {
+		if _, sendErr := c.send(ctx, "Example: "+c.engine.GetPrefix()+"lastmessages g0KY09 3"); sendErr != nil {
+			return model.FAILED, sendErr
+		}
 		return model.FAILED, nil
 	}
 	if n > 30 {
-		reply(&c.commandBase, "Retrieving at max 30 messages! ")
+		if _, err := c.send(ctx, "Retrieving at max 30 messages! "); err != nil {
+			return model.FAILED, err
+		}
 		n = 30
 	}
 	s := userService(c.engine)
@@ -200,19 +207,44 @@ func (c *messagesCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
+	}
+	if len(ms) == 0 {
+		if _, err := c.send(ctx, "No messages found."); err != nil {
+			return model.FAILED, err
+		}
+		return model.SUCCESSFUL, nil
+	}
 	var b strings.Builder
 	for _, m := range ms {
-		msg := m.Message
-		if len(msg) > 200 {
-			msg = msg[:200] + "..."
-		}
+		msg := truncateUTF8Bytes(m.Message, 200)
 		b.WriteString("\n")
 		b.WriteString(m.Name + "#" + m.Trip + ": " + msg)
 		b.WriteString("\n")
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, escapeJava(b.String()), c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+	if _, err := c.send(ctx, escapeJava(b.String())); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
 }
+
+func (c *messagesCommand) send(ctx context.Context, text string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return c.engine.SendChatMessage(c.message.Name, text, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper")
+}
+
+func truncateUTF8Bytes(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	boundary := limit
+	for boundary > 0 && !utf8.RuneStart(value[boundary]) {
+		boundary--
+	}
+	return value[:boundary] + "..."
+}
+
 func escapeJava(s string) string { return strconv.Quote(s)[1 : len(strconv.Quote(s))-1] }

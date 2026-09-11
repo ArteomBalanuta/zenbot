@@ -97,11 +97,11 @@ func TestRuntimeParityMessagesUsesGroupBAndAdaptsTrip(t *testing.T) {
 	long := "<" + string(make([]byte, 201))
 	g := &runtimeParityGroupB{messages: []repository.SaturnLastMessage{{Name: "Merc", Message: long}}}
 	e := runtimeParityEngine(g)
-	status, err := newCommand("messages", []string{"messages", "lastmessages"}, model.MODERATOR, e, &model.ChatMessage{Text: "!messages trip 0"}).Execute(context.Background())
+	status, err := newCommand("messages", []string{"messages", "lastmessages"}, model.MODERATOR, e, &model.ChatMessage{Text: "!messages trip 1"}).Execute(context.Background())
 	if err != nil || status != model.SUCCESSFUL {
 		t.Fatalf("status=%v err=%v", status, err)
 	}
-	if g.lastName != nil || g.lastTrip != "trip" || g.lastN != 0 {
+	if g.lastName != nil || g.lastTrip != "trip" || g.lastN != 1 {
 		t.Fatalf("Group B args=(%v,%q,%d)", g.lastName, g.lastTrip, g.lastN)
 	}
 	if len(e.chats) != 1 || len(e.chats[0]) == 0 {

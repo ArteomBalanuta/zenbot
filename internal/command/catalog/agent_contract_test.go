@@ -234,3 +234,14 @@ func TestAgentCatalogDeclaresAuthoritativePrimaryIntents(t *testing.T) {
 		seen[intent] = entry.Canonical
 	}
 }
+
+func TestActiveAgentContractDescribesExactTripWithCompatibilityKey(t *testing.T) {
+	active, ok := AgentEntry("active")
+	if !ok {
+		t.Fatal("active agent entry missing")
+	}
+	schema := string(active.Agent.Arguments.Schema())
+	if active.Agent.Description != "Display activity statistics for one exact trip." || !strings.Contains(schema, `"identity"`) || !strings.Contains(schema, "Exact trip value; nicknames are not accepted.") || strings.Contains(schema, `"trip":`) {
+		t.Fatalf("active contract description=%q schema=%s", active.Agent.Description, schema)
+	}
+}

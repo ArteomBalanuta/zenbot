@@ -16,7 +16,9 @@ func (c *activityCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 || strings.TrimSpace(arguments[0]) == "" {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"active 8Wotmg")
+		if _, err := c.engine.SendChatMessage(c.message.Name, "Example: "+c.engine.GetPrefix()+"active 8Wotmg", activityWhisper(c.message)); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	services := bundle(c.engine)
@@ -30,6 +32,12 @@ func (c *activityCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, "Stats: \\n"+result)
+	if _, err := c.engine.SendChatMessage(c.message.Name, "Stats: \\n"+result, activityWhisper(c.message)); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
+}
+
+func activityWhisper(message *model.ChatMessage) bool {
+	return message.Whisper || message.IsWhisper || message.Type == "whisper"
 }

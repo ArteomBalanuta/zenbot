@@ -18,7 +18,11 @@ type identityFake struct {
 	messages     []model.Message
 	err          error
 	mutationErr  error
+	lastContext  context.Context
+	lastName     string
+	lastTrip     string
 	lastCount    int
+	lastCalls    int
 }
 
 func (f *identityFake) IsNameRegistered(_ context.Context, v string) (bool, error) {
@@ -39,13 +43,21 @@ func (f *identityFake) RegisterTripByName(_ context.Context, n, t string) error 
 	f.registered = append(f.registered, n+":"+t)
 	return f.mutationErr
 }
-func (f *identityFake) LastMessages(_ context.Context, _, _ string, count int) ([]model.Message, error) {
+
+func (f *identityFake) LastMessages(ctx context.Context, name, trip string, count int) ([]model.Message, error) {
+	f.lastContext, f.lastName, f.lastTrip = ctx, name, trip
 	f.lastCount = count
+	f.lastCalls++
 	return f.messages, f.err
 }
 
 type groupBHistoryFake struct {
 	messages []repository.SaturnLastMessage
+	err      error
+	ctx      context.Context
+	calls    int
+	lastTrip string
+	lastN    int
 }
 
 func (f *groupBHistoryFake) DeleteIdentity(context.Context, string, string) (repository.DeleteResult, error) {
@@ -54,8 +66,10 @@ func (f *groupBHistoryFake) DeleteIdentity(context.Context, string, string) (rep
 func (f *groupBHistoryFake) SaturnRegisteredUsers(context.Context) ([]repository.SaturnRegisteredUser, error) {
 	return nil, nil
 }
-func (f *groupBHistoryFake) SaturnLastMessages(context.Context, *string, string, int) ([]repository.SaturnLastMessage, error) {
-	return f.messages, nil
+func (f *groupBHistoryFake) SaturnLastMessages(ctx context.Context, _ *string, trip string, count int) ([]repository.SaturnLastMessage, error) {
+	f.ctx, f.lastTrip, f.lastN = ctx, trip, count
+	f.calls++
+	return f.messages, f.err
 }
 
 type authFake struct {
@@ -252,6 +266,97 @@ func TestMessagesCommandClampsCountAndParsesEveryRole(t *testing.T) {
 		if _, ok := parseRole(name); !ok {
 			t.Fatalf("role %q rejected", name)
 		}
+	}
+}
+
+func TestMessagesCommandEmptyHistoryReportsNoRecords(t *testing.T) {
+	ids := &identityFake{}
+	e := newIdentityEngine(ids, &authFake{})
+	d, _ := commandDefinitionFor("messages")
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 1", IsWhisper: true}).Execute(context.Background())
+	if status != model.SUCCESSFUL || err != nil || ids.lastCount != 1 || len(e.chats) != 1 || e.chats[0] != "mod|No messages found.|true" {
+		t.Fatalf("status=%v err=%v count=%d chats=%q", status, err, ids.lastCount, e.chats)
+	}
+}
+
+func TestMessagesCommandPrimaryHistoryUsesCallerContextWithoutFallback(t *testing.T) {
+	ctx := context.WithValue(context.Background(), struct{}{}, "caller")
+	primary := &groupBHistoryFake{messages: []repository.SaturnLastMessage{{Name: "alice", Trip: "trip", Message: "hello"}}}
+	fallback := &identityFake{err: errors.New("fallback must not run"), lastCount: -1}
+	e := newIdentityEngine(fallback, &authFake{})
+	e.bundle.Users.GroupB = primary
+	d, _ := commandDefinitionFor("messages")
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 2"}).Execute(ctx)
+	if status != model.SUCCESSFUL || err != nil || primary.calls != 1 || primary.ctx != ctx || primary.lastTrip != "trip" || primary.lastN != 2 || fallback.lastCalls != 0 {
+		t.Fatalf("status=%v err=%v primary=%+v fallbackCount=%d", status, err, primary, fallback.lastCount)
+	}
+}
+
+func TestMessagesCommandFallbackHistoryUsesCallerContextAndTripOnly(t *testing.T) {
+	ctx := context.WithValue(context.Background(), struct{}{}, "caller")
+	fallback := &identityFake{messages: []model.Message{{Name: "alice", Trip: "trip", Message: "hello"}}}
+	e := newIdentityEngine(fallback, &authFake{})
+	d, _ := commandDefinitionFor("messages")
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 2"}).Execute(ctx)
+	if status != model.SUCCESSFUL || err != nil || fallback.lastCalls != 1 || fallback.lastContext != ctx || fallback.lastName != "" || fallback.lastTrip != "trip" || fallback.lastCount != 2 {
+		t.Fatalf("status=%v err=%v fallback=%+v", status, err, fallback)
+	}
+}
+
+func TestMessagesCommandPrimaryReadFailureDoesNotFallbackOrSend(t *testing.T) {
+	want := errors.New("primary history failed")
+	primary := &groupBHistoryFake{err: want}
+	fallback := &identityFake{}
+	e := newIdentityEngine(fallback, &authFake{})
+	e.bundle.Users.GroupB = primary
+	d, _ := commandDefinitionFor("messages")
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 2"}).Execute(context.Background())
+	if status != model.FAILED || !errors.Is(err, want) || primary.calls != 1 || fallback.lastCalls != 0 || len(e.chats) != 0 {
+		t.Fatalf("status=%v err=%v primaryCalls=%d fallbackCalls=%d chats=%v", status, err, primary.calls, fallback.lastCalls, e.chats)
+	}
+}
+
+func TestMessagesCommandOverLimitWarningDeliveryFailureStopsBeforeQuery(t *testing.T) {
+	want := errors.New("warning delivery failed")
+	ids := &identityFake{lastCount: -1}
+	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{Identity: ids}}}, sendErr: want}
+	d, _ := commandDefinitionFor("messages")
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 31"}).Execute(context.Background())
+	if status != model.FAILED || !errors.Is(err, want) || ids.lastCount != -1 {
+		t.Fatalf("status=%v err=%v count=%d", status, err, ids.lastCount)
+	}
+}
+
+func TestMessagesCommandResultDeliveryFailureDoesNotRequery(t *testing.T) {
+	want := errors.New("result delivery failed")
+	primary := &groupBHistoryFake{messages: []repository.SaturnLastMessage{{Name: "alice", Trip: "trip", Message: "hello"}}}
+	e := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Users: &service.UserService{GroupB: primary}}}, sendErr: want}
+	d, _ := commandDefinitionFor("messages")
+	status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 1"}).Execute(context.Background())
+	if status != model.FAILED || !errors.Is(err, want) || primary.calls != 1 {
+		t.Fatalf("status=%v err=%v calls=%d", status, err, primary.calls)
+	}
+}
+
+func TestMessagesCommandUTF8ByteBudgetPreservesExactAndSupplementaryRunes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		message string
+		want    string
+	}{
+		{name: "exact limit", message: strings.Repeat("a", 198) + "é", want: strings.Repeat("a", 198) + "é"},
+		{name: "supplementary boundary", message: strings.Repeat("a", 197) + "😀tail", want: strings.Repeat("a", 197) + "..."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ids := &identityFake{messages: []model.Message{{Name: "alice", Trip: "trip", Message: tc.message}}}
+			e := newIdentityEngine(ids, &authFake{})
+			d, _ := commandDefinitionFor("messages")
+			status, err := d.New(e, &model.ChatMessage{Name: "mod", Text: "!messages trip 1"}).Execute(context.Background())
+			want := `mod|\nalice#trip: ` + tc.want + `\n|false`
+			if status != model.SUCCESSFUL || err != nil || len(e.chats) != 1 || e.chats[0] != want {
+				t.Fatalf("status=%v err=%v chat=%q want=%q", status, err, e.chats, want)
+			}
+		})
 	}
 }
 

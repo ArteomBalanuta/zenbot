@@ -46,13 +46,40 @@ func TestActivityServiceReturnsSourceNoActivityText(t *testing.T) {
 	}
 }
 
-func TestActivityServiceReturnsRepositoryErrorTextAsSourceResult(t *testing.T) {
-	want := "sentinel activity database failure"
-	got, err := (&ActivityService{Repo: &activityRepositoryStub{err: errors.New(want)}}).Stats(context.Background(), "trip")
-	if err != nil {
-		t.Fatalf("err=%v", err)
+func TestActivityServiceReturnsRepositoryErrorWithoutDiagnosticPayload(t *testing.T) {
+	want := errors.New("sentinel activity database failure")
+	got, err := (&ActivityService{Repo: &activityRepositoryStub{err: want}}).Stats(context.Background(), "trip")
+	if !errors.Is(err, want) || got != "" {
+		t.Fatalf("payload=%q err=%v", got, err)
 	}
-	if got != want {
-		t.Fatalf("payload=%q, want %q", got, want)
+}
+
+func TestActivityServiceRejectsMissingRepository(t *testing.T) {
+	for _, service := range []*ActivityService{nil, {}} {
+		got, err := service.Stats(context.Background(), "trip")
+		if err == nil || got != "" {
+			t.Fatalf("service=%#v payload=%q err=%v", service, got, err)
+		}
+	}
+}
+
+type cancelingActivityRepository struct{ cancel context.CancelFunc }
+
+func (r cancelingActivityRepository) ActivityStats(context.Context, string) ([]repository.ActivityStat, error) {
+	r.cancel()
+	return []repository.ActivityStat{{Trip: "trip"}}, nil
+}
+
+func TestActivityServiceObservesCancellationBeforeAndAfterRepositoryRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := &activityRepositoryStub{}
+	if got, err := (&ActivityService{Repo: repo}).Stats(ctx, "trip"); !errors.Is(err, context.Canceled) || got != "" || repo.calls != 0 {
+		t.Fatalf("pre-canceled payload=%q err=%v calls=%d", got, err, repo.calls)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	if got, err := (&ActivityService{Repo: cancelingActivityRepository{cancel: cancel}}).Stats(ctx, "trip"); !errors.Is(err, context.Canceled) || got != "" {
+		t.Fatalf("mid-read cancellation payload=%q err=%v", got, err)
 	}
 }

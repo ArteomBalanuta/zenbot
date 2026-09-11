@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf16"
 
@@ -15,9 +16,18 @@ type ActivityService struct {
 }
 
 func (s *ActivityService) Stats(ctx context.Context, trip string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if s == nil || s.Repo == nil {
+		return "", fmt.Errorf("activity repository unavailable")
+	}
 	stats, err := s.Repo.ActivityStats(ctx, trip)
 	if err != nil {
-		return err.Error(), nil
+		return "", fmt.Errorf("read activity stats: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	if len(stats) == 0 {
 		return "No activity found.", nil

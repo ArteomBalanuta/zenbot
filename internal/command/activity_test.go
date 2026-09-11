@@ -55,20 +55,31 @@ func TestActivityCommandMissingTargetUsesSourceExampleWithoutQuery(t *testing.T)
 	}
 }
 
-func TestActivityCommandRepliesWithRepositoryErrorTextAsSourceResult(t *testing.T) {
-	want := "sentinel activity database failure"
-	repo := &activityCommandRepositoryStub{err: errors.New(want)}
+func TestActivityCommandReturnsRepositoryErrorWithoutReply(t *testing.T) {
+	want := errors.New("sentinel activity database failure")
+	repo := &activityCommandRepositoryStub{err: want}
 	engine := &commandEngineStub{bundle: &service.Bundle{Activity: &service.ActivityService{Repo: repo}}}
 	definition, _ := commandDefinitionFor("active")
 	status, err := definition.New(engine, &model.ChatMessage{Name: "alice", Text: "!active  trip ignored", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil {
+	if status != model.FAILED || !errors.Is(err, want) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, engine.chats)
 	}
 	if repo.calls != 1 || repo.target != "trip" {
 		t.Fatalf("calls=%d target=%q", repo.calls, repo.target)
 	}
-	if len(engine.chats) != 1 || engine.chats[0] != "alice|Stats: \\n"+want+"|true" {
+	if len(engine.chats) != 0 {
 		t.Fatalf("chats=%v", engine.chats)
+	}
+}
+
+func TestActivityCommandReturnsMissingTargetDeliveryFailure(t *testing.T) {
+	want := errors.New("usage delivery failed")
+	repo := &activityCommandRepositoryStub{}
+	engine := &gatewayEngine{commandEngineStub: commandEngineStub{bundle: &service.Bundle{Activity: &service.ActivityService{Repo: repo}}}, sendErr: want}
+	definition, _ := commandDefinitionFor("active")
+	status, err := definition.New(engine, &model.ChatMessage{Name: "alice", Text: "!active"}).Execute(context.Background())
+	if status != model.FAILED || !errors.Is(err, want) || repo.calls != 0 {
+		t.Fatalf("status=%v err=%v calls=%d", status, err, repo.calls)
 	}
 }
 
