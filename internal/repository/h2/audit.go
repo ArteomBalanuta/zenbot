@@ -62,11 +62,15 @@ func insertReturning(ctx context.Context, q interface {
 		return 0, fmt.Errorf("invalid audit table %q", table)
 	}
 	query = strings.TrimSpace(strings.TrimSuffix(query, "RETURNING id"))
-	if _, err := q.ExecContext(ctx, query, args...); err != nil {
-		return 0, err
+	boundArgs := append([]any(nil), args...)
+	for i, arg := range boundArgs {
+		switch arg.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			boundArgs[i] = fmt.Sprint(arg)
+		}
 	}
 	var id int64
-	if err := q.QueryRowContext(ctx, "SELECT MAX(id) FROM "+table).Scan(&id); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT id FROM FINAL TABLE ("+query+")", boundArgs...).Scan(&id); err != nil {
 		return 0, err
 	}
 	return id, nil
