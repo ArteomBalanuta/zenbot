@@ -19,12 +19,16 @@ func (c *nukeCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks")
+		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	target := strings.ReplaceAll(arguments[0], "@", "")
 	if target == "" {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks")
+		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"nuke hotlinks"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	submitter, ok := c.engine.(common.CredentialedRoomSnapshotSubmitter)

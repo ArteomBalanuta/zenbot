@@ -51,6 +51,29 @@ func (e *agentCaptureEngine) recordAction(err error) error {
 	return err
 }
 
+func (e *agentCaptureEngine) SubscribeTrip(trip string) bool {
+	changed := e.Engine.SubscribeTrip(trip)
+	if changed {
+		e.actionCount++
+	}
+	return changed
+}
+
+func (e *agentCaptureEngine) UnsubscribeTrip(trip string) bool {
+	changed := e.Engine.UnsubscribeTrip(trip)
+	if changed {
+		e.actionCount++
+	}
+	return changed
+}
+
+func (e *agentCaptureEngine) AddAfkUser(user *model.User, reason string) {
+	e.Engine.AddAfkUser(user, reason)
+	if user != nil {
+		e.actionCount++
+	}
+}
+
 func requiredAgentCapability[T any](engine common.Engine, name string) (T, error) {
 	capability, ok := any(engine).(T)
 	if !ok {

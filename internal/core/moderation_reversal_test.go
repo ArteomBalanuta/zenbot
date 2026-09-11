@@ -25,10 +25,10 @@ func (r *reversalRepo) LogCommand(context.Context, model.CommandAuditRecord) (in
 	return 0, nil
 }
 func (r *reversalRepo) Close() error { return nil }
-func (r *reversalRepo) RemoveShadowBanBySourceTarget(_ context.Context, name string) error {
+func (r *reversalRepo) RemoveShadowBanBySourceTarget(_ context.Context, name string) (int64, error) {
 	r.calls++
 	r.name = name
-	return r.err
+	return 0, r.err
 }
 
 type basicRepository struct{}

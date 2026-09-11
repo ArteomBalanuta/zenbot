@@ -21,15 +21,21 @@ func (c *captchaCommand) Execute(ctx context.Context) (model.Status, error) {
 	case !present || argument == "on":
 		err = operations.EnableCaptcha(ctx)
 		if err == nil {
-			reply(&c.commandBase, " Captcha enabled!")
+			if err := replyContext(ctx, &c.commandBase, " Captcha enabled!"); err != nil {
+				return model.FAILED, err
+			}
 		}
 	case argument == "off":
 		err = operations.DisableCaptcha(ctx)
 		if err == nil {
-			reply(&c.commandBase, " Captcha disabled!")
+			if err := replyContext(ctx, &c.commandBase, " Captcha disabled!"); err != nil {
+				return model.FAILED, err
+			}
 		}
 	default:
-		reply(&c.commandBase, c.engine.GetPrefix()+"captcha [on|off]")
+		if err := replyContext(ctx, &c.commandBase, c.engine.GetPrefix()+"captcha [on|off]"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	if err != nil {

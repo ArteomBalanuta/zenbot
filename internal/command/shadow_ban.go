@@ -32,7 +32,9 @@ func (c *shadowBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"shadowban merc")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"shadowban merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	if len(arguments) > 1 && hasArgument(arguments, "-c") {
@@ -69,7 +71,9 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
-		reply(&c.commandBase, fmt.Sprintf("shadow_banned: %s trip: %s hash: %s", target, user.Trip, user.Hash))
+		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("shadow_banned: %s trip: %s hash: %s", target, user.Trip, user.Hash)); err != nil {
+			return model.FAILED, err
+		}
 		return model.SUCCESSFUL, nil
 	}
 	s, err := shadowBanService(c.engine)
@@ -82,7 +86,9 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, "banned: "+target)
+	if err := replyContext(ctx, &c.commandBase, "banned: "+target); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

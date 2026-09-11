@@ -14,7 +14,9 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"unban merc")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"unban merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	service, err := shadowBanService(c.engine)
@@ -27,7 +29,9 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 			return model.FAILED, err
 		}
 		if len(records) == 0 {
-			reply(&c.commandBase, "No users has been banned.")
+			if err := replyContext(ctx, &c.commandBase, "No users has been banned."); err != nil {
+				return model.FAILED, err
+			}
 			return model.FAILED, nil
 		}
 		if err := service.RemoveAll(ctx); err != nil {
@@ -36,7 +40,9 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
-		reply(&c.commandBase, "Unbanned hashes, trips, nicks: \\n"+formatShadowBanRecords(records))
+		if err := replyContext(ctx, &c.commandBase, "Unbanned hashes, trips, nicks: \\n"+formatShadowBanRecords(records)); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	target := arguments[0]
@@ -46,7 +52,9 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, " unbanned "+target)
+	if err := replyContext(ctx, &c.commandBase, " unbanned "+target); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

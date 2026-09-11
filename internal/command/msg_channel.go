@@ -21,12 +21,16 @@ func (c *msgChannelCommand) Execute(ctx context.Context) (model.Status, error) {
 	target, message := splitCommandToken(commandBody(c.message))
 	message = strings.TrimSpace(message)
 	if target == "" || message == "" {
-		reply(&c.commandBase, " Example: "+c.engine.GetPrefix()+"msgroom your-room your message")
+		if err := replyContext(ctx, &c.commandBase, " Example: "+c.engine.GetPrefix()+"msgroom your-room your message"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	room := strings.TrimSpace(strings.ReplaceAll(target, "?", ""))
 	if room == "" {
-		reply(&c.commandBase, "Room name cannot be blank.")
+		if err := replyContext(ctx, &c.commandBase, "Room name cannot be blank."); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	body := msgChannelBody(c.engine.GetChannel(), message)

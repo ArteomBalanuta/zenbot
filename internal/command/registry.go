@@ -34,26 +34,36 @@ func (c *replicaCommand) Execute(ctx context.Context) (model.Status, error) {
 	channel, err := ParseReplicaChannel(c.message.GetArguments())
 	if err != nil {
 		if hasBlankReplicaChannel(c.message.Text, c.message.GetArguments()) {
-			reply(&c.commandBase, "I'm the host bot serving current channel. Example: "+c.engine.GetPrefix()+"replica lounge")
+			if err := replyContext(ctx, &c.commandBase, "I'm the host bot serving current channel. Example: "+c.engine.GetPrefix()+"replica lounge"); err != nil {
+				return model.FAILED, err
+			}
 		} else {
-			reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"replica lounge")
+			if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"replica lounge"); err != nil {
+				return model.FAILED, err
+			}
 		}
 		return model.FAILED, nil
 	}
 	if channel == c.engine.GetChannel() {
-		reply(&c.commandBase, "I'm the host bot serving current channel. Example: "+c.engine.GetPrefix()+"replica lounge")
+		if err := replyContext(ctx, &c.commandBase, "I'm the host bot serving current channel. Example: "+c.engine.GetPrefix()+"replica lounge"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	for _, existing := range controller.ReplicaChannels() {
 		if existing == channel {
-			reply(&c.commandBase, "Channel "+channel+" already has a replica running.")
+			if err := replyContext(ctx, &c.commandBase, "Channel "+channel+" already has a replica running."); err != nil {
+				return model.FAILED, err
+			}
 			return model.FAILED, nil
 		}
 	}
 	if err := controller.AddReplica(ctx, channel); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, fmt.Sprintf("started replica in channel: %s successfully. Number of replicas: %d", channel, len(controller.ReplicaChannels())))
+	if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("started replica in channel: %s successfully. Number of replicas: %d", channel, len(controller.ReplicaChannels()))); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 func (c *replicaOffCommand) Execute(ctx context.Context) (model.Status, error) {
@@ -67,14 +77,20 @@ func (c *replicaOffCommand) Execute(ctx context.Context) (model.Status, error) {
 	channel, err := ParseReplicaChannel(c.message.GetArguments())
 	if err != nil {
 		if hasBlankReplicaChannel(c.message.Text, c.message.GetArguments()) {
-			reply(&c.commandBase, "I'm the host bot serving current channel, not a replica.")
+			if err := replyContext(ctx, &c.commandBase, "I'm the host bot serving current channel, not a replica."); err != nil {
+				return model.FAILED, err
+			}
 		} else {
-			reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"replicaoff lounge")
+			if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"replicaoff lounge"); err != nil {
+				return model.FAILED, err
+			}
 		}
 		return model.FAILED, nil
 	}
 	if channel == c.engine.GetChannel() {
-		reply(&c.commandBase, "I'm the host bot serving current channel, not a replica.")
+		if err := replyContext(ctx, &c.commandBase, "I'm the host bot serving current channel, not a replica."); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	found := false
@@ -85,13 +101,17 @@ func (c *replicaOffCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 	}
 	if !found {
-		reply(&c.commandBase, "No replica in channel: "+channel)
+		if err := replyContext(ctx, &c.commandBase, "No replica in channel: "+channel); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	if err := controller.RemoveReplica(ctx, channel); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, "Successfully shut down replica in channel: "+channel)
+	if err := replyContext(ctx, &c.commandBase, "Successfully shut down replica in channel: "+channel); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 func (c *replicaStatusCommand) Execute(ctx context.Context) (model.Status, error) {
@@ -108,7 +128,9 @@ func (c *replicaStatusCommand) Execute(ctx context.Context) (model.Status, error
 	if serving == "" {
 		serving = "none"
 	}
-	reply(&c.commandBase, fmt.Sprintf("Host room:%s, replicas active: %d \\nServing channels: %s", c.engine.GetChannel(), len(channels), serving))
+	if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Host room:%s, replicas active: %d \\nServing channels: %s", c.engine.GetChannel(), len(channels), serving)); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -128,7 +150,7 @@ func (c *replicaStatusCommand) NewInstance(e common.Engine, m *model.ChatMessage
 	return newCommand(c.canonical, c.aliases, c.role, e, m)
 }
 
-func (c *saturnCommand) Execute(context.Context) (model.Status, error) {
+func (c *saturnCommand) Execute(ctx context.Context) (model.Status, error) {
 	if c.message == nil || c.engine == nil {
 		return model.FAILED, fmt.Errorf("invalid command context")
 	}
@@ -141,40 +163,66 @@ func (c *saturnCommand) Execute(context.Context) (model.Status, error) {
 	}
 	switch c.canonical {
 	case "help":
-		reply(&commandBase{engine: c.engine, message: c.message}, " commands: help, say, list, afk, ping, weather, time")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " commands: help, say, list, afk, ping, weather, time"); err != nil {
+			return model.FAILED, err
+		}
 	case "version":
-		reply(&commandBase{engine: c.engine, message: c.message}, "zenbot")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, "zenbot"); err != nil {
+			return model.FAILED, err
+		}
 	case "ping":
-		reply(&commandBase{engine: c.engine, message: c.message}, " pong")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " pong"); err != nil {
+			return model.FAILED, err
+		}
 	case "ape":
-		reply(&commandBase{engine: c.engine, message: c.message}, "🦍")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, "🦍"); err != nil {
+			return model.FAILED, err
+		}
 	case "coin":
-		reply(&commandBase{engine: c.engine, message: c.message}, " heads")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " heads"); err != nil {
+			return model.FAILED, err
+		}
 	case "lastonline", "nicks", "users":
 		if len(args) == 0 {
-			reply(&commandBase{engine: c.engine, message: c.message}, " user not found")
+			if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " user not found"); err != nil {
+				return model.FAILED, err
+			}
 		} else {
-			reply(&commandBase{engine: c.engine, message: c.message}, " user: "+args[0])
+			if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " user: "+args[0]); err != nil {
+				return model.FAILED, err
+			}
 		}
 	case "weather", "time":
 		if len(args) == 0 {
-			reply(&commandBase{engine: c.engine, message: c.message}, " missing location")
+			if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " missing location"); err != nil {
+				return model.FAILED, err
+			}
 		} else {
-			reply(&commandBase{engine: c.engine, message: c.message}, " "+args[0])
+			if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " "+args[0]); err != nil {
+				return model.FAILED, err
+			}
 		}
 	case "whiskey":
 		return model.FAILED, fmt.Errorf("whiskey proxy configuration is unavailable")
 	case "access", "memory", "mine", "prefix", "restart", "shutdown", "sql":
 	case "dbzstr", "dfight", "dbzhelp", "dbzregister", "dspawn", "dbzstats":
 		reply(&commandBase{engine: c.engine, message: c.message}, " "+c.canonical+" requires DBZ state")
-	case "active", "authorize", "automove", "captcha", "color", "deauthorize", "flair", "messages", "mute", "nuke", "overflow", "register", "remove", "resurrect", "shadowbanlist", "shadowban", "unmute", "unshadowban":
+	case "automove":
 		reply(&commandBase{engine: c.engine, message: c.message}, " "+c.canonical+" accepted")
+	case "active", "authorize", "captcha", "color", "deauthorize", "flair", "messages", "mute", "nuke", "overflow", "register", "remove", "resurrect", "shadowbanlist", "shadowban", "unmute", "unshadowban":
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " "+c.canonical+" accepted"); err != nil {
+			return model.FAILED, err
+		}
 	case "lock":
 		c.engine.Lock()
-		reply(&commandBase{engine: c.engine, message: c.message}, " room locked")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " room locked"); err != nil {
+			return model.FAILED, err
+		}
 	case "unbanall":
 		c.engine.UnbanAll()
-		reply(&commandBase{engine: c.engine, message: c.message}, " unbanned all users")
+		if err := replyContext(ctx, &commandBase{engine: c.engine, message: c.message}, " unbanned all users"); err != nil {
+			return model.FAILED, err
+		}
 	default:
 		return model.FAILED, fmt.Errorf("no Saturn implementation for %q", c.canonical)
 	}

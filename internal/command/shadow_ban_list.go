@@ -27,10 +27,14 @@ func (c *shadowBanListCommand) Execute(ctx context.Context) (model.Status, error
 		return model.FAILED, err
 	}
 	if len(records) == 0 {
-		reply(&c.commandBase, "No users has been banned.")
+		if err := replyContext(ctx, &c.commandBase, "No users has been banned."); err != nil {
+			return model.FAILED, err
+		}
 		return model.SUCCESSFUL, nil
 	}
-	reply(&c.commandBase, "Banned hashes, trips, names: \\n"+formatShadowBanRecords(records))
+	if err := replyContext(ctx, &c.commandBase, "Banned hashes, trips, names: \\n"+formatShadowBanRecords(records)); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

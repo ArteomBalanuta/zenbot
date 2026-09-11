@@ -37,7 +37,9 @@ func (c *usersCommand) Execute(ctx context.Context) (model.Status, error) {
 	} else {
 		return model.SUCCESSFUL, nil
 	}
-	reply(&c.commandBase, "Users: \\n"+formatRegisteredUsers(users))
+	if err := replyContext(ctx, &c.commandBase, "Users: \\n"+formatRegisteredUsers(users)); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -49,7 +51,9 @@ func (c *nicksCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) == 0 || strings.TrimSpace(a[0]) == "" {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"t2n QLnV66")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"t2n QLnV66"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
@@ -60,7 +64,9 @@ func (c *nicksCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, strings.Join(nicks, ","))
+	if err := replyContext(ctx, &c.commandBase, strings.Join(nicks, ",")); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

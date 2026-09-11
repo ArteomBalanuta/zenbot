@@ -46,5 +46,6 @@ func (e *EngineImpl) UnshadowBanTarget(ctx context.Context, target ModerationTar
 	if !ok {
 		return fmt.Errorf("authoritative shadow-ban reversal repository is unavailable")
 	}
-	return repo.RemoveShadowBanBySourceTarget(ctx, target.Name)
+	_, err := repo.RemoveShadowBanBySourceTarget(ctx, target.Name)
+	return err
 }

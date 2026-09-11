@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"zenbot/internal/common"
 
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
@@ -49,7 +50,11 @@ func (s *ShadowBanService) Persist(ctx context.Context, record repository.Shadow
 	if err != nil {
 		return err
 	}
-	return r.PersistShadowBanRecord(ctx, record)
+	err = r.PersistShadowBanRecord(ctx, record)
+	if err == nil {
+		common.RecordCommittedMutation(ctx)
+	}
+	return err
 }
 func (s *ShadowBanService) List(ctx context.Context) ([]repository.ShadowBanRecord, error) {
 	r, err := s.repository()
@@ -63,12 +68,20 @@ func (s *ShadowBanService) Remove(ctx context.Context, target string) error {
 	if err != nil {
 		return err
 	}
-	return r.RemoveShadowBanBySourceTarget(ctx, target)
+	changed, err := r.RemoveShadowBanBySourceTarget(ctx, target)
+	if err == nil && changed > 0 {
+		common.RecordCommittedMutation(ctx)
+	}
+	return err
 }
 func (s *ShadowBanService) RemoveAll(ctx context.Context) error {
 	r, err := s.repository()
 	if err != nil {
 		return err
 	}
-	return r.RemoveAllShadowBans(ctx)
+	changed, err := r.RemoveAllShadowBans(ctx)
+	if err == nil && changed > 0 {
+		common.RecordCommittedMutation(ctx)
+	}
+	return err
 }

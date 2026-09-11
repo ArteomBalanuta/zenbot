@@ -19,12 +19,16 @@ func (c *resurrectCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) != 3 {
-		reply(&c.commandBase, " "+c.engine.GetPrefix()+"move <nick> <from> <to>")
+		if err := replyContext(ctx, &c.commandBase, " "+c.engine.GetPrefix()+"move <nick> <from> <to>"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	nick, err := util.NormalizeNickTarget(&arguments[0])
 	if err != nil {
-		reply(&c.commandBase, " "+c.engine.GetPrefix()+"move <nick> <from> <to>")
+		if err := replyContext(ctx, &c.commandBase, " "+c.engine.GetPrefix()+"move <nick> <from> <to>"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	mover, ok := c.engine.(common.LiveRoomMover)

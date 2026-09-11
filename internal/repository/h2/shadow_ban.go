@@ -131,25 +131,31 @@ func (d *Database) ListShadowBans(ctx context.Context) ([]repository.ShadowBanRe
 // RemoveShadowBanBySourceTarget mirrors Saturn's local unshadowban persistence
 // semantics. The supplied target is bound exactly as name and trip, while the
 // hash predicate receives its standard UTF-8 base64 encoding.
-func (d *Database) RemoveShadowBanBySourceTarget(ctx context.Context, target string) error {
+func (d *Database) RemoveShadowBanBySourceTarget(ctx context.Context, target string) (int64, error) {
 	if d == nil || d.DB == nil {
-		return fmt.Errorf("shadow-ban database is unavailable")
+		return 0, fmt.Errorf("shadow-ban database is unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users WHERE name=$1 OR trip=$2 OR hash=$3`, target, target, base64.StdEncoding.EncodeToString([]byte(target)))
-	return err
+	result, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users WHERE name=$1 OR trip=$2 OR hash=$3`, target, target, base64.StdEncoding.EncodeToString([]byte(target)))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // RemoveAllShadowBans deletes every local shadow-ban identity record.
-func (d *Database) RemoveAllShadowBans(ctx context.Context) error {
+func (d *Database) RemoveAllShadowBans(ctx context.Context) (int64, error) {
 	if d == nil || d.DB == nil {
-		return fmt.Errorf("shadow-ban database is unavailable")
+		return 0, fmt.Errorf("shadow-ban database is unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users`)
-	return err
+	result, err := d.DB.ExecContext(ctx, `DELETE FROM banned_users`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

@@ -16,7 +16,9 @@ func (c *overflowCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	target, ok := firstModerationArgument(c.message)
 	if !ok {
-		reply(&c.commandBase, "target nick isn't set! Example: "+c.engine.GetPrefix()+"shoot @merc")
+		if err := replyContext(ctx, &c.commandBase, "target nick isn't set! Example: "+c.engine.GetPrefix()+"shoot @merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	normalized, err := util.NormalizeNickTarget(&target)

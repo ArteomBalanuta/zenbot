@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/util"
@@ -133,13 +134,25 @@ func (s *UserService) IsTripRegistered(ctx context.Context, trip string) (bool, 
 	return s.Identity.IsTripRegistered(ctx, trip)
 }
 func (s *UserService) Register(ctx context.Context, name, trip string, role model.Role) error {
-	return s.Identity.Register(ctx, name, trip, role)
+	err := s.Identity.Register(ctx, name, trip, role)
+	if err == nil {
+		common.RecordCommittedMutation(ctx)
+	}
+	return err
 }
 func (s *UserService) RegisterNameByTrip(ctx context.Context, name, trip string) error {
-	return s.Identity.RegisterNameByTrip(ctx, name, trip)
+	err := s.Identity.RegisterNameByTrip(ctx, name, trip)
+	if err == nil {
+		common.RecordCommittedMutation(ctx)
+	}
+	return err
 }
 func (s *UserService) RegisterTripByName(ctx context.Context, name, trip string) error {
-	return s.Identity.RegisterTripByName(ctx, name, trip)
+	err := s.Identity.RegisterTripByName(ctx, name, trip)
+	if err == nil {
+		common.RecordCommittedMutation(ctx)
+	}
+	return err
 }
 func (s *UserService) LastMessages(ctx context.Context, name, trip string, count int) ([]model.Message, error) {
 	return s.Identity.LastMessages(ctx, name, trip, count)
@@ -209,7 +222,11 @@ func (s *UserService) DeleteIdentity(ctx context.Context, nameOrTrip string) (re
 	if !ok {
 		return repository.DeleteResult{}, fmt.Errorf("authorized Group B delete unavailable")
 	}
-	return capability.DeleteIdentityAuthorized(ctx, nameOrTrip)
+	result, err := capability.DeleteIdentityAuthorized(ctx, nameOrTrip)
+	if err == nil && result.TripNamesRows+result.TripRows+result.NameRows > 0 {
+		common.RecordCommittedMutation(ctx)
+	}
+	return result, err
 }
 
 func (s *UserService) SaturnRegisteredUsers(ctx context.Context) ([]repository.SaturnRegisteredUser, error) {

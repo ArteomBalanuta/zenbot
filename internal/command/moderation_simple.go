@@ -32,7 +32,9 @@ func (c *moderationIdentityCommand) Execute(ctx context.Context) (model.Status, 
 		if c.deauthorize {
 			name = "deauth"
 		}
-		reply(&c.commandBase, " example: "+c.engine.GetPrefix()+name+" cmdTV+")
+		if err := replyContext(ctx, &c.commandBase, " example: "+c.engine.GetPrefix()+name+" cmdTV+"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(c.engine)
@@ -51,7 +53,9 @@ func (c *moderationIdentityCommand) Execute(ctx context.Context) (model.Status, 
 	if c.deauthorize {
 		verb = " deauthorized"
 	}
-	reply(&c.commandBase, verb+" trip: "+trip)
+	if err := replyContext(ctx, &c.commandBase, verb+" trip: "+trip); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -63,12 +67,16 @@ func (c *simpleBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	target, ok := firstModerationArgument(c.message)
 	if !ok {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"ban merc")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"ban merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	normalized, err := util.NormalizeNickTarget(&target)
 	if err != nil {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"ban merc")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"ban merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(c.engine)
@@ -78,7 +86,9 @@ func (c *simpleBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err = operations.BanNick(ctx, common.NickTarget(normalized)); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, normalized+" has been banned")
+	if err := replyContext(ctx, &c.commandBase, normalized+" has been banned"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -90,7 +100,9 @@ func (c *simpleUnbanCommand) Execute(ctx context.Context) (model.Status, error) 
 	}
 	hash, ok := firstModerationArgument(c.message)
 	if !ok || strings.TrimSpace(hash) == "" {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"unban HjkUEWNlIRH35Xk")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"unban HjkUEWNlIRH35Xk"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(c.engine)
@@ -100,7 +112,9 @@ func (c *simpleUnbanCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err = operations.UnbanHash(ctx, common.BanHash(hash)); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, hash+" has been unbanned")
+	if err := replyContext(ctx, &c.commandBase, hash+" has been unbanned"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -117,7 +131,9 @@ func (c *simpleUnbanAllCommand) Execute(ctx context.Context) (model.Status, erro
 	if err = operations.UnbanAllContext(ctx); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, "mercy.")
+	if err := replyContext(ctx, &c.commandBase, "mercy."); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -129,7 +145,9 @@ func (c *simpleLockCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	argument, ok := firstModerationArgument(c.message)
 	if !ok || (argument != "on" && argument != "off") {
-		reply(&c.commandBase, c.engine.GetPrefix()+"lock [on|off]")
+		if err := replyContext(ctx, &c.commandBase, c.engine.GetPrefix()+"lock [on|off]"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(c.engine)
@@ -139,12 +157,16 @@ func (c *simpleLockCommand) Execute(ctx context.Context) (model.Status, error) {
 	if argument == "on" {
 		err = operations.LockRoom(ctx)
 		if err == nil {
-			reply(&c.commandBase, " Room locked!")
+			if err := replyContext(ctx, &c.commandBase, " Room locked!"); err != nil {
+				return model.FAILED, err
+			}
 		}
 	} else {
 		err = operations.UnlockRoom(ctx)
 		if err == nil {
-			reply(&c.commandBase, " Room unlocked!")
+			if err := replyContext(ctx, &c.commandBase, " Room unlocked!"); err != nil {
+				return model.FAILED, err
+			}
 		}
 	}
 	if err != nil {

@@ -20,7 +20,9 @@ func (c *memoryCommand) Execute(ctx context.Context) (model.Status, error) {
 	runtime.GC()
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	reply(&c.commandBase, formatMemoryReport(stats))
+	if err := replyContext(ctx, &c.commandBase, formatMemoryReport(stats)); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

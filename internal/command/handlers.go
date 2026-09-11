@@ -106,8 +106,16 @@ func args(m *model.ChatMessage) []string {
 	}
 	return nil
 }
-func reply(c *commandBase, text string) {
-	_, _ = c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper")
+func reply(c *commandBase, text string) error {
+	_, err := c.engine.SendChatMessage(c.message.Name, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper")
+	return err
+}
+
+func replyContext(ctx context.Context, c *commandBase, text string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return reply(c, text)
 }
 func raw(c *commandBase, v any) { b, _ := json.Marshal(v); c.engine.SendRawMessage(string(b)) }
 
@@ -118,7 +126,9 @@ func (c *sayCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	message := commandBody(c.message)
-	c.engine.SendChatMessage("", message, false)
+	if _, err := c.engine.SendChatMessage("", message, false); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -131,7 +141,9 @@ func (c *afkCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	if c.message.Trip == "" {
-		reply(&c.commandBase, "Set your trip in order to use this command")
+		if err := replyContext(ctx, &c.commandBase, "Set your trip in order to use this command"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	reason := commandBody(c.message)
@@ -140,7 +152,9 @@ func (c *afkCommand) Execute(ctx context.Context) (model.Status, error) {
 			c.engine.AddAfkUser(u, reason)
 		}
 	}
-	reply(&c.commandBase, " is afk")
+	if err := replyContext(ctx, &c.commandBase, " is afk"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -154,7 +168,9 @@ func (c *infoUserCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) == 0 {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"info merc")
+		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"info merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	target := strings.TrimSpace(a[0])
@@ -162,7 +178,9 @@ func (c *infoUserCommand) Execute(ctx context.Context) (model.Status, error) {
 		target = strings.TrimSpace(strings.TrimPrefix(target, "@"))
 	}
 	if target == "" {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"info merc")
+		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"info merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	var user *model.User
@@ -173,10 +191,14 @@ func (c *infoUserCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 	}
 	if user == nil {
-		reply(&c.commandBase, "\\n target with nick:  "+target+" not found!")
+		if err := replyContext(ctx, &c.commandBase, "\\n target with nick:  "+target+" not found!"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
-	reply(&c.commandBase, "\n User trip: "+user.Trip+"\n User hash: "+user.Hash)
+	if err := replyContext(ctx, &c.commandBase, "\n User trip: "+user.Trip+"\n User hash: "+user.Hash); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -187,8 +209,12 @@ func (c *listCommand) Execute(ctx context.Context) (model.Status, error) {
 	a := args(c.message)
 	if len(a) == 0 {
 		out := formatSaturnUsers(*c.engine.GetActiveUsers())
-		reply(&c.commandBase, out)
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"list programming")
+		if err := replyContext(ctx, &c.commandBase, out); err != nil {
+			return model.FAILED, err
+		}
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"list programming"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	channel := strings.TrimSpace(a[0])
@@ -215,7 +241,9 @@ func (c *listCommand) Execute(ctx context.Context) (model.Status, error) {
 		}
 		return model.SUCCESSFUL, nil
 	}
-	reply(&c.commandBase, formatSaturnUsers(*c.engine.GetActiveUsers()))
+	if err := replyContext(ctx, &c.commandBase, formatSaturnUsers(*c.engine.GetActiveUsers())); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -246,7 +274,9 @@ func (c *banCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, nil
 	}
 	c.engine.Ban(a[0])
-	reply(&c.commandBase, a[0]+" has been banned")
+	if err := replyContext(ctx, &c.commandBase, a[0]+" has been banned"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -316,11 +346,15 @@ func (c *unbanCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) == 0 || strings.TrimSpace(a[0]) == "" {
-		reply(&c.commandBase, " user not found")
+		if err := replyContext(ctx, &c.commandBase, " user not found"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	c.engine.Unban(a[0])
-	reply(&c.commandBase, a[0]+" has been unbanned")
+	if err := replyContext(ctx, &c.commandBase, a[0]+" has been unbanned"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -331,7 +365,9 @@ func (c *unbanAllCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	c.engine.UnbanAll()
-	reply(&c.commandBase, "mercy.")
+	if err := replyContext(ctx, &c.commandBase, "mercy."); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -343,15 +379,21 @@ func (c *lockCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) == 0 || (a[0] != "on" && a[0] != "off") {
-		reply(&c.commandBase, c.engine.GetPrefix()+"lock [on|off]")
+		if err := replyContext(ctx, &c.commandBase, c.engine.GetPrefix()+"lock [on|off]"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	if a[0] == "on" {
 		c.engine.Lock()
-		reply(&c.commandBase, " Room locked!")
+		if err := replyContext(ctx, &c.commandBase, " Room locked!"); err != nil {
+			return model.FAILED, err
+		}
 	} else {
 		c.engine.Unlock()
-		reply(&c.commandBase, " Room unlocked!")
+		if err := replyContext(ctx, &c.commandBase, " Room unlocked!"); err != nil {
+			return model.FAILED, err
+		}
 	}
 	return model.SUCCESSFUL, nil
 }
@@ -363,7 +405,9 @@ func (c *unlockCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	c.engine.Unlock()
-	reply(&c.commandBase, " room unlocked")
+	if err := replyContext(ctx, &c.commandBase, " room unlocked"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

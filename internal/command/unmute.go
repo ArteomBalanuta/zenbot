@@ -15,7 +15,9 @@ func (c *unmuteCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"unmute jJ4M4fsECSazzlj")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"unmute jJ4M4fsECSazzlj"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(c.engine)
@@ -26,6 +28,8 @@ func (c *unmuteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := operations.UnmuteHash(ctx, common.BanHash(hash)); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, hash+" has been unmuted")
+	if err := replyContext(ctx, &c.commandBase, hash+" has been unmuted"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

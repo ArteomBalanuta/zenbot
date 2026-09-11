@@ -94,10 +94,10 @@ func (r *shadowBanJoinRepository) PersistShadowBanRecord(context.Context, reposi
 func (r *shadowBanJoinRepository) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
 	return append([]repository.ShadowBanRecord(nil), r.records...), nil
 }
-func (r *shadowBanJoinRepository) RemoveShadowBanBySourceTarget(context.Context, string) error {
-	return nil
+func (r *shadowBanJoinRepository) RemoveShadowBanBySourceTarget(context.Context, string) (int64, error) {
+	return 0, nil
 }
-func (r *shadowBanJoinRepository) RemoveAllShadowBans(context.Context) error { return nil }
+func (r *shadowBanJoinRepository) RemoveAllShadowBans(context.Context) (int64, error) { return 0, nil }
 
 func TestUserJoinedListenerKicksMatchingShadowBannedIdentity(t *testing.T) {
 	e := &core.EngineImpl{

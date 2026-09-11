@@ -264,10 +264,10 @@ func (f *shadowManagementFake) PersistShadowBanRecord(_ context.Context, record 
 func (f *shadowManagementFake) ListShadowBans(context.Context) ([]repository.ShadowBanRecord, error) {
 	return f.rows, nil
 }
-func (f *shadowManagementFake) RemoveShadowBanBySourceTarget(context.Context, string) error {
-	return nil
+func (f *shadowManagementFake) RemoveShadowBanBySourceTarget(context.Context, string) (int64, error) {
+	return 0, nil
 }
-func (f *shadowManagementFake) RemoveAllShadowBans(context.Context) error { return nil }
+func (f *shadowManagementFake) RemoveAllShadowBans(context.Context) (int64, error) { return 0, nil }
 
 var _ repository.ShadowBanCommandRepository = (*shadowManagementFake)(nil)
 

@@ -49,14 +49,14 @@ type ShadowBanRecord struct {
 type ShadowBanCommandRepository interface {
 	PersistShadowBanRecord(context.Context, ShadowBanRecord) error
 	ListShadowBans(context.Context) ([]ShadowBanRecord, error)
-	RemoveShadowBanBySourceTarget(context.Context, string) error
-	RemoveAllShadowBans(context.Context) error
+	RemoveShadowBanBySourceTarget(context.Context, string) (int64, error)
+	RemoveAllShadowBans(context.Context) (int64, error)
 }
 
 // ShadowBanReversalRepository removes source-compatible shadow-ban identity
 // records for a captured authoritative target.
 type ShadowBanReversalRepository interface {
-	RemoveShadowBanBySourceTarget(context.Context, string) error
+	RemoveShadowBanBySourceTarget(context.Context, string) (int64, error)
 }
 
 type Repository interface {

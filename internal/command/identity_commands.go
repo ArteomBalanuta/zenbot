@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,7 +30,9 @@ func (c *registerCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) < 2 {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"reg merc g0KY09")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"reg merc g0KY09"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	s := userService(c.engine)
@@ -60,15 +63,19 @@ func (c *registerCommand) Execute(ctx context.Context) (model.Status, error) {
 		err = s.RegisterTripByName(ctx, name, trip)
 		acknowledgment = fmt.Sprintf("New trip: %s, assigned to user named: %s", trip, name)
 	default:
-		reply(&c.commandBase, fmt.Sprintf("Name %s and trip %s are already registered.", name, trip))
+		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Name %s and trip %s are already registered.", name, trip)); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	if err != nil {
-		reply(&c.commandBase, "Something went wrong")
+		if sendErr := replyContext(ctx, &c.commandBase, "Something went wrong"); sendErr != nil {
+			return model.FAILED, errors.Join(err, sendErr)
+		}
 		return model.FAILED, err
 	}
 	// Registration is committed here, before attempting its acknowledgment.
-	if _, err := c.engine.SendChatMessage(c.message.Name, acknowledgment, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, acknowledgment); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -82,7 +89,9 @@ func (c *authorizeCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) == 0 {
-		reply(&c.commandBase, " example: "+c.engine.GetPrefix()+"auth cmdTV+")
+		if err := replyContext(ctx, &c.commandBase, " example: "+c.engine.GetPrefix()+"auth cmdTV+"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
@@ -93,7 +102,7 @@ func (c *authorizeCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := b.Security.AuthorizeTripContext(ctx, trip); err != nil {
 		return model.FAILED, err
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, " authorized trip: "+trip, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, " authorized trip: "+trip); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -107,7 +116,9 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	a := args(c.message)
 	if len(a) != 2 || strings.TrimSpace(c.message.Trip) == "" {
-		reply(&c.commandBase, "\\n Set your trip first. Example: "+c.engine.GetPrefix()+"grant 8Wotmg ADMIN")
+		if err := replyContext(ctx, &c.commandBase, "\\n Set your trip first. Example: "+c.engine.GetPrefix()+"grant 8Wotmg ADMIN"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	roleName := a[1]
@@ -137,11 +148,12 @@ func (c *accessCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	// The entire role batch is committed here, before its acknowledgment.
+	common.RecordCommittedMutation(ctx)
 	acknowledgment := "\\n Granted new Role: " + roleName + " to trip: " + target
 	if strings.Contains(target, ",") {
 		acknowledgment = fmt.Sprintf("\\n Granted new Roles: %s to trips: %v", roleName, targets)
 	}
-	if _, err := c.engine.SendChatMessage(c.message.Name, acknowledgment, c.message.Whisper || c.message.IsWhisper || c.message.Type == "whisper"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, acknowledgment); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

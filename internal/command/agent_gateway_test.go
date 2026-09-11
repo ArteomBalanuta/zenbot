@@ -347,7 +347,7 @@ func commandExecutionData(t *testing.T, execution CommandExecution) json.RawMess
 	return append(json.RawMessage(nil), data...)
 }
 
-func TestAgentCommandGatewayDoesNotVerifyLegacySuccessWithoutDelivery(t *testing.T) {
+func TestAgentCommandGatewayReportsFailedSayDeliveryAsUnknown(t *testing.T) {
 	e := &gatewayEngine{
 		commandEngineStub: commandEngineStub{users: map[string]*model.User{"caller": {Name: "caller"}}},
 		authorized:        true,
@@ -360,7 +360,7 @@ func TestAgentCommandGatewayDoesNotVerifyLegacySuccessWithoutDelivery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != commandgateway.OutcomeSucceeded || result.EffectsCommitted || result.Action != nil {
+	if result.Status != commandgateway.OutcomeUnknown || result.EffectsCommitted || result.Action != nil {
 		t.Fatalf("terminal command outcome=%#v", result)
 	}
 	if result.Delivery != nil || len(result.Messages) != 0 {

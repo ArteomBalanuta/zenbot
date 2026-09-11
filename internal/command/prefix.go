@@ -17,7 +17,9 @@ func (c *prefixCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 || strings.TrimSpace(arguments[0]) == "" {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"prefix $")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"prefix $"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	controller, ok := c.engine.(common.PrefixController)
@@ -29,6 +31,8 @@ func (c *prefixCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, "prefix changed from "+previous+" to "+prefix)
+	if err := replyContext(ctx, &c.commandBase, "prefix changed from "+previous+" to "+prefix); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

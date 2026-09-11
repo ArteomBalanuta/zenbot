@@ -19,7 +19,9 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 	receiver, body := splitCommandToken(commandBody(c.message))
 	body = strings.TrimSpace(body)
 	if receiver == "" {
-		reply(&c.commandBase, "Example: -mail merc message")
+		if err := replyContext(ctx, &c.commandBase, "Example: -mail merc message"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
@@ -29,19 +31,25 @@ func (c *mailCommand) Execute(ctx context.Context) (model.Status, error) {
 	receivers, e := b.Mail.QueueResolved(ctx, body, c.message.Name+"#"+c.message.Trip, receiver, true)
 	if e != nil {
 		if errors.Is(e, service.ErrMailReceiverBlank) {
-			reply(&c.commandBase, "Receiver cannot be blank.")
+			if err := replyContext(ctx, &c.commandBase, "Receiver cannot be blank."); err != nil {
+				return model.FAILED, errors.Join(e, err)
+			}
 		} else if errors.Is(e, service.ErrMailRecipientUnregistered) {
 			users, listErr := b.Mail.SaturnRegisteredUsers(ctx)
 			if listErr != nil {
-				return model.FAILED, listErr
+				return model.FAILED, errors.Join(e, listErr)
 			}
-			reply(&c.commandBase, "User you specified is not registered. Please use a name from provided list to send a message to respective trip. \\\\n"+formatSaturnRegisteredUsers(users))
+			if err := replyContext(ctx, &c.commandBase, "User you specified is not registered. Please use a name from provided list to send a message to respective trip. \\\\n"+formatSaturnRegisteredUsers(users)); err != nil {
+				return model.FAILED, errors.Join(e, err)
+			}
 		} else {
 			return model.FAILED, e
 		}
 		return model.FAILED, nil
 	}
-	reply(&c.commandBase, "trips: "+receivers+" will receive your message as soon they chat")
+	if err := replyContext(ctx, &c.commandBase, "trips: "+receivers+" will receive your message as soon they chat"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -61,11 +69,15 @@ func (c *noteCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	text := commandBody(c.message)
 	if text == "" {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"note Jedi am I?!")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"note Jedi am I?!"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	if strings.TrimSpace(c.message.Trip) == "" {
-		reply(&c.commandBase, "Set your trip before saving a note.")
+		if err := replyContext(ctx, &c.commandBase, "Set your trip before saving a note."); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
@@ -75,7 +87,9 @@ func (c *noteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if e := b.Notes.Save(ctx, c.message.Trip, text); e != nil {
 		return model.FAILED, e
 	}
-	reply(&c.commandBase, "note successfully saved!")
+	if err := replyContext(ctx, &c.commandBase, "note successfully saved!"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 
@@ -86,7 +100,9 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, e
 	}
 	if c.message.Trip == "" {
-		reply(&c.commandBase, "\\n Set your trip first. Example: !notes")
+		if err := replyContext(ctx, &c.commandBase, "\\n Set your trip first. Example: !notes"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	b := bundle(c.engine)
@@ -98,7 +114,9 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 		if e := b.Notes.Clear(ctx, c.message.Trip); e != nil {
 			return model.FAILED, e
 		}
-		reply(&c.commandBase, "'s notes has been deleted")
+		if err := replyContext(ctx, &c.commandBase, "'s notes has been deleted"); err != nil {
+			return model.FAILED, err
+		}
 		return model.SUCCESSFUL, nil
 	}
 	if len(a) > 0 {
@@ -107,6 +125,9 @@ func (c *notesCommand) Execute(ctx context.Context) (model.Status, error) {
 	ns, e := b.Notes.List(ctx, c.message.Trip)
 	if e != nil {
 		return model.FAILED, e
+	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
 	}
 	if _, err := c.engine.SendChatMessage(c.message.Name, "'s notes: \\n ```Text \\n"+fmt.Sprint(ns)+"\\n```", true); err != nil {
 		return model.FAILED, err

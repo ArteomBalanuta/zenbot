@@ -16,7 +16,9 @@ func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc")
+		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	target := strings.TrimSpace(arguments[0])
@@ -24,7 +26,9 @@ func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 		target = strings.TrimSpace(strings.TrimPrefix(target, "@"))
 	}
 	if target == "" {
-		reply(&c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc")
+		if err := replyContext(ctx, &c.commandBase, "\\n Example: "+c.engine.GetPrefix()+"lastseen merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	services := bundle(c.engine)
@@ -35,6 +39,8 @@ func (c *lastonlineCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, text)
+	if err := replyContext(ctx, &c.commandBase, text); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }

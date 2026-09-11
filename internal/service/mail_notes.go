@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 )
@@ -72,6 +73,7 @@ func (s *MailService) QueueResolved(ctx context.Context, message, owner, receive
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO mail(owner,receiver,message,status,created_on,is_whisper) VALUES($1,$2,$3,'PENDING',$4,$5)`, owner, receivers, message, time.Now().UnixMilli(), strconv.FormatBool(whisper)); err != nil {
 		return "", err
 	}
+	common.RecordCommittedMutation(ctx)
 	return receivers, nil
 }
 func (s *MailService) RegisteredUsers(ctx context.Context) string {
@@ -136,6 +138,9 @@ type NoteService struct {
 
 func (s *NoteService) Save(ctx context.Context, trip, note string) error {
 	_, e := s.DB.ExecContext(ctx, `INSERT INTO notes(trip,note,created_on) VALUES($1,$2,$3)`, trip, note, time.Now().UnixMilli())
+	if e == nil {
+		common.RecordCommittedMutation(ctx)
+	}
 	return e
 }
 func (s *NoteService) List(ctx context.Context, trip string) ([]string, error) {
@@ -156,6 +161,11 @@ func (s *NoteService) List(ctx context.Context, trip string) ([]string, error) {
 	return o, rows.Err()
 }
 func (s *NoteService) Clear(ctx context.Context, trip string) error {
-	_, e := s.DB.ExecContext(ctx, `DELETE FROM notes WHERE trip=$1`, trip)
+	result, e := s.DB.ExecContext(ctx, `DELETE FROM notes WHERE trip=$1`, trip)
+	if e == nil {
+		if rows, err := result.RowsAffected(); err == nil && rows > 0 {
+			common.RecordCommittedMutation(ctx)
+		}
+	}
 	return e
 }

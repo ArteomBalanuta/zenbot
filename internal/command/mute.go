@@ -48,17 +48,23 @@ func (c *muteCommand) Execute(ctx context.Context) (model.Status, error) {
 	}
 	arguments := args(c.message)
 	if len(arguments) == 0 {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"mute merc")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"mute merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	target, err := activeModerationTarget(c.engine, arguments[0])
 	if err != nil {
-		reply(&c.commandBase, "Example: "+c.engine.GetPrefix()+"mute merc")
+		if err := replyContext(ctx, &c.commandBase, "Example: "+c.engine.GetPrefix()+"mute merc"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	nick, _ := util.NormalizeNickTarget(&arguments[0])
 	if target == nil {
-		reply(&c.commandBase, nick+" is not in the room")
+		if err := replyContext(ctx, &c.commandBase, nick+" is not in the room"); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(c.engine)
@@ -68,7 +74,9 @@ func (c *muteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := operations.MuteNick(ctx, common.NickTarget(target.Name)); err != nil {
 		return model.FAILED, err
 	}
-	reply(&c.commandBase, target.Name+" "+target.Hash+" has been muted")
+	if err := replyContext(ctx, &c.commandBase, target.Name+" "+target.Hash+" has been muted"); err != nil {
+		return model.FAILED, err
+	}
 	return model.SUCCESSFUL, nil
 }
 

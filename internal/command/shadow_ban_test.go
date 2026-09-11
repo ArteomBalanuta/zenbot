@@ -36,19 +36,19 @@ func (s *shadowBanRepositoryStub) ListShadowBans(context.Context) ([]repository.
 	}
 	return append([]repository.ShadowBanRecord(nil), s.records...), nil
 }
-func (s *shadowBanRepositoryStub) RemoveShadowBanBySourceTarget(_ context.Context, target string) error {
+func (s *shadowBanRepositoryStub) RemoveShadowBanBySourceTarget(_ context.Context, target string) (int64, error) {
 	if s.err != nil {
-		return s.err
+		return 0, s.err
 	}
 	s.removedTarget = target
-	return nil
+	return 0, nil
 }
-func (s *shadowBanRepositoryStub) RemoveAllShadowBans(context.Context) error {
+func (s *shadowBanRepositoryStub) RemoveAllShadowBans(context.Context) (int64, error) {
 	if s.err != nil {
-		return s.err
+		return 0, s.err
 	}
 	s.removeAlls++
-	return nil
+	return 0, nil
 }
 
 type shadowBanCommandEngine struct {

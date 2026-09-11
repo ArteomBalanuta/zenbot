@@ -77,6 +77,7 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		text += " " + arguments
 	}
 	message := &model.ChatMessage{Name: caller.Nick(), Trip: trip, Hash: hash, Channel: caller.Room(), Text: text, Whisper: caller.Whisper(), IsWhisper: caller.Whisper()}
+	ctx, mutations := common.WithMutationRecorder(ctx)
 	capturing := &agentCaptureEngine{Engine: g.engine, invocationWhisper: caller.Whisper()}
 	// Effects may already exist when a later command operation or audit fails.
 	// Preserve receipts on every return, including panics after delivery.
@@ -89,9 +90,10 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		if result.Status == commandgateway.OutcomeSucceeded {
 			result.Data = append(result.Data[:0:0], capturing.data...)
 		}
-		if capturing.actionCount > 0 {
+		count := capturing.actionCount + mutations.Count()
+		if count > 0 {
 			result.EffectsCommitted = true
-			result.Action = &commandgateway.ActionReceipt{Count: capturing.actionCount}
+			result.Action = &commandgateway.ActionReceipt{Count: count}
 		}
 		if capturing.deliveryCount > 0 {
 			result.Delivery = &commandgateway.DeliveryReceipt{Count: capturing.deliveryCount}
@@ -102,6 +104,9 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 	if len(capturing.snapshotCompletions) > 0 {
 		_ = capturing.awaitSnapshotCompletions(ctx)
 		return CommandExecution{Status: capturing.snapshotStatus}, nil
+	}
+	if ctx.Err() != nil {
+		return CommandExecution{Status: commandgateway.OutcomeUnknown}, nil
 	}
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

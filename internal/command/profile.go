@@ -44,17 +44,23 @@ func executeAppearance(ctx context.Context, base *commandBase, kind, example str
 	}
 	arguments := args(base.message)
 	if len(arguments) < 2 {
-		reply(base, "\\n Example: "+base.engine.GetPrefix()+kind+" merc "+example)
+		if err := replyContext(ctx, base, "\\n Example: "+base.engine.GetPrefix()+kind+" merc "+example); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	target, err := activeModerationTarget(base.engine, arguments[0])
 	if err != nil {
-		reply(base, base.engine.GetPrefix()+kind+" merc "+example)
+		if err := replyContext(ctx, base, base.engine.GetPrefix()+kind+" merc "+example); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	nick, _ := util.NormalizeNickTarget(&arguments[0])
 	if target == nil {
-		reply(base, "User "+nick+" is not in the room, "+kind+" was not applied.")
+		if err := replyContext(ctx, base, "User "+nick+" is not in the room, "+kind+" was not applied."); err != nil {
+			return model.FAILED, err
+		}
 		return model.FAILED, nil
 	}
 	operations, err := moderationOperations(base.engine)
@@ -65,7 +71,9 @@ func executeAppearance(ctx context.Context, base *commandBase, kind, example str
 		return model.FAILED, err
 	}
 	if kind == "flair" {
-		reply(base, "\\n Flair set successfully!")
+		if err := replyContext(ctx, base, "\\n Flair set successfully!"); err != nil {
+			return model.FAILED, err
+		}
 	}
 	return model.SUCCESSFUL, nil
 }

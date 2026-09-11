@@ -44,7 +44,7 @@ func TestRemoveShadowBanBySourceTargetMatchesNameTripAndBase64Name(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
+	if _, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
 		t.Fatal(err)
 	}
 	var remaining int
@@ -54,7 +54,7 @@ func TestRemoveShadowBanBySourceTargetMatchesNameTripAndBase64Name(t *testing.T)
 	if remaining != 1 {
 		t.Fatalf("remaining rows = %d, want 1", remaining)
 	}
-	if err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
+	if _, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
 		t.Fatalf("idempotent zero-row deletion failed: %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestRemoveShadowBanBySourceTargetTreatsSQLLookingNameAsValue(t *testing.T) 
 	if _, err := db.DB.ExecContext(ctx, `INSERT INTO banned_users(trip,name,hash,reason,created_on) VALUES($1,$2,$3,$4,$5)`, "other-trip", "unmatched", "unmatched", "seed", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
+	if _, err := db.RemoveShadowBanBySourceTarget(ctx, name); err != nil {
 		t.Fatal(err)
 	}
 	var remaining int
@@ -94,7 +94,7 @@ func TestShadowBanCommandRecordsRoundTripAndDeleteAllInRealH2(t *testing.T) {
 	if len(records) != 2 || records[0] != (repository.ShadowBanRecord{Trip: "trip", Name: "nick", Hash: "raw-hash", Reason: "reason"}) || records[1] != (repository.ShadowBanRecord{Name: "offline"}) {
 		t.Fatalf("records=%+v", records)
 	}
-	if err := db.RemoveAllShadowBans(ctx); err != nil {
+	if _, err := db.RemoveAllShadowBans(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if records, err = db.ListShadowBans(ctx); err != nil || len(records) != 0 {
