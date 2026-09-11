@@ -48,6 +48,19 @@ func TestRunnerLogsLoadedContextAndFinalizedResponse(t *testing.T) {
 	}
 }
 
+func TestOutputFinalizerPreservesStructuredMarkerValuesAndRejectsTruncation(t *testing.T) {
+	f := OutputFinalizer{NoReplyMarker: "[[SATURN_NO_REPLY]]", MaxOutputChars: 8000}
+	inv := runtime.NewInvocation("id", runtime.NewContext("r", "n", "", "", false, nil), "p", runtime.MENTION, "", true)
+	raw := "{\"text\":\"[[SATURN_NO_REPLY]]\"}"
+	if got, reply, err := f.Finalize(inv, raw); err != nil || !reply || got != raw {
+		t.Fatalf("structured value changed: %q %v", got, err)
+	}
+	f.MaxOutputChars = 5
+	if _, reply, err := f.Finalize(inv, raw); err == nil || reply {
+		t.Fatal("truncated structured output must not be delivered")
+	}
+}
+
 func TestOutputFinalizerAppliesMarkerSemanticsAndSanitization(t *testing.T) {
 	f := OutputFinalizer{NoReplyMarker: "[[SATURN_NO_REPLY]]", MaxOutputChars: 8000}
 	required := runtime.NewInvocation("id", runtime.NewContext("r", "n", "", "", false, nil), "p", runtime.MENTION, "", true)

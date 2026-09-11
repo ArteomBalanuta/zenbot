@@ -195,6 +195,13 @@ The final answer is LLM-authored, including the tool-free terminal synthesis whe
 
 If a later provider call, context projection, or finalization fails after tools ran, the partial completion retains receipts and valid evidence in an `IncompleteTurnError`. The runner attempts a bounded persistence of an interrupted-turn record and eligible reads. The interruption record is untrusted metadata, with call identity/status/effect counts rather than raw action bodies. Cancellation permits a separate short persistence attempt. This is a recovery record, not an automatic resume mechanism.
 
+Output cleanup preserves valid JSON and answers containing code fences, including
+literal marker strings and code contents. Protocol/evidence rejection checks
+still apply. Structured output that exceeds the configured character limit is
+rejected rather than sliced into invalid data; ordinary prose retains the
+existing bounded-output behavior. This guard formats output, not task intent or
+completion decisions.
+
 [`FailureReply`](../internal/agent/live/failure_reply.go) can report that the answer is incomplete and distinguish success, not-started/failure, partial, and unknown outcomes using receipts. It excludes raw arguments/results and does not suggest replaying the task. Cancellation follows the no-send path. See [operations](operations.md) for diagnosis and logs.
 
 ## Extending and verifying the agent

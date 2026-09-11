@@ -61,7 +61,11 @@ func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string,
 	if turn.ContainsToolProtocolArtifact(content) {
 		return "", false, fmt.Errorf("agent response exposed tool protocol markup")
 	}
-	content = trimASCIIControlWhitespace(strings.ReplaceAll(content, f.NoReplyMarker, ""))
+	structured := structuredOutput(content)
+	if !structured {
+		content = strings.ReplaceAll(content, f.NoReplyMarker, "")
+	}
+	content = trimASCIIControlWhitespace(content)
 	if content == "" {
 		return "", false, fmt.Errorf("agent returned an empty response")
 	}
@@ -71,6 +75,9 @@ func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string,
 	}
 	runes := []rune(content)
 	if len(runes) > maxOutputChars {
+		if structured {
+			return "", false, fmt.Errorf("structured response exceeds output limit")
+		}
 		content = string(runes[:maxOutputChars])
 	}
 	return content, true, nil

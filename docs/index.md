@@ -10,6 +10,7 @@ the code and tests, not by historical migration or implementation plans.
 | [Commands](commands.md) | Syntax, aliases, roles, and action semantics |
 | [Architecture](architecture.md) | Components, ownership, data flow, persistence boundaries |
 | [Agent](agent.md) | Model loop, tools, context, permissions, recovery, extension points |
+| [Agent capability testing](agent-testing.md) | Python suite, real-model evaluation, read-only live chat checks |
 | [Operations](operations.md) | Lifecycle, SQLite backups and upgrades, profiling, troubleshooting |
 | [Development](development.md) | Building, tests, resources, source layout, provider evaluation |
 | [Contributing](../CONTRIBUTING.md) | Change and review expectations |

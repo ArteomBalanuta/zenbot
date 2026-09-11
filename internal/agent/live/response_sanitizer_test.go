@@ -2,6 +2,19 @@ package live
 
 import "testing"
 
+func TestResponseSanitizerPreservesStructuredContent(t *testing.T) {
+	for _, raw := range []string{
+		"```json\n{\"text\":\"[sips tea]\"}\n```",
+		"{\"text\":\"[sips tea]\"}",
+		"Example:\n```text\n1. literal\nThe archives reveal data\n```",
+		"~~~text\n* literal\n~~~",
+	} {
+		if got := (responseSanitizer{}).sanitize(raw); got != raw {
+			t.Errorf("structured content changed: got %q, want %q", got, raw)
+		}
+	}
+}
+
 func TestResponseSanitizerRemovesLegacyPersonaAndFormatsLists(t *testing.T) {
 	sanitizer := responseSanitizer{}
 	got := sanitizer.sanitize("[sips tea]\nAh, mer.\n* weather was sunny\nCarpe diem, mer.")

@@ -211,23 +211,29 @@ func (p *providerEvalTransport) RoundTrip(r *http.Request) (*http.Response, erro
 }
 
 type providerEvalCall struct {
+	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+type providerEvalToolResult struct {
+	CallID  string          `json:"call_id"`
+	Content json.RawMessage `json:"content"`
+}
+
 type providerEvalRound struct {
-	ToolsOffered   int                `json:"tools_offered"`
-	ToolBytes      int                `json:"tool_schema_bytes"`
-	ToolChoice     llm.ToolChoice     `json:"tool_choice"`
-	Model          string             `json:"model,omitempty"`
-	Finish         string             `json:"finish"`
-	Calls          []providerEvalCall `json:"calls,omitempty"`
-	Answer         string             `json:"answer,omitempty"`
-	Usage          map[string]int     `json:"usage,omitempty"`
-	Error          string             `json:"error,omitempty"`
-	RequestPresent bool               `json:"original_request_present"`
-	ToolResults    []json.RawMessage  `json:"tool_results,omitempty"`
-	ReasoningChars any                `json:"reasoning_chars,omitempty"`
+	ToolsOffered   int                      `json:"tools_offered"`
+	ToolBytes      int                      `json:"tool_schema_bytes"`
+	ToolChoice     llm.ToolChoice           `json:"tool_choice"`
+	Model          string                   `json:"model,omitempty"`
+	Finish         string                   `json:"finish"`
+	Calls          []providerEvalCall       `json:"calls,omitempty"`
+	Answer         string                   `json:"answer,omitempty"`
+	Usage          map[string]int           `json:"usage,omitempty"`
+	Error          string                   `json:"error,omitempty"`
+	RequestPresent bool                     `json:"original_request_present"`
+	ToolResults    []providerEvalToolResult `json:"tool_results,omitempty"`
+	ReasoningChars any                      `json:"reasoning_chars,omitempty"`
 }
 
 type providerEvalClient struct {
@@ -251,7 +257,7 @@ func (c *providerEvalClient) Complete(ctx context.Context, request llm.LlmReques
 			if !json.Valid(raw) {
 				raw, _ = json.Marshal(message.Content())
 			}
-			round.ToolResults = append(round.ToolResults, raw)
+			round.ToolResults = append(round.ToolResults, providerEvalToolResult{CallID: message.ToolCallID(), Content: raw})
 		}
 	}
 	for _, call := range response.ToolCalls() {
@@ -259,7 +265,7 @@ func (c *providerEvalClient) Complete(ctx context.Context, request llm.LlmReques
 		if !json.Valid(raw) {
 			raw, _ = json.Marshal(call.RawArguments())
 		}
-		round.Calls = append(round.Calls, providerEvalCall{Name: call.Name(), Arguments: raw})
+		round.Calls = append(round.Calls, providerEvalCall{ID: call.ID(), Name: call.Name(), Arguments: raw})
 	}
 	if err != nil {
 		round.Error = providerEvalError(err)

@@ -26,5 +26,11 @@ jobs:
       - run: make check
       - run: make compile
       - run: go test -race ./...
+      - name: Install agent capability test dependencies
+        run: |
+          python3 -m venv target/agent-tests-venv
+          target/agent-tests-venv/bin/python -m pip install -r tests/agent_capabilities/requirements.txt
+      - name: Test agent capability harness offline
+        run: target/agent-tests-venv/bin/python -m pytest tests/agent_capabilities -m 'not provider and not live' --junitxml target/agent-capabilities.xml
       - name: Build runtime image without starting a bot
         run: docker build -t zenbot:ci .

@@ -1,6 +1,7 @@
 package live
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -15,9 +16,18 @@ var (
 
 type responseSanitizer struct{}
 
+// Structured examples are data, not persona prose. Conservatively preserve
+// the whole answer when fences occur, including incomplete code examples.
+func structuredOutput(raw string) bool {
+	return json.Valid([]byte(strings.TrimSpace(raw))) || strings.Contains(raw, "```") || strings.Contains(raw, "~~~")
+}
+
 func (responseSanitizer) sanitize(raw string) string {
 	if stripJavaWhitespace(raw) == "" {
 		return ""
+	}
+	if structuredOutput(raw) {
+		return raw
 	}
 	content := legacySipTea.ReplaceAllString(raw, "")
 	content = initialMarkup.ReplaceAllString(content, "")

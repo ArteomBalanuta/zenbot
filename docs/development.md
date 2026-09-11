@@ -33,8 +33,8 @@ the image without starting a bot. Neither a successful compile nor a Docker
 image build proves successful operation against a real room/provider.
 
 The [CI workflow](../.github/workflows/ci.yml) provisions Go,
-then runs checks, compilation, full race tests, and a
-Docker build. Actions are pinned to commit IDs. It has read-only repository
+then runs checks, compilation, full race tests, the Python offline capability
+suite, and a Docker build. Actions are pinned to commit IDs. It has read-only repository
 permissions and does not start a bot or enable the live-provider evaluation.
 
 For iteration, run the packages and tests relevant to your change:
@@ -90,6 +90,10 @@ verified effects, not inferred intention. Never retry an uncertain state-changin
 operation merely because the transport returned an error.
 
 ## Prompt and provider changes
+
+For multi-tool capability testing from Python, see
+[agent capability evaluation](agent-testing.md). It separates offline harness
+checks, real-model fixture evaluations, and opt-in read-only live chat tests.
 
 Prompt files are loaded from `resources/agent/`, not embedded. Keep these files
 available from the process working directory when testing trimmed-path binaries.

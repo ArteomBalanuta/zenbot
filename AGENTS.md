@@ -87,6 +87,13 @@ The `ZENBOT_PROVIDER_EVAL=1` evaluation is explicitly opt-in, contacts a configu
 provider, and can incur costs. Use it only when the task authorizes that activity;
 see [development](docs/development.md). Never set that flag in ordinary CI.
 
+`tests/agent_capabilities/` is the Python capability suite. It drives the actual
+Go loop through a test-only bridge, with scripted loopback providers by default.
+See [agent capability testing](docs/agent-testing.md) for setup and opt-in model
+or live-chat runs. Grade observable calls, observations, and answers, not hidden
+reasoning. Live chat has no internal tool trace: do not turn an unverifiable
+result into a pass. Keep reports and virtual environments under ignored `target/`.
+
 ## Changes and invariants
 
 The [agent tool-loop diagrams](docs/agent.md#agent-tool-loop) map the production
