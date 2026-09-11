@@ -8,6 +8,76 @@ import (
 	"time"
 )
 
+func TestOwnershipZeroWriteCancellationDuringCloseIsUnknown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &controlledSession{fakeSession: fakeSession{id: "zero-write-close"}, closeEntered: make(chan struct{}), closeRelease: make(chan struct{})}
+	completed := make(chan OperationResult, 1)
+	c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, nil, ParseUsers, time.Second)
+	req := request(NewListRoomOperation())
+	req.Context = ctx
+	req.OnComplete = func(r OperationResult) { completed <- r }
+	if err := c.Submit(req); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan struct{})
+	go func() { c.OnSnapshot(s.id, `{"cmd":"onlineSet","users":[]}`); close(received) }()
+	<-s.closeEntered
+	cancel()
+	select {
+	case <-completed:
+		t.Error("completed before close returned")
+	default:
+	}
+	close(s.closeRelease)
+	<-received
+	r := <-completed
+	if r.Outcome != OutcomeFailed || !r.OutcomeUnknown || r.ActionCount != 0 || r.DeliveryCount != 0 || !errors.Is(r.Error, context.Canceled) || c.State(req.WorkflowID) != StateCancelled {
+		t.Fatalf("result=%+v state=%s", r, c.State(req.WorkflowID))
+	}
+}
+
+func TestOwnershipCancellationDuringBlockedReplyRemainsObservable(t *testing.T) {
+	for _, mode := range []string{"caller", "coordinator"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			entered, release := make(chan struct{}), make(chan struct{})
+			completed := make(chan OperationResult, 1)
+			s := &fakeSession{id: "blocked-reply"}
+			c := NewRoomSnapshotCoordinator(fakeFactory{session: s}, func(RoomSnapshotRequest, string) error { close(entered); <-release; return nil }, ParseUsers, time.Second)
+			req := request(NewListRoomOperation())
+			req.Context = ctx
+			req.OnComplete = func(r OperationResult) { completed <- r }
+			if err := c.Submit(req); err != nil {
+				t.Fatal(err)
+			}
+			received := make(chan struct{})
+			go func() { c.OnSnapshot(s.id, `{"cmd":"onlineSet","users":[]}`); close(received) }()
+			<-entered
+			if mode == "caller" {
+				cancel()
+			} else if !c.Cancel(req.WorkflowID, "cancel while delivering") {
+				t.Error("coordinator rejected cancellation before reply returned")
+			}
+			select {
+			case <-completed:
+				t.Error("completed before reply returned")
+			default:
+			}
+			if c.ActiveWorkflowCount() != 1 {
+				t.Error("blocked delivery lost owner")
+			}
+			close(release)
+			<-received
+			r := <-completed
+			if r.Outcome != OutcomeFailed || !r.OutcomeUnknown || r.ActionCount != 1 || r.DeliveryCount != 1 || r.Error == nil || c.State(req.WorkflowID) != StateCancelled {
+				t.Fatalf("result=%+v state=%s", r, c.State(req.WorkflowID))
+			}
+		})
+	}
+}
+
 func TestOwnershipLateCallbacksCannotCancelReusedWorkflowAndRetentionIsBounded(t *testing.T) {
 	var oldRequest RoomSnapshotRequest
 	var oldSink SnapshotSink

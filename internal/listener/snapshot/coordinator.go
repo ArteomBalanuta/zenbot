@@ -288,6 +288,7 @@ func (w *workflow) run(started chan<- error) {
 	result := Success()
 	var session Session
 	startSent := false
+	operationDispatched := false
 	actions, deliveries := 0, 0
 	unknown := false
 	var actionErr error
@@ -311,10 +312,23 @@ func (w *workflow) run(started chan<- error) {
 				result.Error = errors.Join(result.Error, err)
 			}
 		}
+		reply := result.Reply
+		if result.Outcome == OutcomeFailed || result.Error != nil || w.ctx.Err() != nil {
+			reply = w.request.ReplyMessage
+		}
+		if reply != "" && w.coordinator.reply != nil {
+			if err := w.coordinator.reply(w.request, reply); err != nil {
+				result.Error = errors.Join(result.Error, err)
+				result.Outcome, result.OutcomeUnknown = OutcomeFailed, true
+			} else {
+				result.DeliveryCount++
+				result.ActionCount++
+			}
+		}
+		// Delivery is still part of execution. Resolve cancellation and close
+		// its acceptance window only after every outward call has returned.
 		w.mu.Lock()
 		failure, state := w.failure, w.failureState
-		w.terminal = true
-		w.mu.Unlock()
 		if failure == nil && w.ctx.Err() != nil {
 			failure = w.ctx.Err()
 			state = StateCancelled
@@ -322,8 +336,10 @@ func (w *workflow) run(started chan<- error) {
 				state = StateTimedOut
 			}
 		}
+		w.terminal = true
+		w.mu.Unlock()
 		result.Error = errors.Join(result.Error, failure)
-		if failure != nil && actions > 0 {
+		if failure != nil && operationDispatched {
 			result.OutcomeUnknown = true
 		}
 		if result.Error != nil {
@@ -341,20 +357,6 @@ func (w *workflow) run(started chan<- error) {
 			}
 		} else {
 			state = StateCompleted
-		}
-		reply := result.Reply
-		if result.Outcome == OutcomeFailed {
-			reply = w.request.ReplyMessage
-		}
-		if reply != "" && w.coordinator.reply != nil {
-			if err := w.coordinator.reply(w.request, reply); err != nil {
-				result.Error = errors.Join(result.Error, err)
-				result.Outcome, result.OutcomeUnknown = OutcomeFailed, true
-				state = StateFailed
-			} else {
-				result.DeliveryCount++
-				result.ActionCount++
-			}
 		}
 		w.cancel()
 		c := w.coordinator
@@ -450,6 +452,7 @@ func (w *workflow) run(started chan<- error) {
 				actions++
 			}
 		}
+		operationDispatched = true
 		result, err = w.request.Operation.Apply(operationContext, parsed)
 		result.Error = errors.Join(result.Error, err)
 	}
