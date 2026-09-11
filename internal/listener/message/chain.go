@@ -28,9 +28,15 @@ type Chain struct{ handlers []Handler }
 func NewChain(h ...Handler) *Chain   { return &Chain{handlers: h} }
 func (c *Chain) Handlers() []Handler { return append([]Handler(nil), c.handlers...) }
 func (c *Chain) Process(ctx context.Context, message *model.ChatMessage, engine common.Engine) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	state := &Context{Engine: engine, Message: message}
 	profileHandlers := profiling.Active(ctx)
 	for _, h := range c.handlers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var next bool
 		var err error
 		if profileHandlers {

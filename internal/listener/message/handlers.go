@@ -29,7 +29,23 @@ func (ResolveUserMetadata) Handle(_ context.Context, c *Context) (bool, error) {
 
 type AuditChatMessage struct{}
 
-func (AuditChatMessage) Handle(_ context.Context, c *Context) (bool, error) {
+func (AuditChatMessage) Handle(ctx context.Context, c *Context) (bool, error) {
+	whisper := c.Message.IsWhisper || c.Message.Whisper || c.Message.Type == "whisper"
+	if auditor, ok := c.Engine.(common.MessageRecordAuditor); ok {
+		visibility := "PUBLIC"
+		if whisper {
+			visibility = "WHISPER"
+		}
+		_, err := auditor.LogMessageRecord(ctx, model.MessageRecord{
+			Trip: c.Message.Trip, Name: c.Message.Name, Hash: c.Message.Hash,
+			Message: c.Message.Text, Channel: c.Engine.GetChannel(),
+			Visibility: visibility, CreatedOnMillis: time.Now().UnixMilli(),
+		})
+		return true, err
+	}
+	if whisper {
+		return false, fmt.Errorf("whisper audit requires visibility-aware storage")
+	}
 	_, err := c.Engine.LogMessage(c.Message.Trip, c.Message.Name, c.Message.Hash, c.Message.Text, c.Engine.GetChannel())
 	return true, err
 }
@@ -157,32 +173,8 @@ func (h AgentParticipation) Handle(ctx context.Context, c *Context) (bool, error
 
 type DispatchUserCommand struct{}
 
-type contextCommand interface {
-	ExecuteContext(context.Context)
-}
-
 type canonicalCommand interface {
 	CanonicalName() string
-}
-
-type lifecycleDispatchController interface {
-	BeginDispatch() func()
-}
-
-type lifecycleControllerProvider interface {
-	HostLifecycleController() common.HostLifecycleController
-}
-
-func releaseLifecycleDispatch(engine common.Engine) func() {
-	provider, ok := engine.(lifecycleControllerProvider)
-	if !ok || provider.HostLifecycleController() == nil {
-		return func() {}
-	}
-	controller, ok := provider.HostLifecycleController().(lifecycleDispatchController)
-	if !ok {
-		return func() {}
-	}
-	return controller.BeginDispatch()
 }
 
 func isCommandAuthorized(engine common.Engine, cmd common.Command, author *model.User) bool {
@@ -213,23 +205,14 @@ func (DispatchUserCommand) Handle(ctx context.Context, c *Context) (bool, error)
 	if !authorized {
 		if c.Author != nil {
 			replyDone := profiling.Measure(ctx, "command.unauthorized_reply")
-			_, _ = c.Engine.SendChatMessage(c.Author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", fields[0]), c.Message.IsWhisper)
+			_, err := c.Engine.SendChatMessage(c.Author.Name, fmt.Sprintf(" you are not authorized to run: %s command.", fields[0]), c.Message.IsWhisper)
 			replyDone()
+			return false, err
 		}
 		return false, nil
 	}
-	lifecycleDone := profiling.Measure(ctx, "command.lifecycle_gate")
-	releaseDispatch := releaseLifecycleDispatch(c.Engine)
-	lifecycleDone()
-	defer releaseDispatch()
-	executionDone := profiling.Measure(ctx, "command.execute")
-	defer executionDone()
-	if contextual, ok := cmd.(contextCommand); ok {
-		contextual.ExecuteContext(ctx)
-	} else {
-		cmd.Execute()
-	}
-	return false, nil
+	_, err := common.InvokeCommand(ctx, c.Engine, cmd)
+	return false, err
 }
 func DefaultChain() *Chain {
 	return DefaultChainWithParticipation(PassParticipation{})

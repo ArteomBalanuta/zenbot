@@ -459,7 +459,13 @@ func (e *EngineImpl) DispatchMessageContext(ctx context.Context, jsonMessage str
 			e.UserChatListener.Notify(jsonMessage)
 		}
 	case "info":
-		e.UserInfoListener.Notify(jsonMessage)
+		if listener, ok := e.UserInfoListener.(interface {
+			NotifyContext(context.Context, string)
+		}); ok {
+			listener.NotifyContext(ctx, jsonMessage)
+		} else {
+			e.UserInfoListener.Notify(jsonMessage)
+		}
 	case "session":
 	default:
 		log.Printf("Non functional payload: %s", jsonMessage)
@@ -732,8 +738,18 @@ func (e *EngineImpl) LogPresence(trip, name, hash, eventType, channel string) (i
 }
 
 func (e *EngineImpl) LogMessageRecord(ctx context.Context, record model.MessageRecord) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	auditor, ok := e.Repository.(repository.AuditRepository)
 	if !ok {
+		// Legacy repositories can only represent explicitly public messages.
+		if record.Visibility == "PUBLIC" && e.Repository != nil {
+			return e.Repository.LogMessage(record.Trip, record.Name, record.Hash, record.Message, record.Channel)
+		}
 		return 0, errors.New("typed message audit repository is not configured")
 	}
 	return auditor.MessageAudit(ctx, record)

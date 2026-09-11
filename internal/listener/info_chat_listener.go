@@ -31,12 +31,21 @@ func SliceDownTo(s string, n int) string {
 	return string(r[n+1:])
 }
 func (u *InfoChatListener) Notify(text string) {
+	u.NotifyContext(context.Background(), text)
+}
+
+func (u *InfoChatListener) NotifyContext(parent context.Context, text string) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
 	var m model.InfoMessage
 	if err := json.Unmarshal([]byte(text), &m); err != nil {
 		log.Printf("malformed info payload: %v", err)
 		return
 	}
-	if err := u.chain.Process(context.Background(), &m, u.engine); err != nil {
+	if err := u.chain.Process(ctx, &m, u.engine); err != nil {
 		log.Printf("info listener stopped: %v", err)
 	}
 }

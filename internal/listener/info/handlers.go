@@ -66,7 +66,7 @@ func (ConvertWhisperToChatMessage) Handle(_ context.Context, c *Context) (bool, 
 	if u == nil {
 		return false, nil
 	}
-	c.ChatMessage = &model.ChatMessage{IsWhisper: true, Name: u.Name, Trip: u.Trip, Hash: u.Hash, Text: c.Message.Text[i+len(marker):], Cmd: ""}
+	c.ChatMessage = &model.ChatMessage{Whisper: true, IsWhisper: true, Type: "whisper", Channel: c.Engine.GetChannel(), Name: u.Name, Trip: u.Trip, Hash: u.Hash, Text: c.Message.Text[i+len(marker):], Cmd: ""}
 	return true, nil
 }
 
@@ -88,8 +88,7 @@ func (AuditWhisperCommand) Handle(ctx context.Context, c *Context) (bool, error)
 		})
 		return true, err
 	}
-	_, err := c.Engine.LogMessage(c.ChatMessage.Trip, c.ChatMessage.Name, c.ChatMessage.Hash, c.ChatMessage.Text, c.Engine.GetChannel())
-	return true, err
+	return false, fmt.Errorf("whisper audit requires visibility-aware storage")
 }
 
 type DispatchWhisperCommand struct{}
@@ -108,11 +107,8 @@ func (DispatchWhisperCommand) Handle(ctx context.Context, c *Context) (bool, err
 	}
 	cmd := common.BuildCommand(f[0], c.Engine, c.ChatMessage)
 	if cmd != nil && common.IsCommandAuthorized(c.Engine, cmd, c.ChatMessageUser()) {
-		if contextual, ok := cmd.(interface{ ExecuteContext(context.Context) }); ok {
-			contextual.ExecuteContext(ctx)
-		} else {
-			cmd.Execute()
-		}
+		_, err := common.InvokeCommand(ctx, c.Engine, cmd)
+		return false, err
 	}
 	return false, nil
 }

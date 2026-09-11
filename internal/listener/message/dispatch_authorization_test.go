@@ -71,19 +71,19 @@ func TestDispatchUserCommandRejectsUnauthorizedPrincipal(t *testing.T) {
 }
 
 func TestDispatchUserCommandAuthorizesBeforeContextualExecution(t *testing.T) {
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
+	caller, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	executed := false
 	cmd := &contextualDispatchTestCommand{executed: &executed}
 	e := &dispatchTestEngine{allowed: true, commands: map[string]common.CommandMetadata{
 		"contextual": {Alias: "contextual", Command: func(*model.ChatMessage) common.Command { return cmd }},
 	}}
 
-	next, err := (DispatchUserCommand{}).Handle(cancelled, &Context{
+	next, err := (DispatchUserCommand{}).Handle(caller, &Context{
 		Engine: e, Message: &model.ChatMessage{Name: "alice", Text: "!contextual"}, Author: &model.User{Name: "alice"},
 	})
 
-	if err != nil || next || !executed || cmd.ctx != cancelled || e.chats != 0 || e.authorizationCalls != 1 {
+	if err != nil || next || !executed || cmd.ctx != caller || e.chats != 0 || e.authorizationCalls != 1 {
 		t.Fatalf("next=%v err=%v executed=%v context=%#v chats=%d authorizationCalls=%d", next, err, executed, cmd.ctx, e.chats, e.authorizationCalls)
 	}
 }

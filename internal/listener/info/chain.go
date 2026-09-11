@@ -23,8 +23,14 @@ type Chain struct{ handlers []Handler }
 func NewChain(h ...Handler) *Chain   { return &Chain{handlers: h} }
 func (c *Chain) Handlers() []Handler { return append([]Handler(nil), c.handlers...) }
 func (c *Chain) Process(ctx context.Context, m *model.InfoMessage, e common.Engine) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s := &Context{Engine: e, Message: m}
 	for _, h := range c.handlers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		next, err := h.Handle(ctx, s)
 		if err != nil {
 			return err

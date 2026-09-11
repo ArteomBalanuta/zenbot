@@ -2,6 +2,7 @@ package message_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -245,8 +246,8 @@ func TestDispatchUserCommandDBZStatsMissingCharacterDoesNotPublishSuccess(t *tes
 		Message: &model.ChatMessage{Name: "missing", Text: "!dbzstats", IsWhisper: true},
 		Author:  &model.User{Name: "missing"},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("dispatch lost the command failure")
 	}
 	if len(engine.replies) != 0 {
 		t.Fatalf("replies=%#v, want no success output", engine.replies)
@@ -347,8 +348,8 @@ func TestDispatchUserCommandDBZRegisterPreCancelledDoesNotPersistOrReply(t *test
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := (message.DispatchUserCommand{}).Handle(ctx, state); err != nil {
-		t.Fatal(err)
+	if _, err := (message.DispatchUserCommand{}).Handle(ctx, state); !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatch error=%v, want cancellation", err)
 	}
 	if repo.registerCalls != 0 || len(engine.replies) != 0 {
 		t.Fatalf("RegisterCharacter calls=%d replies=%#v, want no write and no output", repo.registerCalls, engine.replies)
@@ -418,8 +419,8 @@ func TestDispatchUserCommandDBZRegisterFailureRollsBackAndPublishesNoSuccess(t *
 
 	if _, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{
 		Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dbzregister", IsWhisper: true}, Author: user,
-	}); err != nil {
-		t.Fatal(err)
+	}); err == nil {
+		t.Fatal("dispatch lost the command failure")
 	}
 	var characters, stats int
 	if err := database.DB.QueryRow("SELECT COUNT(*) FROM dbz_characters WHERE name=$1", "goku").Scan(&characters); err != nil {
@@ -449,8 +450,8 @@ func TestDispatchUserCommandDBZStrengthAliasRejectsOverspendWithoutSuccessOutput
 	_, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{
 		Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!daddstr 2 ignored", IsWhisper: true}, Author: user,
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("dispatch lost the command failure")
 	}
 	if len(engine.replies) != 0 {
 		t.Fatalf("replies=%#v, want no success output", engine.replies)
@@ -505,8 +506,9 @@ func TestDispatchUserCommandDBZStrengthInvalidAmountRepliesUsageWithoutMutation(
 			_, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{
 				Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!daddstr " + input, IsWhisper: true}, Author: user,
 			})
-			if err != nil {
-				t.Fatal(err)
+			var rejection *common.CommandRejectedError
+			if !errors.As(err, &rejection) || rejection.Status != model.FAILED {
+				t.Fatalf("dispatch error=%v, want command rejection", err)
 			}
 			if got, want := engine.replies, []recordedDBZReply{{recipient: "goku", text: "Example: !daddstr amount", whisper: true}}; len(got) != 1 || got[0] != want[0] {
 				t.Fatalf("replies=%#v, want %#v", got, want)
@@ -534,8 +536,8 @@ func TestDispatchUserCommandDBZStrengthNoFreeStatsDoesNotPublishSuccess(t *testi
 	if err := command.RegisterUserUtilitiesWithDirectAgent(engine, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dstr 1", IsWhisper: true}, Author: user}); err != nil {
-		t.Fatal(err)
+	if _, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dstr 1", IsWhisper: true}, Author: user}); err == nil {
+		t.Fatal("dispatch lost the command failure")
 	}
 	if len(engine.replies) != 0 {
 		t.Fatalf("replies=%#v, want no success output", engine.replies)
@@ -589,8 +591,8 @@ func TestDispatchUserCommandDBZStrengthPreCancelledDoesNotReadWriteOrReply(t *te
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := (message.DispatchUserCommand{}).Handle(ctx, &message.Context{Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dstr 1", IsWhisper: true}, Author: user})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatch error=%v, want cancellation", err)
 	}
 	if repo.freeStatsReads != 0 || repo.strengthAdds != 0 || len(engine.replies) != 0 {
 		t.Fatalf("FreeStats=%d AddStrength=%d replies=%#v, want no DBZ calls/output", repo.freeStatsReads, repo.strengthAdds, engine.replies)
@@ -643,8 +645,8 @@ func TestDispatchUserCommandDBZFightMissingEnemyDoesNotRewardOrPublishSuccess(t 
 
 	if _, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{
 		Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dfight absent", IsWhisper: true}, Author: user,
-	}); err != nil {
-		t.Fatal(err)
+	}); err == nil {
+		t.Fatal("dispatch lost the command failure")
 	}
 	if len(engine.replies) != 0 {
 		t.Fatalf("replies=%#v, want no success output", engine.replies)
@@ -672,10 +674,12 @@ func TestDispatchUserCommandDBZFightMissingEnemyArgumentUsesSourceUsageWithoutMu
 		t.Fatal(err)
 	}
 
-	if _, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{
+	_, err := (message.DispatchUserCommand{}).Handle(context.Background(), &message.Context{
 		Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dfight   ", IsWhisper: true}, Author: user,
-	}); err != nil {
-		t.Fatal(err)
+	})
+	var rejection *common.CommandRejectedError
+	if !errors.As(err, &rejection) || rejection.Status != model.FAILED {
+		t.Fatalf("dispatch error=%v, want command rejection", err)
 	}
 	if got, want := engine.replies, []recordedDBZReply{{recipient: "goku", text: "Example: !dfight enemy", whisper: true}}; len(got) != 1 || got[0] != want[0] {
 		t.Fatalf("replies=%#v, want %#v", got, want)
@@ -736,8 +740,8 @@ func TestDispatchUserCommandDBZFightPreCancelledHasNoFightOrLevelUpEffects(t *te
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := (message.DispatchUserCommand{}).Handle(ctx, &message.Context{Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dfight frieza", IsWhisper: true}, Author: user}); err != nil {
-		t.Fatal(err)
+	if _, err := (message.DispatchUserCommand{}).Handle(ctx, &message.Context{Engine: engine, Message: &model.ChatMessage{Name: "goku", Text: "!dfight frieza", IsWhisper: true}, Author: user}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatch error=%v, want cancellation", err)
 	}
 	if repo.levelUpCalls != 0 || len(engine.replies) != 0 {
 		t.Fatalf("LevelUp calls=%d replies=%#v, want no effects", repo.levelUpCalls, engine.replies)

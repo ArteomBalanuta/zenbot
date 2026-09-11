@@ -23,16 +23,21 @@ type legacyAdapter struct {
 }
 
 func (a *legacyAdapter) Execute() {
-	a.execute(context.Background())
+	_, _ = a.ExecuteResult(context.Background())
 }
 
 func (a *legacyAdapter) ExecuteContext(ctx context.Context) {
-	a.execute(ctx)
+	_, _ = a.ExecuteResult(ctx)
 }
 
-func (a *legacyAdapter) execute(ctx context.Context) {
+// ExecuteResult preserves the handler outcome even if its subsequent audit
+// fails. Compatibility entry points intentionally discard this result.
+func (a *legacyAdapter) ExecuteResult(ctx context.Context) (model.Status, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return model.FAILED, err
 	}
 	profiling.SetCommandName(ctx, a.def.Canonical)
 	handlerDone := profiling.Measure(ctx, "command.handler")
@@ -44,6 +49,7 @@ func (a *legacyAdapter) execute(ctx context.Context) {
 	if err != nil {
 		log.Printf("Saturn command %q failed with status %s: %v", a.def.Canonical, status, err)
 	}
+	return status, err
 }
 
 func (a *legacyAdapter) CanonicalName() string { return a.def.Canonical }

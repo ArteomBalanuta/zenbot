@@ -12,15 +12,17 @@ import (
 
 type commandEngineStub struct {
 	common.Engine
-	chats              []string
-	raws               []string
-	users              map[string]*model.User
-	afkUsers           map[*model.User]string
-	bundle             *service.Bundle
-	commands           map[string]common.CommandMetadata
-	subs               map[string]struct{}
-	authorizationCalls int
-	audits             []model.CommandAuditRecord
+	chats               []string
+	raws                []string
+	users               map[string]*model.User
+	afkUsers            map[*model.User]string
+	bundle              *service.Bundle
+	commands            map[string]common.CommandMetadata
+	subs                map[string]struct{}
+	authorizationCalls  int
+	audits              []model.CommandAuditRecord
+	messageAudits       []model.MessageRecord
+	messageAuditContext context.Context
 }
 
 func (s *commandEngineStub) ServiceBundle() *service.Bundle { return s.bundle }
@@ -157,6 +159,11 @@ func (s *commandEngineStub) IsUserAuthorized(_ *model.User, _ *model.Role) bool 
 	return true
 }
 func (s *commandEngineStub) LogMessage(_, _, _, _, _ string) (int64, error) { return 0, nil }
+func (s *commandEngineStub) LogMessageRecord(ctx context.Context, record model.MessageRecord) (int64, error) {
+	s.messageAuditContext = ctx
+	s.messageAudits = append(s.messageAudits, record)
+	return int64(len(s.messageAudits)), nil
+}
 func (s *commandEngineStub) LogCommand(_ context.Context, record model.CommandAuditRecord) (int64, error) {
 	s.audits = append(s.audits, record)
 	return int64(len(s.audits)), nil
@@ -274,8 +281,8 @@ func TestLiveLegacyDispatchPassesEngineCancellationToDirectLBeforeAdmission(t *t
 
 	listener.NewUserChatListener(engine).NotifyContext(ctx, string(raw))
 
-	if engine.authorizationCalls != 1 {
-		t.Fatalf("authorization calls=%d, want 1", engine.authorizationCalls)
+	if engine.authorizationCalls != 0 {
+		t.Fatalf("authorization calls=%d, want 0 before canceled chain admission", engine.authorizationCalls)
 	}
 	if submitter.calls != 0 {
 		t.Fatalf("submissions=%d, want 0", submitter.calls)
