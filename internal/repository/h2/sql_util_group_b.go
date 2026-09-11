@@ -47,28 +47,40 @@ func (d *Database) DeleteIdentityAuthorized(ctx context.Context, nameOrTrip stri
 	if value == "" {
 		return repository.DeleteResult{}, fmt.Errorf("identity selector must match exactly one registered user")
 	}
-	rows, err := d.DB.QueryContext(ctx, `SELECT DISTINCT n.name,t.trip FROM trip_names tn JOIN names n ON n.id=tn.name_id JOIN trips t ON t.id=tn.trip_id WHERE LOWER(n.name)=LOWER($1) OR LOWER(t.trip)=LOWER($2)`, value, value)
+	ctx = withSaturnAuthorization(ctx)
+	var result repository.DeleteResult
+	err := d.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT n.name,t.trip FROM trip_names tn JOIN names n ON n.id=tn.name_id JOIN trips t ON t.id=tn.trip_id WHERE LOWER(n.name)=LOWER($1) OR t.trip=$2`, value, value)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var name, trip string
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("identity selector must match exactly one registered user")
+		}
+		if err := rows.Scan(&name, &trip); err != nil {
+			return err
+		}
+		if rows.Next() {
+			return fmt.Errorf("identity selector must match exactly one registered user")
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		result, err = d.deleteIdentityInTx(ctx, tx, name, trip, d.execDelete)
+		return err
+	})
 	if err != nil {
 		return repository.DeleteResult{}, err
 	}
-	defer rows.Close()
-	var name, trip string
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return repository.DeleteResult{}, err
-		}
-		return repository.DeleteResult{}, fmt.Errorf("identity selector must match exactly one registered user")
-	}
-	if err := rows.Scan(&name, &trip); err != nil {
-		return repository.DeleteResult{}, err
-	}
-	if rows.Next() {
-		return repository.DeleteResult{}, fmt.Errorf("identity selector must match exactly one registered user")
-	}
-	if err := rows.Err(); err != nil {
-		return repository.DeleteResult{}, err
-	}
-	return d.DeleteIdentity(withSaturnAuthorization(ctx), name, trip)
+	return result, nil
 }
 
 // DeleteIdentity is an unwired compatibility operation. Only an already
@@ -88,27 +100,44 @@ func (d *Database) execDelete(ctx context.Context, tx *sql.Tx, query string, arg
 func (d *Database) deleteIdentity(ctx context.Context, name, trip string, exec deleteExecutor) (repository.DeleteResult, error) {
 	var result repository.DeleteResult
 	err := d.WithTx(ctx, func(tx *sql.Tx) error {
-		r, err := exec(ctx, tx, "DELETE FROM trip_names WHERE trip_id IN (SELECT id FROM trips WHERE trip = $1) OR name_id IN (SELECT id FROM names WHERE name = $2)", trip, name)
-		if err != nil {
-			return err
-		}
-		if result.TripNamesRows, err = r.RowsAffected(); err != nil {
-			return err
-		}
-		r, err = exec(ctx, tx, "DELETE FROM trips WHERE trip = $1", trip)
-		if err != nil {
-			return err
-		}
-		if result.TripRows, err = r.RowsAffected(); err != nil {
-			return err
-		}
-		r, err = exec(ctx, tx, "DELETE FROM names WHERE name = $1", name)
-		if err != nil {
-			return err
-		}
-		result.NameRows, err = r.RowsAffected()
+		var err error
+		result, err = d.deleteIdentityInTx(ctx, tx, name, trip, exec)
 		return err
 	})
+	if err != nil {
+		return repository.DeleteResult{}, err
+	}
+	return result, nil
+}
+
+func (d *Database) deleteIdentityInTx(ctx context.Context, tx *sql.Tx, name, trip string, exec deleteExecutor) (repository.DeleteResult, error) {
+	if !authorizedSaturnContext(ctx) {
+		return repository.DeleteResult{}, errSaturnUnauthorized
+	}
+	var result repository.DeleteResult
+	r, err := exec(ctx, tx, "DELETE FROM trip_names WHERE trip_id IN (SELECT id FROM trips WHERE trip = $1) AND name_id IN (SELECT id FROM names WHERE name = $2)", trip, name)
+	if err != nil {
+		return repository.DeleteResult{}, err
+	}
+	if result.TripNamesRows, err = r.RowsAffected(); err != nil {
+		return repository.DeleteResult{}, err
+	}
+	// Only prune parents of a relationship this operation actually removed.
+	if result.TripNamesRows == 0 {
+		return result, nil
+	}
+	r, err = exec(ctx, tx, "DELETE FROM trips WHERE trip = $1 AND NOT EXISTS (SELECT 1 FROM trip_names WHERE trip_id=trips.id)", trip)
+	if err != nil {
+		return repository.DeleteResult{}, err
+	}
+	if result.TripRows, err = r.RowsAffected(); err != nil {
+		return repository.DeleteResult{}, err
+	}
+	r, err = exec(ctx, tx, "DELETE FROM names WHERE name = $1 AND NOT EXISTS (SELECT 1 FROM trip_names WHERE name_id=names.id)", name)
+	if err != nil {
+		return repository.DeleteResult{}, err
+	}
+	result.NameRows, err = r.RowsAffected()
 	if err != nil {
 		return repository.DeleteResult{}, err
 	}

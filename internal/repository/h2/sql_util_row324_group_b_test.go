@@ -51,7 +51,7 @@ func TestGroupBDeleteRequiresAuthorizedContextAndUsesTypedScope(t *testing.T) {
 	assertCounts(t, d, 0, 0, 0)
 }
 
-func TestGroupBDeleteTripNamesHasORScopeAndParentsAreExact(t *testing.T) {
+func TestGroupBDeleteOnlySelectedPairAndUnreferencedParents(t *testing.T) {
 	d := openTestDB(t)
 	seedIdentity(t, d, "shared", "trip-a")
 	seedIdentity(t, d, "other", "trip-b")
@@ -59,12 +59,12 @@ func TestGroupBDeleteTripNamesHasORScopeAndParentsAreExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := d.DeleteIdentity(withSaturnAuthorization(context.Background()), "shared", "trip-a")
-	if err != nil || result.TripNamesRows != 2 || result.TripRows != 1 || result.NameRows != 1 {
+	if err != nil || result.TripNamesRows != 1 || result.TripRows != 1 || result.NameRows != 0 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	assertCounts(t, d, 1, 1, 1)
+	assertCounts(t, d, 2, 1, 2)
 	var links int
-	if err := d.DB.QueryRow("SELECT COUNT(*) FROM trip_names").Scan(&links); err != nil || links != 1 {
+	if err := d.DB.QueryRow("SELECT COUNT(*) FROM trip_names").Scan(&links); err != nil || links != 2 {
 		t.Fatalf("links=%d err=%v", links, err)
 	}
 }
@@ -72,7 +72,7 @@ func TestGroupBDeleteTripNamesHasORScopeAndParentsAreExact(t *testing.T) {
 func TestGroupBDeleteAbsentAndBlankAreNoOpWithoutParameterInjection(t *testing.T) {
 	d := openTestDB(t)
 	seedIdentity(t, d, "safe", "trip-safe")
-	for _, input := range [][2]string{{"missing", "none"}, {"", ""}, {"' OR '1'='1", "x"}} {
+	for _, input := range [][2]string{{"missing", "none"}, {"", ""}, {"' OR '1'='1", "x"}, {"safe", "none"}, {"missing", "trip-safe"}} {
 		result, err := d.DeleteIdentity(withSaturnAuthorization(context.Background()), input[0], input[1])
 		if err != nil || result != (repository.DeleteResult{}) {
 			t.Fatalf("input=%q result=%+v err=%v", input, result, err)
