@@ -68,7 +68,7 @@ func (t RunCommand) Execute(ctx context.Context, caller api.Context, args json.R
 		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "command is not allowed", contract.EffectNotStarted), nil
 	}
 	arguments := strings.TrimSpace(input.Arguments)
-	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(name) && !sameModerationTarget(firstArgument(arguments), *target) {
+	if !commandgateway.TargetAllowed(caller, name, arguments) {
 		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author", contract.EffectNotStarted), nil
 	}
 	executed, err := t.Gateway.Execute(ctx, caller, name, arguments)

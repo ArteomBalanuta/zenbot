@@ -34,11 +34,11 @@ func (e *credentialedRoomSnapshotMaster) RegisterCommand(command common.Command)
 }
 
 // BindCredentialedRoomSnapshotMaster returns a command-facing engine view that
-// can supply a host password exclusively to a temporary snapshot join. Non-
-// masters retain their ordinary engine view and therefore cannot expose this
-// capability.
+// can supply a host password exclusively to a temporary snapshot join. Only a
+// master with its construction-time coordinator installed exposes this
+// capability; other engines retain their ordinary engine view.
 func BindCredentialedRoomSnapshotMaster(engine *EngineImpl) common.Engine {
-	if engine == nil || engine.Type != model.MASTER {
+	if engine == nil || engine.Type != model.MASTER || engine.snapshotCoordinator == nil {
 		return engine
 	}
 	return &credentialedRoomSnapshotMaster{EngineImpl: engine}

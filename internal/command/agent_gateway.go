@@ -31,6 +31,18 @@ func NewResolvingAgentCommandGateway(resolve func() common.Engine) AgentCommandG
 
 type resolvingAgentCommandGateway struct{ resolve func() common.Engine }
 
+func (g resolvingAgentCommandGateway) CommandAvailable(canonical string) bool {
+	if g.resolve == nil {
+		return false
+	}
+	return agentCommandGateway{engine: g.resolve()}.CommandAvailable(canonical)
+}
+
+func (g agentCommandGateway) CommandAvailable(canonical string) bool {
+	definition, ok := AgentCommandDefinition(canonical)
+	return ok && configuredCommandAvailable(g.engine, definition.Canonical, agentInvocation)
+}
+
 func (g resolvingAgentCommandGateway) Execute(ctx context.Context, caller api.Context, command, arguments string) (CommandExecution, error) {
 	if g.resolve == nil {
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, fmt.Errorf("command gateway is unavailable")
@@ -43,10 +55,13 @@ func (g resolvingAgentCommandGateway) Execute(ctx context.Context, caller api.Co
 }
 
 func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, command, arguments string) (result CommandExecution, resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, err
 	}
-	if g.engine == nil {
+	if !configuredDependency(g.engine) {
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, fmt.Errorf("command gateway is unavailable")
 	}
 	alias := strings.ToLower(strings.TrimSpace(command))
@@ -61,8 +76,19 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 	if !AgentCommandAuthorized(caller, definition) {
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, fmt.Errorf("command is not authorized")
 	}
-	if target := caller.ModerationTarget(); target != nil && AgentCommandTargetsUser(definition.Canonical) && !sameCommandTarget(firstCommandArgument(arguments), *target) {
+	if !commandgateway.TargetAllowed(caller, definition.Canonical, arguments) {
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, fmt.Errorf("moderation action must target the reviewed author")
+	}
+	release, err := common.BeginCommandDispatch(ctx, g.engine)
+	if err != nil {
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, err
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, err
+	}
+	if !configuredCommandAvailable(g.engine, definition.Canonical, agentInvocation) {
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, fmt.Errorf("command is unavailable")
 	}
 	trip, hash := "", ""
 	if v := caller.Trip(); v != nil {
@@ -119,16 +145,4 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		return CommandExecution{Status: commandgateway.OutcomeRejected}, nil
 	}
 	return CommandExecution{Status: commandgateway.OutcomeSucceeded}, nil
-}
-
-func firstCommandArgument(arguments string) string {
-	fields := strings.Fields(arguments)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
-func sameCommandTarget(argument, expected string) bool {
-	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(argument), "@"), strings.TrimPrefix(strings.TrimSpace(expected), "@"))
 }

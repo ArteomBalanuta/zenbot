@@ -219,9 +219,9 @@ func TestModerationReviewRegistryExposesOnlyMuteAndNativeReads(t *testing.T) {
 	tools := []agenttool.Tool{
 		agenttool.RoomUsers{},
 		agenttool.RunCommand{},
-		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "mute")},
-		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "nuke")},
-		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "notes")},
+		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "mute"), Gateway: &runCommandGatewayStub{}},
+		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "nuke"), Gateway: &runCommandGatewayStub{}},
+		agenttool.SaturnCommand{Definition: agentCommandDefinition(t, "notes"), Gateway: &runCommandGatewayStub{}},
 	}
 	allowed := make([]string, len(tools))
 	for index, registered := range tools {

@@ -2,6 +2,7 @@ package command
 
 import (
 	"zenbot/internal/agent/api"
+	"zenbot/internal/agent/commandgateway"
 	commandcatalog "zenbot/internal/command/catalog"
 	"zenbot/internal/common"
 )
@@ -37,24 +38,12 @@ func AgentCommandCapability(definition common.CommandDefinition) (api.Capability
 	if !ok {
 		return "", true
 	}
-	switch commandcatalog.Access(entry) {
-	case commandcatalog.AgentPermanentBan:
-		return api.PermanentBan, true
-	case commandcatalog.AgentAdmin:
-		return api.AdminCommands, true
-	case commandcatalog.AgentModerator:
-		return api.ModerationCommands, true
-	default:
-		return "", false
-	}
+	return commandgateway.RequiredCapability(entry)
 }
 
 func AgentCommandAuthorized(caller api.Context, definition common.CommandDefinition) bool {
-	if caller.ModerationTarget() != nil && !commandcatalog.ModerationReviewAllows(definition.Canonical) {
-		return false
-	}
-	required, restricted := AgentCommandCapability(definition)
-	return !restricted || caller.HasCapability(required)
+	entry, ok := commandcatalog.AgentEntry(definition.Canonical)
+	return ok && commandgateway.Authorized(caller, entry)
 }
 
 // AgentRunCommandAliases derives the compact compatibility tool's enum from

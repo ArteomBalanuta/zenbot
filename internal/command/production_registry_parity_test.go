@@ -7,14 +7,16 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 	"zenbot/internal/service"
+	"zenbot/internal/testutil/h2fixture"
 )
 
 func TestProductionRegistryIncludesEveryInScopeSaturnCommand(t *testing.T) {
+	database := h2fixture.Open(t, "production-registry-availability")
 	engine := &commandEngineStub{
 		users: map[string]*model.User{},
 		bundle: &service.Bundle{
-			Mail:  &service.MailService{},
-			Notes: &service.NoteService{},
+			Mail:  &service.MailService{DB: database.DB},
+			Notes: &service.NoteService{DB: database.DB},
 		},
 	}
 	if err := RegisterUserUtilities(engine); err != nil {

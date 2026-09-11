@@ -34,6 +34,10 @@ type agentSnapshotCompletion struct {
 	whisper bool
 }
 
+func (e *agentCaptureEngine) CommandAvailable(canonical string) bool {
+	return e != nil && configuredCommandAvailable(e.Engine, canonical, agentInvocation)
+}
+
 const privateDeliveryObservation = "A private response was delivered to the caller."
 
 func (e *agentCaptureEngine) recordDelivery(message string, whisper bool) {

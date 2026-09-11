@@ -27,7 +27,13 @@ func (t SaturnCommand) Name() string {
 
 func (t SaturnCommand) Authorized(caller api.Context) bool {
 	definition, ok := commandcatalog.AgentEntry(t.Definition.Canonical)
-	return ok && agentCommandAuthorized(caller, definition)
+	if !ok || !commandgateway.Authorized(caller, definition) || t.Gateway == nil {
+		return false
+	}
+	if availability, ok := t.Gateway.(commandgateway.CanonicalAvailability); ok {
+		return availability.CommandAvailable(definition.Canonical)
+	}
+	return true
 }
 
 func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
@@ -37,7 +43,7 @@ func (t SaturnCommand) Descriptor(api.Context) (contract.Descriptor, error) {
 	}
 	capabilities := []string(nil)
 	access := contractAccess(definition.Agent.Access)
-	if required, restricted := requiredCommandCapability(definition); restricted {
+	if required, restricted := commandgateway.RequiredCapability(definition); restricted {
 		capabilities = []string{string(required)}
 	}
 	resultSchema := baseCommandResultSchemaJSON
@@ -86,7 +92,7 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	if !ok {
 		return contract.ActionErrorResult("", t.Name(), "UNKNOWN_TOOL", "Saturn command is unavailable", contract.EffectNotStarted), nil
 	}
-	if !agentCommandAuthorized(caller, definition) {
+	if !commandgateway.Authorized(caller, definition) {
 		return contract.ActionErrorResult("", t.Name(), "TOOL_NOT_AUTHORIZED", "Caller is not allowed to execute this Saturn command", contract.EffectNotStarted), nil
 	}
 	if t.Gateway == nil {
@@ -106,7 +112,7 @@ func (t SaturnCommand) Execute(ctx context.Context, caller api.Context, args jso
 	if definition.Canonical == "list" && strings.EqualFold(strings.TrimSpace(arguments), strings.TrimSpace(caller.Room())) {
 		return contract.ActionErrorResult("", t.Name(), "INVALID_ARGUMENTS", "saturn_list requires a room other than the caller's current room; use room_users for current-room presence", contract.EffectNotStarted), nil
 	}
-	if target := caller.ModerationTarget(); target != nil && commandcatalog.TargetsUser(definition.Canonical) && !sameModerationTarget(firstArgument(arguments), *target) {
+	if !commandgateway.TargetAllowed(caller, definition.Canonical, arguments) {
 		return contract.ActionErrorResult("", t.Name(), "COMMAND_REJECTED", "moderation action must target the reviewed author", contract.EffectNotStarted), nil
 	}
 	execution, err := t.Gateway.Execute(ctx, caller, definition.Canonical, arguments)
@@ -132,39 +138,6 @@ func contractAccess(access commandcatalog.AgentAccess) contract.Access {
 	default:
 		return contract.AccessUser
 	}
-}
-
-func requiredCommandCapability(definition commandcatalog.Entry) (api.Capability, bool) {
-	switch commandcatalog.Access(definition) {
-	case commandcatalog.AgentAdmin:
-		return api.AdminCommands, true
-	case commandcatalog.AgentModerator:
-		return api.ModerationCommands, true
-	case commandcatalog.AgentPermanentBan:
-		return api.PermanentBan, true
-	default:
-		return "", false
-	}
-}
-
-func agentCommandAuthorized(caller api.Context, definition commandcatalog.Entry) bool {
-	if caller.ModerationTarget() != nil && !commandcatalog.ModerationReviewAllows(definition.Canonical) {
-		return false
-	}
-	required, restricted := requiredCommandCapability(definition)
-	return !restricted || caller.HasCapability(required)
-}
-
-func firstArgument(arguments string) string {
-	fields := strings.Fields(arguments)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
-func sameModerationTarget(argument, expected string) bool {
-	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(argument), "@"), strings.TrimPrefix(strings.TrimSpace(expected), "@"))
 }
 
 var _ Tool = SaturnCommand{}

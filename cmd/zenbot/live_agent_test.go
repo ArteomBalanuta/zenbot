@@ -101,7 +101,9 @@ func TestTrustedAgentSnapshotToleratesUnavailableActiveUserSet(t *testing.T) {
 }
 
 func TestAgentCommandEngineResolverBindsCredentialedSnapshotCapability(t *testing.T) {
+	options := newRoomSnapshotEngineOptions(&config.Config{WebsocketUrl: "ws://127.0.0.1:1"}, nil, nil, nil)
 	first := &core.EngineImpl{Type: model.MASTER, Channel: "first"}
+	first.InstallRoomSnapshotCoordinator(options.SnapshotCoordinator)
 	binding := newMasterBinding(first)
 	resolve, err := resolveCurrentEngine(binding)
 	if err != nil {
@@ -113,6 +115,7 @@ func TestAgentCommandEngineResolverBindsCredentialedSnapshotCapability(t *testin
 	}
 
 	second := &core.EngineImpl{Type: model.MASTER, Channel: "second"}
+	second.InstallRoomSnapshotCoordinator(options.SnapshotCoordinator)
 	binding.Rebind(second)
 	resolved := commandEngine()
 	if resolved.GetChannel() != "second" {

@@ -129,69 +129,17 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgent
 	}
 
 	canonicals := []string{"help", "crashcourse", "say", "afk", "list", "ping", "version", "ape", "coin", "weather", "time", "info", "users", "nicks", "sub", "unsub", "memory", "dbzhelp", "msgchannel"}
-	if _, ok := e.(common.ModerationOperations); ok {
-		canonicals = append(canonicals, "captcha", "authorize", "deauthorize", "lock", "overflow", "ban", "kick", "unban", "unbanall", "mute", "unmute", "color", "flair")
-	}
-	if _, ok := e.(common.CredentialedRoomSnapshotSubmitter); ok {
-		canonicals = append(canonicals, "nuke")
-	}
-	if _, mover := e.(common.LiveRoomMover); mover {
-		if _, submitter := e.(common.CredentialedRoomSnapshotSubmitter); submitter {
-			canonicals = append(canonicals, "resurrect")
-		}
-	}
-	if _, ok := e.(common.PrefixController); ok {
-		canonicals = append(canonicals, "prefix")
-	}
+	canonicals = append(canonicals, "captcha", "authorize", "deauthorize", "lock", "overflow", "ban", "kick", "unban", "unbanall", "mute", "unmute", "color", "flair", "nuke", "resurrect", "prefix")
 	if _, ok := e.(common.AutoMoveController); ok {
 		canonicals = append(canonicals, "automove")
 	}
-	if _, ok := e.(ReplicaController); ok {
-		canonicals = append(canonicals, "replica", "replicaoff", "replicastatus")
-	}
-	if _, ok := e.(common.SupportReplicaRelay); ok {
-		canonicals = append(canonicals, "ws", "wsa")
-	}
-	if lifecycleController(e) != nil {
-		canonicals = append(canonicals, "restart", "shutdown")
-	}
-	if b := bundle(e); b != nil && b.SQLCommand != nil {
-		canonicals = append(canonicals, "sql")
-	}
-
-	if b := bundle(e); b != nil && b.Users != nil && (b.Users.Queries != nil || b.Users.LastSeen != nil) {
-		canonicals = append(canonicals, "lastonline")
-	}
-	if b := bundle(e); b != nil && b.Mail != nil {
-		canonicals = append(canonicals, "mail")
-	}
-	if b := bundle(e); b != nil && b.Notes != nil {
-		canonicals = append(canonicals, "note", "notes")
-	}
-	if b := bundle(e); b != nil && b.Activity != nil && b.Activity.Repo != nil {
-		canonicals = append(canonicals, "active")
-	}
-	if b := bundle(e); b != nil && b.ShadowBans != nil && b.ShadowBans.Repo != nil {
-		canonicals = append(canonicals, "shadowbanlist", "unshadowban")
-		if _, ok := e.(common.ModerationOperations); ok {
-			canonicals = append(canonicals, "shadowban")
-		}
-	}
-	if b := bundle(e); b != nil && b.Users != nil && b.Users.GroupB != nil {
-		canonicals = append(canonicals, "remove")
-	}
-	if b := bundle(e); b != nil && b.Users != nil && b.Users.GroupB != nil && b.Security != nil {
-		canonicals = append(canonicals, "register", "messages")
-		if b.Security.Authorization != nil {
-			canonicals = append(canonicals, "access")
-		}
-	}
+	canonicals = append(canonicals, "replica", "replicaoff", "replicastatus", "ws", "wsa", "restart", "shutdown", "sql", "lastonline", "mail", "note", "notes", "active", "shadowbanlist", "unshadowban", "shadowban", "remove", "register", "messages", "access")
 	if b := bundle(e); b != nil && b.DBZ != nil {
 		canonicals = append(canonicals, "dbzregister", "dbzstats", "dbzstr", "dfight", "dspawn")
 	}
 	registered := make(map[string]struct{}, len(canonicals))
 	for _, canonical := range canonicals {
-		if owner, ok := e.(common.CommandAvailability); ok && !owner.CommandAvailable(canonical) {
+		if !configuredCommandAvailable(e, canonical, manualInvocation) {
 			continue
 		}
 		if _, duplicate := registered[canonical]; duplicate {

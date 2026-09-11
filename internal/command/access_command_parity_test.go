@@ -147,7 +147,7 @@ func TestAccessParityTracer6DoesNotExposeWithoutWritableAuthorization(t *testing
 func TestAccessAuthorizationGateDoesNotSuppressOtherGroupBCommands(t *testing.T) {
 	e := &commandEngineStub{
 		bundle: &service.Bundle{
-			Users:    &service.UserService{GroupB: &groupBHistoryFake{}},
+			Users:    &service.UserService{GroupB: &groupBHistoryFake{}, Identity: &identityFake{}},
 			Security: service.NewSecurityService(&config.Config{}),
 		},
 	}

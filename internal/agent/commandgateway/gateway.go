@@ -43,3 +43,10 @@ type Execution struct {
 type Gateway interface {
 	Execute(context.Context, api.Context, string, string) (Execution, error)
 }
+
+// CanonicalAvailability is optional advisory visibility. Execute remains the
+// authoritative source admission boundary and must recheck its pinned owner.
+// Small compatibility gateways need only implement Gateway.
+type CanonicalAvailability interface {
+	CommandAvailable(canonical string) bool
+}

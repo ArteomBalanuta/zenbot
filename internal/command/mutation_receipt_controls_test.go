@@ -9,6 +9,7 @@ import (
 	"zenbot/internal/agent/api"
 	"zenbot/internal/agent/commandgateway"
 	"zenbot/internal/common"
+	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
 	"zenbot/internal/repository"
 	"zenbot/internal/service"
@@ -138,7 +139,14 @@ func TestCommandReplyFailurePropagation(t *testing.T) {
 
 type receiptSequenceEngine struct {
 	*gatewayEngine
-	cancel context.CancelFunc
+	cancel    context.CancelFunc
+	snapshots int
+}
+
+func (e *receiptSequenceEngine) SubmitCredentialedRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
+	e.snapshots++
+	request.OnComplete(snapshot.OperationResult{Outcome: snapshot.OutcomeSuccess})
+	return nil
 }
 
 func (e *receiptSequenceEngine) SendChatMessage(author, text string, whisper bool) (string, error) {
@@ -166,7 +174,7 @@ func TestMutationReceiptMultipleRepliesStopOnFailureOrCancellation(t *testing.T)
 		if cancelAfterFirst {
 			wantSends = 1
 		}
-		if err != nil || got.Status != commandgateway.OutcomeUnknown || got.Action == nil || got.Action.Count != 1 || got.Delivery == nil || got.Delivery.Count != 1 || len(got.Messages) != 1 || e.sends != wantSends {
+		if err != nil || got.Status != commandgateway.OutcomeUnknown || got.Action == nil || got.Action.Count != 1 || got.Delivery == nil || got.Delivery.Count != 1 || len(got.Messages) != 1 || e.sends != wantSends || e.snapshots != 0 {
 			t.Fatalf("cancel=%v result=%+v sends=%d err=%v", cancelAfterFirst, got, e.sends, err)
 		}
 	}
