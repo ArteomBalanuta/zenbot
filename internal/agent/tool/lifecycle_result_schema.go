@@ -1,0 +1,4 @@
+package tool
+
+// The payload describes one host request, never a process or replica shutdown.
+const lifecycleCommandResultSchemaJSON = `{"type":"object","additionalProperties":false,"properties":{"messages":{"type":"array","items":{"type":"string"}},"deliveredCount":{"type":"integer"},"actionCount":{"type":"integer"},"data":{"type":"object","additionalProperties":false,"properties":{"operation":{"type":"string","enum":["restart","shutdown"]},"scope":{"type":"string","enum":["host"]},"requestStatus":{"type":"string","enum":["accepted","coalesced"]},"completionStatus":{"type":"string","enum":["not_observed","succeeded","failed"]},"failureCode":{"type":"string","enum":["HOST_LIFECYCLE_FAILED"]}},"required":["operation","scope","requestStatus","completionStatus"]}},"required":["messages","deliveredCount","actionCount"]}`

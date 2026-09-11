@@ -132,6 +132,10 @@ func (g agentCommandGateway) Execute(ctx context.Context, caller api.Context, co
 		_ = capturing.awaitSnapshotCompletions(ctx)
 		return CommandExecution{Status: capturing.snapshotStatus}, nil
 	}
+	var notAdmitted *common.LifecycleRequestRejectedError
+	if errors.As(err, &notAdmitted) && !capturing.dataObserved && capturing.actionCount == 0 && mutations.Count() == 0 {
+		return CommandExecution{Status: commandgateway.OutcomeRejected}, err
+	}
 	if ctx.Err() != nil {
 		return CommandExecution{Status: commandgateway.OutcomeUnknown}, nil
 	}

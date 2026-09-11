@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"zenbot/internal/common"
 )
 
 var (
@@ -16,10 +18,7 @@ var (
 )
 
 // LifecycleResult is source completion evidence, separate from admission.
-type LifecycleResult struct {
-	Kind string
-	Err  error
-}
+type LifecycleResult = common.LifecycleResult
 
 // LifecycleOperation is shared by coalesced requests. Callers may retain their
 // handle; the owner retains only pending and active operations. A dispatcher
@@ -48,10 +47,7 @@ func (o *LifecycleOperation) finish(err error) LifecycleResult {
 	return o.result
 }
 
-type LifecycleAdmission struct {
-	Operation *LifecycleOperation
-	Coalesced bool
-}
+type LifecycleAdmission = common.LifecycleAdmission
 
 // HostLifecycle owns command admission and serial process-lifetime callbacks.
 // It never waits for lifecycle work from a submitting command's dispatcher.
@@ -182,6 +178,7 @@ func (h *HostLifecycle) request(ctx context.Context, kind string) (LifecycleAdmi
 	superseded := h.pending
 	operation := &LifecycleOperation{done: make(chan struct{}), result: LifecycleResult{Kind: kind}}
 	h.pending = operation
+	common.RecordCommittedMutation(ctx)
 	var previous LifecycleResult
 	if superseded != nil {
 		previous = superseded.finish(ErrHostLifecycleSuperseded)
