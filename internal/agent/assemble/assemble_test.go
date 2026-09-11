@@ -118,6 +118,32 @@ func TestSystemPromptSelectsModeAndDynamicSQLPoliciesAndCarriesMetadata(t *testi
 	}
 }
 
+func TestSystemPromptDefinesModerationReceiptsAtTheirProducingBoundary(t *testing.T) {
+	catalog, err := prompt.NewCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := testAssembler(t, catalog).Assemble(context.Background(), invocation(runtime.DIRECT, "kick alice", runtime.ModerationCommands), nil, "", nil, Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := request.Messages()[0].Content()
+	for _, required := range []string{
+		"documented boundary",
+		"outbound moderation",
+		"request transmission",
+		"never server application",
+		"local command acknowledgment is not independent remote server evidence",
+		"roster snapshot is selection evidence only",
+		"silent request action, such as kick",
+		"request was sent",
+	} {
+		if !strings.Contains(policy, required) {
+			t.Errorf("system prompt omitted moderation receipt guidance %q", required)
+		}
+	}
+}
+
 func TestSystemPromptOmitsRequestLocalAndStaleLoopMetadata(t *testing.T) {
 	catalog, err := prompt.NewCatalog(nil)
 	if err != nil {

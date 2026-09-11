@@ -20,17 +20,19 @@ type DeliveryReceipt struct {
 	Count int
 }
 
-// ActionReceipt verifies that the command caused one or more outward effects.
-// It is independent from room delivery because moderation actions can be
-// intentionally silent.
+// ActionReceipt records effects at the producing command's documented
+// boundary, such as an outward write, a local mutation, or a delivered reply.
+// It does not by itself prove whole-command or remote-server application. It is
+// independent from room delivery because moderation requests can be silent.
 type ActionReceipt struct {
 	Count int
 }
 
 type Execution struct {
 	Status OutcomeStatus
-	// EffectsCommitted records observed effects even when Status is rejected
-	// or unknown. It is not evidence that the whole requested command succeeded.
+	// EffectsCommitted records producer-boundary effects even when Status is
+	// rejected or unknown. It is not evidence that the whole requested command
+	// succeeded or that a remote server applied an outbound request.
 	EffectsCommitted bool
 	Action           *ActionReceipt
 	Messages         []string

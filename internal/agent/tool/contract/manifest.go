@@ -251,7 +251,7 @@ func (entry ManifestEntry) ProviderDefinition() Definition {
 	case entry.ResultMode == RoomDelivery:
 		parts = append(parts, "Executes and delivers output to the room.")
 	case entry.Effect == Action:
-		parts = append(parts, "Returns the action outcome without a separate room message.")
+		parts = append(parts, "Returns the documented action receipt without a separate room message.")
 	default:
 		parts = append(parts, "Read-only; returns data.")
 	}

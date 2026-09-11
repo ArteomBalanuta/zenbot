@@ -8,8 +8,8 @@ import (
 	"zenbot/internal/util"
 )
 
-// NukeRoomOperation applies the snapshot-derived moderation actions through
-// the temporary room session owned by the coordinator.
+// NukeRoomOperation submits snapshot-derived moderation requests through the
+// temporary room session owned by the coordinator.
 type NukeRoomOperation struct {
 	delay time.Duration
 }

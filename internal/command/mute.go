@@ -74,7 +74,7 @@ func (c *muteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := operations.MuteNick(ctx, common.NickTarget(target.Name)); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, target.Name+" "+target.Hash+" has been muted"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "Mute request sent for "+target.Name+" "+target.Hash+"; server application is unconfirmed."); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

@@ -135,10 +135,10 @@ func TestProviderDefinitionPreservesPurposePrerequisitesAndDelivery(t *testing.T
 	}
 }
 
-func TestProviderDefinitionExplainsSilentActionOutcome(t *testing.T) {
+func TestProviderDefinitionExplainsSilentActionReceipt(t *testing.T) {
 	entry := ManifestEntry{Name: "saturn_kick", Description: "Kick one active nickname.", Effect: Action, ResultMode: ModelData}
 	definition := entry.ProviderDefinition()
-	if !strings.Contains(definition.Description, "action outcome") || !strings.Contains(definition.Description, "room message") {
+	if !strings.Contains(definition.Description, "documented action receipt") || !strings.Contains(definition.Description, "room message") {
 		t.Fatalf("silent action contract is not explained: %s", definition.Description)
 	}
 }

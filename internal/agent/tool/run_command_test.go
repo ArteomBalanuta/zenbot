@@ -51,6 +51,10 @@ func TestRunCommandDescriptorIsClosedBoundedAction(t *testing.T) {
 	if !strings.Contains(d.Description(), "Invoke this tool immediately") || !strings.Contains(d.Description(), "Do not answer with instructions") {
 		t.Fatalf("execution guidance missing from description: %q", d.Description())
 	}
+	description := strings.ToLower(d.Description())
+	if !strings.Contains(description, "successful remote moderation means request submission, not proven server application") || !strings.Contains(description, "delivered output and boundary counts") {
+		t.Fatalf("receipt boundary missing from description: %q", d.Description())
+	}
 	var parameters struct {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`

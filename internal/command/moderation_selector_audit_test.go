@@ -168,7 +168,7 @@ func TestModerationSelectorAuditUnshadowUsesChangedRowsAndRetainsReceiptOnExit(t
 		repo := &shadowBanRepositoryStub{records: []repository.ShadowBanRecord{{Name: "one"}, {Name: "two"}}, removeAllCount: 1}
 		engine := newShadowBanEngine(repo, nil)
 		status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!unshadowban -all"}).Execute(context.Background())
-		if status != model.SUCCESSFUL || err != nil || repo.listCalls != 0 || !equalStrings(engine.chats, []string{"mod|Unbanned shadow-ban records: 1|false"}) {
+		if status != model.SUCCESSFUL || err != nil || repo.listCalls != 0 || !equalStrings(engine.chats, []string{"mod|Removed shadow-ban records: 1|false"}) {
 			t.Fatalf("status=%v err=%v listCalls=%d chats=%v", status, err, repo.listCalls, engine.chats)
 		}
 	})

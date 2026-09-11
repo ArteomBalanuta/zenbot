@@ -100,7 +100,7 @@ func TestMuteRequiresActiveCaseInsensitiveTargetAndIncludesResolvedHash(t *testi
 	t.Run("active target resolves case and sends canonical active name", func(t *testing.T) {
 		engine := activeEngine(map[string]*model.User{"Merc": {Name: "Merc", Hash: "hash-a"}})
 		status, err := executeActiveModeration(t, engine, "!mute @mErC", false)
-		if err != nil || status != model.SUCCESSFUL || !reflect.DeepEqual(engine.operations, []string{"mute:Merc"}) || !reflect.DeepEqual(engine.chats, []string{"mod|Merc hash-a has been muted|false"}) {
+		if err != nil || status != model.SUCCESSFUL || !reflect.DeepEqual(engine.operations, []string{"mute:Merc"}) || !reflect.DeepEqual(engine.chats, []string{"mod|Mute request sent for Merc hash-a; server application is unconfirmed.|false"}) {
 			t.Fatalf("status=%v err=%v chats=%v operations=%v", status, err, engine.chats, engine.operations)
 		}
 	})
@@ -109,7 +109,7 @@ func TestMuteRequiresActiveCaseInsensitiveTargetAndIncludesResolvedHash(t *testi
 func TestUnmuteUsesFirstHashAndSourceOutputs(t *testing.T) {
 	engine := activeEngine(nil)
 	status, err := executeActiveModeration(t, engine, "!undumb hash-a ignored", true)
-	if err != nil || status != model.SUCCESSFUL || !reflect.DeepEqual(engine.operations, []string{"unmute:hash-a"}) || !reflect.DeepEqual(engine.chats, []string{"mod|hash-a has been unmuted|true"}) {
+	if err != nil || status != model.SUCCESSFUL || !reflect.DeepEqual(engine.operations, []string{"unmute:hash-a"}) || !reflect.DeepEqual(engine.chats, []string{"mod|Unmute request sent for hash hash-a; server application is unconfirmed.|true"}) {
 		t.Fatalf("status=%v err=%v chats=%v operations=%v", status, err, engine.chats, engine.operations)
 	}
 	engine = activeEngine(nil)
@@ -124,7 +124,7 @@ func TestColorAndFlairRequireActiveCaseInsensitiveTarget(t *testing.T) {
 		name, command, operation, absent, success string
 	}{
 		{"color", "color", "color:Merc:00ff00", "User merc is not in the room, color was not applied.", ""},
-		{"flair", "flair", "flair:Merc:trusted", "User merc is not in the room, flair was not applied.", "\\n Flair set successfully!"},
+		{"flair", "flair", "flair:Merc:trusted", "User merc is not in the room, flair was not applied.", "\\n Flair request sent; server application is unconfirmed."},
 	} {
 		t.Run(tc.name+" absent", func(t *testing.T) {
 			engine := activeEngine(nil)
@@ -160,7 +160,7 @@ func TestActiveTargetModerationUsesCurrentAuthoritativeLookup(t *testing.T) {
 	engine := activeEngine(nil)
 	engine.current = &model.User{Name: "Merc", Hash: "current-hash"}
 	status, err := executeActiveModeration(t, engine, "!mute @mErC", false)
-	if err != nil || status != model.SUCCESSFUL || !reflect.DeepEqual(engine.operations, []string{"mute:Merc"}) || !reflect.DeepEqual(engine.chats, []string{"mod|Merc current-hash has been muted|false"}) {
+	if err != nil || status != model.SUCCESSFUL || !reflect.DeepEqual(engine.operations, []string{"mute:Merc"}) || !reflect.DeepEqual(engine.chats, []string{"mod|Mute request sent for Merc current-hash; server application is unconfirmed.|false"}) {
 		t.Fatalf("status=%v err=%v chats=%v operations=%v", status, err, engine.chats, engine.operations)
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"zenbot/internal/model"
 )
 
-func TestNukeRoomOperationDoesNotLockWhenABanFails(t *testing.T) {
+func TestNukeRoomOperationDoesNotSendLockRequestWhenABanRequestFails(t *testing.T) {
 	var payloads []map[string]string
 	operation := NewNukeRoomOperation(0)
 	result, err := operation.Apply(RoomSnapshotContext{
@@ -41,7 +41,7 @@ type errNukeRawFailure struct{}
 
 func (errNukeRawFailure) Error() string { return "raw ban failed" }
 
-func TestNukeRoomOperationBansNormalizedSnapshotUsersBeforeLockingRoom(t *testing.T) {
+func TestNukeRoomOperationSendsBanRequestsForNormalizedSnapshotUsersBeforeLockRequest(t *testing.T) {
 	var rawPayloads []map[string]string
 	operation := NewNukeRoomOperation(0)
 	result, err := operation.Apply(RoomSnapshotContext{
@@ -69,7 +69,7 @@ func TestNukeRoomOperationBansNormalizedSnapshotUsersBeforeLockingRoom(t *testin
 	}
 }
 
-func TestNukeRoomOperationUses200MillisecondDelayBetweenEveryAction(t *testing.T) {
+func TestNukeRoomOperationUses200MillisecondDelayBetweenEveryRequest(t *testing.T) {
 	var sentAt []time.Time
 	operation := NewNukeRoomOperation()
 	result, err := operation.Apply(RoomSnapshotContext{

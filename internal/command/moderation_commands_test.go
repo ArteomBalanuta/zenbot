@@ -89,7 +89,7 @@ func TestDeauthorizeUsesSourceRawCommandAndUsage(t *testing.T) {
 	e := &commandEngineStub{}
 	d, _ := commandDefinitionFor("deauth")
 	status, err := d.New(e, moderationMessage("!deauth trip-x", true)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"deauthtrip","trip":"trip-x"}`}) || !equalStrings(e.chats, []string{"mod| deauthorized trip: trip-x|true"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"deauthtrip","trip":"trip-x"}`}) || !equalStrings(e.chats, []string{"mod| deauthorization request sent for trip: trip-x|true"}) {
 		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
 	}
 }
@@ -99,8 +99,8 @@ func TestCaptchaUsesSourceDefaultAndOnOffProtocol(t *testing.T) {
 		text, raw, reply string
 		status           model.Status
 	}{
-		{"!captcha", `{"cmd":"enablecaptcha"}`, "mod| Captcha enabled!|false", model.SUCCESSFUL},
-		{"!captcha off", `{"cmd":"disablecaptcha"}`, "mod| Captcha disabled!|false", model.SUCCESSFUL},
+		{"!captcha", `{"cmd":"enablecaptcha"}`, "mod| Captcha-enable request sent; server application is unconfirmed.|false", model.SUCCESSFUL},
+		{"!captcha off", `{"cmd":"disablecaptcha"}`, "mod| Captcha-disable request sent; server application is unconfirmed.|false", model.SUCCESSFUL},
 	} {
 		e := &commandEngineStub{}
 		d, _ := commandDefinitionFor("captcha")
@@ -115,7 +115,7 @@ func TestMuteRequiresActiveTargetAndRetainsRawProtocol(t *testing.T) {
 	e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc", Hash: "hash-x"}}}
 	d, _ := commandDefinitionFor("dumb")
 	status, err := d.New(e, moderationMessage("!dumb @merc", false)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"mute","nick":"Merc"}`}) || !equalStrings(e.chats, []string{"mod|Merc hash-x has been muted|false"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"mute","nick":"Merc"}`}) || !equalStrings(e.chats, []string{"mod|Mute request sent for Merc hash-x; server application is unconfirmed.|false"}) {
 		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
 	}
 }
@@ -124,7 +124,7 @@ func TestUnmuteUsesSourceHashProtocol(t *testing.T) {
 	e := &commandEngineStub{}
 	d, _ := commandDefinitionFor("undumb")
 	status, err := d.New(e, moderationMessage("!undumb hash-x", true)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"unmute","hash":"hash-x"}`}) || !equalStrings(e.chats, []string{"mod|hash-x has been unmuted|true"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.raws, []string{`{"cmd":"unmute","hash":"hash-x"}`}) || !equalStrings(e.chats, []string{"mod|Unmute request sent for hash hash-x; server application is unconfirmed.|true"}) {
 		t.Fatalf("status=%v err=%v raw=%v chats=%v", status, err, e.raws, e.chats)
 	}
 }
@@ -132,7 +132,7 @@ func TestUnmuteUsesSourceHashProtocol(t *testing.T) {
 func TestColorAndFlairRequireActiveUserAndUseSourcePayloads(t *testing.T) {
 	for _, tc := range []struct{ text, raw, reply string }{
 		{"!color @Merc 00ff00", `{"cmd":"forcecolor","color":"00ff00","nick":"Merc"}`, ""},
-		{"!flair Merc trusted", `{"cmd":"forceflair","flair":"trusted","nick":"Merc"}`, "mod|\\n Flair set successfully!|false"},
+		{"!flair Merc trusted", `{"cmd":"forceflair","flair":"trusted","nick":"Merc"}`, "mod|\\n Flair request sent; server application is unconfirmed.|false"},
 	} {
 		e := &commandEngineStub{users: map[string]*model.User{"Merc": {Name: "Merc"}}}
 		canonical := "color"
@@ -210,7 +210,7 @@ func TestShadowBanOfflineSelectorUsesTypedPersistence(t *testing.T) {
 	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("sban")
 	status, err := d.New(e, moderationMessage("!sban offline", false)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(fake.selectors, []string{"offline"}) || !equalStrings(e.chats, []string{"mod|banned: offline|false"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(fake.selectors, []string{"offline"}) || !equalStrings(e.chats, []string{"mod|Shadow-ban record saved for offline.|false"}) {
 		t.Fatalf("status=%v err=%v selectors=%v chats=%v", status, err, fake.selectors, e.chats)
 	}
 }
@@ -230,7 +230,7 @@ func TestUnshadowBanRemovesTypedSelector(t *testing.T) {
 	e := &commandEngineStub{bundle: &service.Bundle{ShadowBans: &service.ShadowBanService{Repo: fake}}}
 	d, _ := commandDefinitionFor("unblock")
 	status, err := d.New(e, moderationMessage("!unblock target", false)).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Unbanned shadow-ban records: 1|false"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(e.chats, []string{"mod|Removed shadow-ban records: 1|false"}) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, e.chats)
 	}
 }

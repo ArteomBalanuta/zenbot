@@ -171,12 +171,12 @@ func TestShadowBanListRendersDecodedRecordsAndNoBans(t *testing.T) {
 	repo.records = nil
 	engine.chats = nil
 	status, err = definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!banlist"}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.chats, []string{"mod|No users has been banned.|false"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.chats, []string{"mod|No shadow-ban records found.|false"}) {
 		t.Fatalf("status=%v err=%v chats=%v", status, err, engine.chats)
 	}
 }
 
-func TestShadowBanSingleActivePersistsIdentityKicksAndReplies(t *testing.T) {
+func TestShadowBanSingleActivePersistsIdentitySendsKickRequestAndReplies(t *testing.T) {
 	repo := &shadowBanRepositoryStub{}
 	engine := newShadowBanEngine(repo, map[string]*model.User{"merc": {Name: "merc", Trip: "trip", Hash: "hash"}})
 	definition, _ := commandDefinitionFor("sban")
@@ -187,7 +187,7 @@ func TestShadowBanSingleActivePersistsIdentityKicksAndReplies(t *testing.T) {
 	if got, want := repo.persisted, []repository.ShadowBanRecord{{Trip: "trip", Name: "merc", Hash: "hash"}}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("persisted=%+v want=%+v", got, want)
 	}
-	if !equalStrings(engine.kicked, []string{"merc"}) || !equalStrings(engine.chats, []string{"mod|shadow_banned: merc trip: trip hash: hash|false"}) {
+	if !equalStrings(engine.kicked, []string{"merc"}) || !equalStrings(engine.chats, []string{"mod|Shadow-ban record saved for merc trip: trip hash: hash; kick request sent, server application unconfirmed.|false"}) {
 		t.Fatalf("kicked=%v chats=%v", engine.kicked, engine.chats)
 	}
 }
@@ -204,7 +204,7 @@ func TestShadowBanSingleUsesAuthoritativeActiveIdentity(t *testing.T) {
 	if got, want := repo.persisted, []repository.ShadowBanRecord{{Trip: "current-trip", Name: "merc", Hash: "current-hash"}}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("persisted=%+v want=%+v", got, want)
 	}
-	if !equalStrings(engine.kicked, []string{"merc"}) || !equalStrings(engine.chats, []string{"mod|shadow_banned: Merc trip: current-trip hash: current-hash|false"}) {
+	if !equalStrings(engine.kicked, []string{"merc"}) || !equalStrings(engine.chats, []string{"mod|Shadow-ban record saved for Merc trip: current-trip hash: current-hash; kick request sent, server application unconfirmed.|false"}) {
 		t.Fatalf("kicked=%v chats=%v", engine.kicked, engine.chats)
 	}
 }
@@ -217,7 +217,7 @@ func TestShadowBanOfflineAndContainsModePreserveSourceReplies(t *testing.T) {
 	})
 	definition, _ := commandDefinitionFor("shadowban")
 	status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!shadowban nobody"}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.chats, []string{"mod|banned: nobody|false"}) || len(repo.persisted) != 1 || repo.persisted[0] != (repository.ShadowBanRecord{Name: "nobody"}) {
+	if status != model.SUCCESSFUL || err != nil || !equalStrings(engine.chats, []string{"mod|Shadow-ban record saved for nobody.|false"}) || len(repo.persisted) != 1 || repo.persisted[0] != (repository.ShadowBanRecord{Name: "nobody"}) {
 		t.Fatalf("offline status=%v err=%v records=%+v chats=%v", status, err, repo.persisted, engine.chats)
 	}
 
@@ -328,13 +328,13 @@ func TestUnshadowBanSingleAndAllDeleteUseRepositoryAndNoAgentPath(t *testing.T) 
 	engine := newShadowBanEngine(repo, nil)
 	definition, _ := commandDefinitionFor("unblock")
 	status, err := definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!unblock nick", IsWhisper: true}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || repo.removedTarget != "nick" || !equalStrings(engine.chats, []string{"mod|Unbanned shadow-ban records: 1|true"}) {
+	if status != model.SUCCESSFUL || err != nil || repo.removedTarget != "nick" || !equalStrings(engine.chats, []string{"mod|Removed shadow-ban records: 1|true"}) {
 		t.Fatalf("single status=%v err=%v target=%q chats=%v", status, err, repo.removedTarget, engine.chats)
 	}
 
 	engine.chats = nil
 	status, err = definition.New(engine, &model.ChatMessage{Name: "mod", Text: "!unblock -all"}).Execute(context.Background())
-	if status != model.SUCCESSFUL || err != nil || repo.removeAlls != 1 || repo.listCalls != 0 || !equalStrings(engine.chats, []string{"mod|Unbanned shadow-ban records: 3|false"}) {
+	if status != model.SUCCESSFUL || err != nil || repo.removeAlls != 1 || repo.listCalls != 0 || !equalStrings(engine.chats, []string{"mod|Removed shadow-ban records: 3|false"}) {
 		t.Fatalf("all status=%v err=%v deleted=%d chats=%v", status, err, repo.removeAlls, engine.chats)
 	}
 }

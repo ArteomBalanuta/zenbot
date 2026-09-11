@@ -110,7 +110,7 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
-		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("shadow_banned: %s trip: %s hash: %s", normalized, user.Trip, user.Hash)); err != nil {
+		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Shadow-ban record saved for %s trip: %s hash: %s; kick request sent, server application unconfirmed.", normalized, user.Trip, user.Hash)); err != nil {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
@@ -125,7 +125,7 @@ func (c *shadowBanCommand) shadowBanSingle(ctx context.Context, target string) (
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, "banned: "+normalized); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "Shadow-ban record saved for "+normalized+"."); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

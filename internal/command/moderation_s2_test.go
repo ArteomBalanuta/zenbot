@@ -83,16 +83,16 @@ func TestManualSimpleModerationCommandsUseTypedOperations(t *testing.T) {
 	cases := []struct {
 		name, command, raw, chat string
 	}{
-		{"captcha defaults on", "!captcha", `{"cmd":"enablecaptcha"}`, "mod| Captcha enabled!|true"},
-		{"captcha off", "!captcha off", `{"cmd":"disablecaptcha"}`, "mod| Captcha disabled!|true"},
-		{"authorize", "!auth trip", `{"cmd":"authtrip","trip":"trip"}`, "mod| authorized trip: trip|true"},
-		{"deauthorize", "!deauth trip", `{"cmd":"deauthtrip","trip":"trip"}`, "mod| deauthorized trip: trip|true"},
-		{"lock", "!lock on", `{"cmd":"lockroom"}`, "mod| Room locked!|true"},
-		{"unlock", "!lock off", `{"cmd":"unlockroom"}`, "mod| Room unlocked!|true"},
+		{"captcha defaults on", "!captcha", `{"cmd":"enablecaptcha"}`, "mod| Captcha-enable request sent; server application is unconfirmed.|true"},
+		{"captcha off", "!captcha off", `{"cmd":"disablecaptcha"}`, "mod| Captcha-disable request sent; server application is unconfirmed.|true"},
+		{"authorize", "!auth trip", `{"cmd":"authtrip","trip":"trip"}`, "mod| authorization request sent for trip: trip|true"},
+		{"deauthorize", "!deauth trip", `{"cmd":"deauthtrip","trip":"trip"}`, "mod| deauthorization request sent for trip: trip|true"},
+		{"lock", "!lock on", `{"cmd":"lockroom"}`, "mod| Room-lock request sent; server application is unconfirmed.|true"},
+		{"unlock", "!lock off", `{"cmd":"unlockroom"}`, "mod| Room-unlock request sent; server application is unconfirmed.|true"},
 		{"overflow", "!shoot @merc", `{"cmd":"overflow","nick":"Merc"}`, ""},
-		{"ban", "!ban @merc", `{"cmd":"ban","nick":"Merc"}`, "mod|Merc has been banned|true"},
-		{"unban", "!unban hash", `{"cmd":"unban","hash":"hash"}`, "mod|hash has been unbanned|true"},
-		{"unban all", "!pardonall", `{"cmd":"unbanall"}`, "mod|mercy.|true"},
+		{"ban", "!ban @merc", `{"cmd":"ban","nick":"Merc"}`, "mod|Permanent-ban request sent for Merc; server application is unconfirmed.|true"},
+		{"unban", "!unban hash", `{"cmd":"unban","hash":"hash"}`, "mod|Unban request sent for hash hash; server application is unconfirmed.|true"},
+		{"unban all", "!pardonall", `{"cmd":"unbanall"}`, "mod|Unban-all request sent; server application is unconfirmed.|true"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

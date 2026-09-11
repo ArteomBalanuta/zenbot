@@ -28,7 +28,7 @@ func (c *unmuteCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err := operations.UnmuteHash(ctx, common.BanHash(hash)); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, hash+" has been unmuted"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "Unmute request sent for hash "+hash+"; server application is unconfirmed."); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

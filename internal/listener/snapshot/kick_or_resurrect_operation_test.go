@@ -9,7 +9,7 @@ import (
 	"zenbot/internal/model"
 )
 
-func TestKickOrResurrectOperationMovesNormalizedPresentTarget(t *testing.T) {
+func TestKickOrResurrectOperationSendsMoveRequestForNormalizedPresentTarget(t *testing.T) {
 	var raws []string
 	operation := NewKickOrResurrectOperation("@Alice")
 	result, err := operation.Apply(RoomSnapshotContext{DestinationChannel: "destination", SendRaw: func(raw string) error {

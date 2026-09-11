@@ -246,7 +246,7 @@ func TestRegistryToolLoopLetsExecutionModelRouteCurrentAndRemoteRooms(t *testing
 	}
 }
 
-func TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner(t *testing.T) {
+func TestRegistryToolLoopExecutesCompoundCountsThenSendsKickRequestWithoutSemanticPlanner(t *testing.T) {
 	objective := "count users in lounge, count users in programming multiply these counts after execute kick tajweed after that summarize everything in one message for me"
 	client := &scriptedToolClient{responses: []llm.LlmResponse{
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{
@@ -256,7 +256,7 @@ func TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner(t 
 		llm.NewLlmResponse(nil, []llm.LlmToolCall{
 			llm.NewLlmToolCall("kick-call", "saturn_kick", map[string]any{"nick": "tajweed"}),
 		}, "tool_calls"),
-		llm.NewLlmResponse("Lounge 1 x programming 1 = 1; tajweed was kicked.", nil, "stop"),
+		llm.NewLlmResponse("Lounge 1 x programming 1 = 1; the kick request for tajweed was sent; server application is unconfirmed.", nil, "stop"),
 	}}
 	gateway := &routeCommandGateway{}
 	directory := &loopRoomDirectory{}
@@ -287,7 +287,7 @@ func TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completion.Response.Content() != "Lounge 1 x programming 1 = 1; tajweed was kicked." {
+	if completion.Response.Content() != "Lounge 1 x programming 1 = 1; the kick request for tajweed was sent; server application is unconfirmed." {
 		t.Fatalf("response=%q", completion.Response.Content())
 	}
 	if directory.calls != 1 || len(gateway.commands) != 2 || gateway.commands[0] != "list lounge" || gateway.commands[1] != "kick tajweed" {
@@ -298,6 +298,9 @@ func TestRegistryToolLoopExecutesCompoundCountsThenKickWithoutSemanticPlanner(t 
 	}
 	if !requestContainsToolCallID(client.requests[2], "kick-call") || !messagesContain(client.requests[2].Messages(), "tajweed") {
 		t.Fatal("final synthesis did not receive the executed kick and its target")
+	}
+	if !messagesContain(client.requests[2].Messages(), "request transmission") || !messagesContain(client.requests[2].Messages(), "never server application") {
+		t.Fatal("final synthesis did not retain moderation request-boundary guidance")
 	}
 	for _, name := range allowed {
 		if !providerRequestHasTool(client.requests[0], name) {

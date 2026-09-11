@@ -7,7 +7,7 @@ import (
 	"zenbot/internal/util"
 )
 
-// KickOrResurrectOperation performs the temporary-session move only after its
+// KickOrResurrectOperation submits the kick-to-room move request only after its
 // source-room snapshot establishes that the normalized target is present.
 type KickOrResurrectOperation struct{ target string }
 

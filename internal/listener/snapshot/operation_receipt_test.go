@@ -48,7 +48,7 @@ func TestNukeCancellationStopsInterActionWait(t *testing.T) {
 		t.Fatalf("result=%+v err=%v calls=%d elapsed=%s", r, err, calls, time.Since(began))
 	}
 }
-func TestResurrectUsesActualSnapshotNickAndCountsSend(t *testing.T) {
+func TestResurrectRequestUsesActualSnapshotNickAndCountsSend(t *testing.T) {
 	raw := ""
 	r, err := NewKickOrResurrectOperation("alice").Apply(RoomSnapshotContext{SendRaw: func(s string) error { raw = s; return nil }}, Snapshot{Users: []*model.User{{Name: "ALIce"}}})
 	if err != nil || r.ActionCount != 1 || !strings.Contains(raw, `"nick":"ALIce"`) {

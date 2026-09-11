@@ -74,6 +74,9 @@ func (f OperationFunc) Apply(c RoomSnapshotContext, s Snapshot) (OperationResult
 type OperationOutcome string
 
 const (
+	// OutcomeSuccess means the local operation returned without error. When the
+	// coordinator returns it, flush and cleanup also completed without error. For
+	// request operations it does not prove remote server application.
 	OutcomeSuccess      OperationOutcome = "SUCCESS"
 	OutcomeEmpty        OperationOutcome = "EMPTY"
 	OutcomeAbsentTarget OperationOutcome = "ABSENT_TARGET"

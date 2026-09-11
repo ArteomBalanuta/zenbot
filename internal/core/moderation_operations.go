@@ -121,6 +121,8 @@ func validateModerationNick(target common.NickTarget) (string, error) {
 	return nick, nil
 }
 
+// sendRawModeration returns nil after the local transport accepts the encoded
+// outbound write. This path has no correlated server-application response.
 func (e *EngineImpl) sendRawModeration(ctx context.Context, payload moderationPayload) error {
 	if ctx == nil {
 		ctx = context.Background()

@@ -23,7 +23,7 @@ func (c *shadowBanListCommand) Execute(ctx context.Context) (model.Status, error
 	if err != nil {
 		return model.FAILED, err
 	}
-	text := "No users has been banned."
+	text := "No shadow-ban records found."
 	if len(records) == 0 {
 		if err := observeAndReply(ctx, &c.commandBase, text, c.message.IsWhisper || c.message.Whisper || c.message.Type == "whisper"); err != nil {
 			return model.FAILED, err

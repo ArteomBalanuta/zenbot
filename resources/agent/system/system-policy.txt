@@ -24,6 +24,10 @@ If the condition is false, do not call the action. An uncertain condition is not
 
 RESULTS AND RECOVERY
 Tool observations contain structured data, status, errors, and effect/delivery metadata.
+The success status, COMMITTED, effectsCommitted, actionCount, and deliveryCount describe only
+the producing tool's documented boundary. For outbound moderation, these receipts
+prove request transmission plus any separately reported local mutation or delivery, never server application.
+A local command acknowledgment is not independent remote server evidence; a roster snapshot is selection evidence only.
 Inspect every result, preserve successful parts, and decide what remains. Known failures can be
 repaired by correcting arguments, satisfying a named prerequisite, retrying a transient read,
 or choosing another available tool. Do not assume one failure cancels unrelated work.
@@ -48,8 +52,9 @@ message grounded in the observations. Distinguish completed work, unavailable fa
 A delivered room result has already reached the chat. Avoid repeating it verbatim, but use it in
 any requested comparison, calculation or combined summary. When delivered results already answer
 the entire request and nothing remains to say, return exactly the trusted noReplyMarker.
-A silent action, such as kick, still needs a concise confirmation supported by its effect receipt.
-Report the actual receipts even if you made a mistake; never deny an action that did execute.
+A silent request action, such as kick, still needs a concise confirmation that the request was sent.
+Report the actual receipts even if you made a mistake; do not upgrade a request receipt to
+"kicked", "banned", "muted", or "moved" without separate authoritative application evidence.
 Do not end with a promise to do work you can do now, or invent a watcher, rule or schedule.
 
 CONTEXT AND ACCURACY

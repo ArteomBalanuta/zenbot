@@ -199,11 +199,31 @@ func TestAgentCatalogDerivedPoliciesRemainExact(t *testing.T) {
 		t.Fatalf("prefix policy = %#v", prefix.Agent)
 	}
 	nuke, ok := AgentEntry("nuke")
-	if !ok || Access(nuke) != AgentPermanentBan || !strings.Contains(strings.ToLower(nuke.Agent.Description), "permanently ban") || !strings.Contains(strings.ToLower(nuke.Agent.Description), "lock") {
+	nukeDescription := strings.ToLower(nuke.Agent.Description)
+	if !ok || Access(nuke) != AgentPermanentBan || !strings.Contains(nukeDescription, "ban request") || !strings.Contains(nukeDescription, "lock request") || !strings.Contains(nukeDescription, "not server application") {
 		t.Fatalf("nuke policy = %#v", nuke.Agent)
 	}
 	if _, ok := AgentEntry("l"); ok {
 		t.Fatal("hidden recursive command l was exposed")
+	}
+}
+
+func TestRemoteModerationCatalogDescriptionsDefineRequestBoundary(t *testing.T) {
+	for _, name := range []string{"authorize", "deauthorize", "ban", "unban", "unbanall", "captcha", "lock", "mute", "unmute", "color", "flair", "kick", "overflow"} {
+		definition, ok := AgentEntry(name)
+		description := strings.ToLower(definition.Agent.Description)
+		if !ok || !strings.Contains(description, "request") || !strings.Contains(description, "server application is not confirmed") {
+			t.Errorf("%s description does not define its request boundary: %q", name, definition.Agent.Description)
+		}
+	}
+
+	resurrect, ok := AgentEntry("resurrect")
+	if !ok || !strings.Contains(strings.ToLower(resurrect.Agent.Description), "kick-to-destination request") || !strings.Contains(strings.ToLower(resurrect.Agent.Description), "not the move") {
+		t.Errorf("resurrect description does not distinguish submission from a completed move: %q", resurrect.Agent.Description)
+	}
+	shadowBan, ok := AgentEntry("shadowban")
+	if !ok || !strings.Contains(strings.ToLower(shadowBan.Agent.Description), "save local shadow-ban") || !strings.Contains(strings.ToLower(shadowBan.Agent.Description), "kick request") || !strings.Contains(strings.ToLower(shadowBan.Agent.Description), "local persistence is confirmed") {
+		t.Errorf("shadowban description does not distinguish local persistence from remote application: %q", shadowBan.Agent.Description)
 	}
 }
 

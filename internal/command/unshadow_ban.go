@@ -38,7 +38,7 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 		if err := ctx.Err(); err != nil {
 			return model.FAILED, err
 		}
-		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Unbanned shadow-ban records: %d", changed)); err != nil {
+		if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Removed shadow-ban records: %d", changed)); err != nil {
 			return model.FAILED, err
 		}
 		return model.SUCCESSFUL, nil
@@ -57,7 +57,7 @@ func (c *unshadowBanCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err := ctx.Err(); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Unbanned shadow-ban records: %d", changed)); err != nil {
+	if err := replyContext(ctx, &c.commandBase, fmt.Sprintf("Removed shadow-ban records: %d", changed)); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil

@@ -71,7 +71,7 @@ func executeAppearance(ctx context.Context, base *commandBase, kind, example str
 		return model.FAILED, err
 	}
 	if kind == "flair" {
-		if err := replyContext(ctx, base, "\\n Flair set successfully!"); err != nil {
+		if err := replyContext(ctx, base, "\\n Flair request sent; server application is unconfirmed."); err != nil {
 			return model.FAILED, err
 		}
 	}

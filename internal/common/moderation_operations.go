@@ -14,7 +14,9 @@ type Color string
 type Channel string
 
 // ModerationOperations is the narrow context-aware raw protocol boundary used
-// by moderator command slices. It does not define command policy or output.
+// by moderator command slices. A nil result confirms the local outbound write,
+// not a correlated server application acknowledgment. It does not define
+// command policy or output.
 type ModerationOperations interface {
 	BanNick(context.Context, NickTarget) error
 	UnbanHash(context.Context, BanHash) error

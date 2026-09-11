@@ -48,11 +48,11 @@ func (c *moderationIdentityCommand) Execute(ctx context.Context) (model.Status, 
 	if err != nil {
 		return model.FAILED, err
 	}
-	verb := " authorized"
+	verb := " authorization request sent"
 	if c.deauthorize {
-		verb = " deauthorized"
+		verb = " deauthorization request sent"
 	}
-	if err := replyContext(ctx, &c.commandBase, verb+" trip: "+trip); err != nil {
+	if err := replyContext(ctx, &c.commandBase, verb+" for trip: "+trip); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -91,7 +91,7 @@ func (c *simpleBanCommand) Execute(ctx context.Context) (model.Status, error) {
 	if err = operations.BanNick(ctx, common.NickTarget(target.Name)); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, target.Name+" has been banned"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "Permanent-ban request sent for "+target.Name+"; server application is unconfirmed."); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -117,7 +117,7 @@ func (c *simpleUnbanCommand) Execute(ctx context.Context) (model.Status, error) 
 	if err = operations.UnbanHash(ctx, common.BanHash(hash)); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, hash+" has been unbanned"); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "Unban request sent for hash "+hash+"; server application is unconfirmed."); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -136,7 +136,7 @@ func (c *simpleUnbanAllCommand) Execute(ctx context.Context) (model.Status, erro
 	if err = operations.UnbanAllContext(ctx); err != nil {
 		return model.FAILED, err
 	}
-	if err := replyContext(ctx, &c.commandBase, "mercy."); err != nil {
+	if err := replyContext(ctx, &c.commandBase, "Unban-all request sent; server application is unconfirmed."); err != nil {
 		return model.FAILED, err
 	}
 	return model.SUCCESSFUL, nil
@@ -162,14 +162,14 @@ func (c *simpleLockCommand) Execute(ctx context.Context) (model.Status, error) {
 	if argument == "on" {
 		err = operations.LockRoom(ctx)
 		if err == nil {
-			if err := replyContext(ctx, &c.commandBase, " Room locked!"); err != nil {
+			if err := replyContext(ctx, &c.commandBase, " Room-lock request sent; server application is unconfirmed."); err != nil {
 				return model.FAILED, err
 			}
 		}
 	} else {
 		err = operations.UnlockRoom(ctx)
 		if err == nil {
-			if err := replyContext(ctx, &c.commandBase, " Room unlocked!"); err != nil {
+			if err := replyContext(ctx, &c.commandBase, " Room-unlock request sent; server application is unconfirmed."); err != nil {
 				return model.FAILED, err
 			}
 		}
