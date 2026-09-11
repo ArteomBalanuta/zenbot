@@ -600,8 +600,5 @@ func commandDefinitionFor(alias string) (common.CommandDefinition, bool) {
 	if d, ok := validatedCatalog.Lookup(alias); ok {
 		return d, true
 	}
-	if strings.EqualFold(alias, "unlock") || strings.EqualFold(alias, "unlockroom") {
-		return def("unlock", []string{"unlock", "unlockroom"}, model.MODERATOR), true
-	}
 	return common.CommandDefinition{}, false
 }

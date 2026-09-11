@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -8,6 +9,62 @@ import (
 	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
+
+func TestRegistryOwnershipAuditGhostUnlockDefinitionsFailClosed(t *testing.T) {
+	for _, alias := range []string{"unlock", "unlockroom", "UNLOCK", "UNLOCKROOM"} {
+		t.Run(alias, func(t *testing.T) {
+			if definition, ok := commandDefinitionFor(alias); ok || definition.New != nil {
+				t.Fatalf("unregistered alias %q exposed an executable definition", alias)
+			}
+		})
+	}
+}
+
+type registryUnlockAuditEngine struct {
+	*commandEngineStub
+	registry       common.RuntimeCommandRegistry
+	unlockContexts []context.Context
+}
+
+func (e *registryUnlockAuditEngine) RegisterCommand(c common.Command) error {
+	return e.registry.Register(c, e)
+}
+func (e *registryUnlockAuditEngine) LookupCommand(alias string) (common.CommandMetadata, bool) {
+	return e.registry.Lookup(alias)
+}
+func (e *registryUnlockAuditEngine) GetEnabledCommands() *map[string]common.CommandMetadata {
+	snapshot := e.registry.Snapshot()
+	return &snapshot
+}
+func (e *registryUnlockAuditEngine) UnlockRoom(ctx context.Context) error {
+	e.unlockContexts = append(e.unlockContexts, ctx)
+	return nil
+}
+
+func TestRegistryOwnershipAuditRegisteredLockOffUsesTypedUnlock(t *testing.T) {
+	e := &registryUnlockAuditEngine{commandEngineStub: &commandEngineStub{}}
+	if err := RegisterUserUtilities(e); err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{"unlock", "unlockroom"} {
+		if common.BuildCommand(alias, e, moderationMessage("!"+alias, false)) != nil {
+			t.Fatalf("ghost alias %q was registered", alias)
+		}
+	}
+	command := common.BuildCommand("lock", e, moderationMessage("!lock off", false))
+	if command == nil {
+		t.Fatal("registered lock command is missing")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	status, err := common.InvokeCommand(ctx, e, command)
+	if err != nil || status != model.SUCCESSFUL {
+		t.Fatalf("lock off status=%v err=%v", status, err)
+	}
+	if len(e.unlockContexts) != 1 || e.unlockContexts[0] != ctx || len(e.raws) != 0 {
+		t.Fatalf("lock off did not use exactly one typed unlock with its context: contexts=%v raw=%v", e.unlockContexts, e.raws)
+	}
+}
 
 func TestRegistryOwnershipAuditRegisterAllIsAtomic(t *testing.T) {
 	r := common.NewSaturnCommandRegistry()
