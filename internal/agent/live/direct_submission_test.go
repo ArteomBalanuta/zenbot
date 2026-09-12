@@ -198,10 +198,12 @@ func TestDirectSubmissionAdapterDefersPersistenceToRuntimeDelivery(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &directRuntimeOrderingRunner{result: tc.result, started: make(chan struct{}), after: make(chan struct{})}
+			delivered := make(chan struct{})
 			rt, err := runtime.New(runtime.Config{MaxConcurrent: 1, QueueCapacity: 0}, runner, runtime.SinkFunc(func(context.Context, runtime.Invocation, runtime.Result) error {
 				runner.mu.Lock()
 				runner.order = append(runner.order, "sink")
 				runner.mu.Unlock()
+				close(delivered)
 				return tc.sinkErr
 			}))
 			if err != nil {
@@ -220,6 +222,16 @@ func TestDirectSubmissionAdapterDefersPersistenceToRuntimeDelivery(t *testing.T)
 			case <-time.After(time.Second):
 				rt.Close()
 				t.Fatal("direct invocation did not reach the runtime")
+			}
+			// Runner entry is not delivery completion. Closing the runtime before
+			// the sink runs can cancel the delivery this test intends to verify.
+			if tc.result.ShouldReply() {
+				select {
+				case <-delivered:
+				case <-time.After(time.Second):
+					rt.Close()
+					t.Fatal("direct reply did not reach the delivery sink")
+				}
 			}
 			if tc.wantAfter {
 				select {
