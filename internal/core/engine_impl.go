@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 	"zenbot/internal/common"
 	"zenbot/internal/listener/snapshot"
 	"zenbot/internal/model"
@@ -82,6 +83,7 @@ type EngineImpl struct {
 	commands             common.RuntimeCommandRegistry
 	usersMu              sync.RWMutex
 	afkMu                sync.RWMutex
+	afkMentions          map[*model.User]afkMention
 	subscribersMu        sync.RWMutex
 	subscribers          map[string]struct{}
 	runtimeMu            sync.Mutex
@@ -658,6 +660,7 @@ func (e *EngineImpl) AddAfkUser(u *model.User, reason string) {
 	for current := range e.AfkUsers {
 		if current.Name == owned.Name {
 			delete(e.AfkUsers, current)
+			delete(e.afkMentions, current)
 		}
 	}
 	e.AfkUsers[owned] = reason
@@ -683,9 +686,13 @@ func (e *EngineImpl) RemoveIfAfk(u *model.User) {
 	}
 	name, trip := u.Name, u.Trip
 	removed := false
+	var mention afkMention
+	var mentioned bool
 	e.afkMu.Lock()
 	for user := range e.AfkUsers {
 		if user.Name == name && user.Trip == trip {
+			mention, mentioned = e.afkMentions[user]
+			delete(e.afkMentions, user)
 			delete(e.AfkUsers, user)
 			removed = true
 			break
@@ -694,23 +701,53 @@ func (e *EngineImpl) RemoveIfAfk(u *model.User) {
 	e.afkMu.Unlock()
 	if removed {
 		log.Printf("Removed Afk user %s", name)
+		if mentioned {
+			// Best-effort, at-most-once notification: an uncertain send must not
+			// replay on every subsequent message. Never hold afkMu during I/O.
+			if _, err := e.SendWhisperMessage(name, fmt.Sprintf("While you were away, %s mentioned you:\n%s", mention.author, mention.text)); err != nil {
+				log.Printf("AFK mention notification send failed: %v", err)
+			}
+		}
 		_, _ = e.SendChatMessage(name, " is not afk anymore - welcome back.", false)
 	}
 }
 
-// TODO: improve to mention users by checking against trip of the mentioned user
+// afkMention belongs to one room's AFK session, keyed by the engine-owned user
+// pointer. Renames retain it; replacing or consuming the AFK entry discards it.
+type afkMention struct {
+	author string
+	text   string
+}
+
 func (e *EngineImpl) NotifyAfkIfMentioned(m *model.ChatMessage) {
-	if m == nil {
+	if m == nil || m.IsWhisper || m.Whisper || m.Type == "whisper" {
 		return
 	}
 	text, author := m.Text, m.Name
-	snapshot := e.GetAfkUsers()
-	for user, reason := range *snapshot {
-		mentionedTrip := user.Trip != "" && strings.Contains(text, user.Trip)
-		mentionedName := user.Name != "" && strings.Contains(text, user.Name)
-		if mentionedTrip || mentionedName {
-			_, _ = e.SendChatMessage(author, fmt.Sprintf(" user: %s is afk, reason: %s", user.Name, reason), false)
+	// Nicknames are case-insensitive; tripcodes are opaque and case-sensitive.
+	tokens := strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) && !strings.ContainsRune("_-+/", r)
+	})
+	var notifications []string
+	e.afkMu.Lock()
+	for user, reason := range e.AfkUsers {
+		if user == nil || strings.EqualFold(author, user.Name) {
+			continue
 		}
+		for _, token := range tokens {
+			if (user.Trip != "" && token == user.Trip) || (user.Name != "" && strings.EqualFold(token, strings.TrimPrefix(user.Name, "@"))) {
+				if e.afkMentions == nil {
+					e.afkMentions = make(map[*model.User]afkMention)
+				}
+				e.afkMentions[user] = afkMention{author: author, text: text}
+				notifications = append(notifications, fmt.Sprintf(" user: %s is afk, reason: %s", user.Name, reason))
+				break
+			}
+		}
+	}
+	e.afkMu.Unlock()
+	for _, notification := range notifications {
+		_, _ = e.SendChatMessage(author, notification, false)
 	}
 }
 

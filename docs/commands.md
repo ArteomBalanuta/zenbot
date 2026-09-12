@@ -42,7 +42,7 @@ Aliases below are alternatives to the canonical name in the first column.
 | `help` | `h` | Whisper the command reference. |
 | `crashcourse` | `howto`, `moderationcrashcourse`, `hcguide` | Show the moderation guide. |
 | `l <prompt>` | — | Ask the configured room agent. Never exposed back to the agent as a tool. |
-| `afk [reason]` | `a` | Mark yourself away. |
+| `afk [reason]` | `a` | Mark yourself away. Your next public message clears AFK and privately returns the latest mention received while away, if any. |
 | `ape` | `harambe` | Print an ape. |
 | `coin` | `toss`, `ct` | Toss a coin. |
 | `info <nick>` | `i`, `whois`, `who` | Show an active room user's current trip and hash. |
@@ -61,6 +61,14 @@ Aliases below are alternatives to the canonical name in the first column.
 | `time <location>` | `t` | Fetch current local time for a city or location. |
 | `weather <location>` | `w`, `today` | Fetch current weather. |
 | `version` | `v` | Show the running bot version. |
+
+AFK retains only the latest public mention per away user in a room-local,
+mutex-protected memory map. Complete nickname matches (including `@nick`) are
+case-insensitive; tripcode matches are case-sensitive. New mentions replace the
+previous one. Nickname changes retain the reminder; a new AFK session clears it.
+Private messages are not captured. Return notifications are best-effort and
+attempted once, even if sending fails, so subsequent chat does not replay them.
+No database or disk storage is used for reminders; restarting the bot loses them.
 
 History and registration are different from presence: `lastonline`, `nicks`, and
 `users` do not prove who is online now. In agent requests, `room_users` supplies
