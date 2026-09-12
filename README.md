@@ -1,5 +1,7 @@
 # Zenbot
 
+[![CI](https://github.com/ArteomBalanuta/zenbot/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ArteomBalanuta/zenbot/actions/workflows/ci.yml?query=branch%3Amaster)
+
 A Go bot for Hack.Chat rooms, with role-aware commands, moderation, persistent
 history and mail, replica management, and an optional LLM agent.
 
