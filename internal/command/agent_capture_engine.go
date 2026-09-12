@@ -346,12 +346,14 @@ func (e *agentCaptureEngine) awaitSnapshotCompletions(ctx context.Context) error
 	return completionErr
 }
 
-func (e *agentCaptureEngine) UpdatePrefix(prefix string) (string, error) {
+func (e *agentCaptureEngine) GetPrefixes() []string { return common.CommandPrefixes(e.Engine) }
+
+func (e *agentCaptureEngine) UpdatePrefix(prefixes ...string) (string, error) {
 	controller, err := requiredAgentCapability[common.PrefixController](e.Engine, "prefix controller")
 	if err != nil {
 		return "", err
 	}
-	previous, err := controller.UpdatePrefix(prefix)
+	previous, err := controller.UpdatePrefix(prefixes...)
 	return previous, e.recordAction(err)
 }
 

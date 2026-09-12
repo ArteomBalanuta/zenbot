@@ -98,10 +98,11 @@ func (DispatchWhisperCommand) Handle(ctx context.Context, c *Context) (bool, err
 		return false, nil
 	}
 	text := strings.TrimSpace(c.ChatMessage.Text)
-	if !strings.HasPrefix(text, c.Engine.GetPrefix()) {
+	prefix := common.MatchCommandPrefix(text, common.CommandPrefixes(c.Engine))
+	if prefix == "" {
 		return false, nil
 	}
-	f := strings.Fields(strings.TrimPrefix(text, c.Engine.GetPrefix()))
+	f := strings.Fields(strings.TrimPrefix(text, prefix))
 	if len(f) == 0 {
 		return false, nil
 	}

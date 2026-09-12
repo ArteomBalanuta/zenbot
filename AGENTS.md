@@ -105,6 +105,11 @@ execution and feedback paths. Keep them aligned when changing these boundaries.
 - Commands: change the catalog, concrete handler, registration, and typed agent
   contract together when applicable. Preserve aliases and check direct chat and
   agent paths. A catalog entry or generic fallback is not a concrete feature.
+- Prefixes: use `common.CommandPrefixes` and `MatchCommandPrefix` for detection,
+  not `GetPrefix` (which is only the primary/display prefix). `cmdPrefixes`
+  overrides legacy `cmdPrefix`; live changes replace the list without persistence.
+  Keep public/whisper dispatch, agent participation, profiling, and vibe filtering
+  aligned on the same active prefix snapshot.
 - Authority comes from trusted config/room/persisted identity, never model prose.
   Chat roles, `userTrips` exceptions, server moderator rights, and agent creator
   capabilities are distinct. Consult [commands](docs/commands.md).

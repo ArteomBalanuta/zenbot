@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"zenbot/internal/common"
 	"zenbot/internal/util"
 
 	"zenbot/internal/agent/runtime"
@@ -27,10 +28,11 @@ func (NoConversationContext) Load(context.Context, runtime.Invocation) (string, 
 
 // RepositoryConversationContextProvider loads bounded public-room messages.
 type RepositoryConversationContextProvider struct {
-	Repository    repository.AgentConversationRepository
-	MessageLimit  int
-	BotNames      func() []string
-	CommandPrefix func() string
+	Repository      repository.AgentConversationRepository
+	MessageLimit    int
+	BotNames        func() []string
+	CommandPrefix   func() string
+	CommandPrefixes func() []string
 }
 
 func NewRepositoryConversationContextProvider(repository repository.AgentConversationRepository, messageLimit int) (RepositoryConversationContextProvider, error) {
@@ -130,7 +132,7 @@ func (p RepositoryConversationContextProvider) vibeContext(inv runtime.Invocatio
 		AgeMinutes int64  `json:"ageMinutes"`
 		Truncated  bool   `json:"truncated,omitempty"`
 	}
-	prefix := ""
+	var prefixes []string
 	bots := map[string]bool{}
 	if p.BotNames != nil {
 		for _, bot := range p.BotNames() {
@@ -140,8 +142,10 @@ func (p RepositoryConversationContextProvider) vibeContext(inv runtime.Invocatio
 			}
 		}
 	}
-	if p.CommandPrefix != nil {
-		prefix = p.CommandPrefix()
+	if p.CommandPrefixes != nil {
+		prefixes = p.CommandPrefixes()
+	} else if p.CommandPrefix != nil {
+		prefixes = []string{p.CommandPrefix()}
 	}
 	caller := inv.Context().Nick()
 	callerKey, _ := util.CanonicalNick(&caller)
@@ -154,7 +158,7 @@ func (p RepositoryConversationContextProvider) vibeContext(inv runtime.Invocatio
 		if err != nil || !strings.EqualFold(r.Channel, inv.Context().Room()) || strings.TrimSpace(r.Message) == "" || bots[key] {
 			continue
 		}
-		if (key == callerKey && r.Message == inv.CurrentMessageText()) || (prefix != "" && strings.HasPrefix(strings.TrimSpace(r.Message), prefix)) {
+		if (key == callerKey && r.Message == inv.CurrentMessageText()) || common.MatchCommandPrefix(strings.TrimSpace(r.Message), prefixes) != "" {
 			continue
 		}
 		chars := []rune(r.Message)

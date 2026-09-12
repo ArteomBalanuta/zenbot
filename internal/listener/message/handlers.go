@@ -184,10 +184,11 @@ func isCommandAuthorized(engine common.Engine, cmd common.Command, author *model
 
 func (DispatchUserCommand) Handle(ctx context.Context, c *Context) (bool, error) {
 	text := strings.TrimSpace(c.Message.Text)
-	if !strings.HasPrefix(text, c.Engine.GetPrefix()) {
+	prefix := common.MatchCommandPrefix(text, common.CommandPrefixes(c.Engine))
+	if prefix == "" {
 		return false, nil
 	}
-	fields := strings.Fields(strings.TrimPrefix(text, c.Engine.GetPrefix()))
+	fields := strings.Fields(strings.TrimPrefix(text, prefix))
 	if len(fields) == 0 {
 		return false, nil
 	}

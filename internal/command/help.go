@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
 
@@ -17,7 +18,7 @@ func (c *helpCommand) Execute(ctx context.Context) (model.Status, error) {
 		return model.FAILED, err
 	}
 	payload := strings.Join([]string{
-		fmtHelp(helpHeader, c.engine.GetPrefix()),
+		fmtHelp(helpHeader, strings.Join(common.CommandPrefixes(c.engine), " ")),
 		alignHelp(adminCommands),
 		"         \n Moderator commands:\n",
 		alignHelp(moderatorCommands),
@@ -70,12 +71,12 @@ func alignHelp(output string) string {
 	return b.String()
 }
 
-const helpHeader = "All commands can be used through '/whisper'\nPrefix: %s \nCommands:\n"
+const helpHeader = "All commands can be used through '/whisper'\nPrefixes: %s \nCommands:\n"
 
 const adminCommands = " grant,access <trip> <role> - grants a role to a trip\n" +
 	" sql <SQL>    - runs SQL against the bot database\n" +
 	" mem,memory,memstats - shows Go runtime memory values in MiB\n" +
-	" prefix <char>   - changes the live command prefix\n" +
+	" prefix [token ...]   - shows or replaces the live command prefixes\n" +
 	" replica,bot <channel> - starts a replica in a room\n" +
 	" replicaoff <channel> - stops a running replica\n" +
 	" replicastatus,status - shows host and replica status\n" +

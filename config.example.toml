@@ -9,8 +9,12 @@ dbPath = "database/zenbot.db"
 # Hack.Chat WebSocket endpoint used by the bot and its room connections.
 wsUrl = "wss://hack.chat/chat-ws"
 
-# Prefix users type before chat commands, for example *help.
+# Legacy single prefix; used only when cmdPrefixes is omitted.
 cmdPrefix = "*"
+
+# Accepted command prefixes, in priority order; first is used in help/autorun.
+# This list overrides cmdPrefix. Each entry must be nonempty without whitespace.
+cmdPrefixes = [".", "*"]
 
 # Initial room to join; choose a room you control for the first run.
 channel = "programming"

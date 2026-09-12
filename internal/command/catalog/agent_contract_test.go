@@ -10,6 +10,16 @@ import (
 	agentcontract "zenbot/internal/agent/tool/contract"
 )
 
+func TestPrefixContractSupportsMultipleTokensAndInspection(t *testing.T) {
+	entry, _ := AgentEntry("prefix")
+	for _, test := range []struct{ input, want string }{{`{"prefix":". *"}`, ". *"}, {`{}`, ""}, {`{"prefix":"$"}`, "$"}} {
+		tail, err := entry.Agent.Arguments.Encode(json.RawMessage(test.input))
+		if err != nil || tail != test.want {
+			t.Fatalf("%s: tail=%q err=%v", test.input, tail, err)
+		}
+	}
+}
+
 func TestAgentArgumentContractsEncodeTypedInvocations(t *testing.T) {
 	kick, ok := AgentEntry("kick")
 	if !ok {

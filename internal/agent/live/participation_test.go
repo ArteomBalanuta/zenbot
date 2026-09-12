@@ -15,6 +15,23 @@ import (
 
 type participationEngine struct{ common.Engine }
 
+type multiplePrefixParticipationEngine struct{ participationEngine }
+
+func (multiplePrefixParticipationEngine) GetPrefixes() []string { return []string{".", "*"} }
+
+func TestRoomParticipationSkipsEveryCommandPrefix(t *testing.T) {
+	p := RoomParticipation{Pipeline: &participation.Pipeline{}, Snapshot: func(*message.Context) participation.TrustedSnapshot {
+		t.Fatal("command reached semantic pipeline")
+		return participation.TrustedSnapshot{}
+	}, AmbientEnabled: true, AmbientEvery: 1}
+	for _, input := range []string{".help", "*help"} {
+		claimed, err := p.Handle(context.Background(), &message.Context{Engine: multiplePrefixParticipationEngine{}, Message: &model.ChatMessage{Name: "alice", Text: input}})
+		if claimed || err != nil {
+			t.Fatalf("command consumed: claimed=%v err=%v", claimed, err)
+		}
+	}
+}
+
 func (participationEngine) GetName() string   { return "bot" }
 func (participationEngine) GetPrefix() string { return "!" }
 

@@ -1,7 +1,7 @@
 # Commands
 
-Use the configured command prefix before a command or alias; examples below use
-`*`, the example configuration's default. Commands also accept whispers. `<value>` is required, `[value]` is optional,
+Use any configured command prefix before a command or alias; examples below use
+`*`. The example configuration accepts both `.` and `*`. Commands also accept whispers. `<value>` is required, `[value]` is optional,
 and names, trips, hashes, and room selectors are single tokens unless the command
 explicitly accepts text. Run `*help` for the in-chat reference.
 
@@ -165,11 +165,19 @@ unconfirmed. Bulk operations can partially succeed before a later error.
 
 ## Administration (`ADMIN`)
 
+`*prefix . *` replaces the active prefix list with `.` and `*`; `.prefix .`
+returns to a single prefix. `.prefix` shows the active list without changing it.
+The first prefix is used in help examples and autorun; overlapping prefixes match
+longest-first. Updates affect this host and its current managed replicas only,
+and remain in memory. Set `cmdPrefixes = [".", "*"]` in `config.toml` to apply the
+list after restart and to subsequently created replicas. Existing `cmdPrefix`
+configuration remains supported when `cmdPrefixes` is omitted.
+
 | Command and syntax | Other aliases | Behavior |
 |---|---|---|
 | `access <trip[,trip...]> <role>` | `grant` | Persist a role grant: `ADMIN`, `MODERATOR`, `TRUSTED`, `USER`, `REGULAR`, or `PEST`. |
 | `memory` | `mem`, `memstats` | Show Go runtime memory values in MiB. |
-| `prefix <token>` | — | Change the live command prefix. |
+| `prefix [token ...]` | — | Show active prefixes, or replace the complete live prefix list. |
 | `replica <room>` | `bot`, `agent` | Start a bot replica for a room. |
 | `replicaoff <room>` | `offline`, `botoff`, `agentoff` | Stop a running room replica. |
 | `replicastatus` | `status` | Show host and replica status. |

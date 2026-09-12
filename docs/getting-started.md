@@ -40,8 +40,9 @@ persists the database outside it. It uses `config.example.toml` if `config.toml`
 is absent, but its placeholder identities are not a usable production setup.
 Use `make stop` to stop the container without deleting its database.
 
-In the configured room, try `*help`, `*ping`, and `*weather Chisinau`. Replace `*`
-if you changed `cmdPrefix`. Help is sent privately. Server moderation rights
+In the configured room, try `*help`, `*ping`, and `*weather Chisinau`. The example
+accepts both `.` and `*`; adjust `cmdPrefixes` to choose your own list (or omit it
+to use legacy `cmdPrefix`). Help is sent privately. Server moderation rights
 must be granted separately from the bot's configured role lists.
 
 ## Local development

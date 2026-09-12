@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,7 +158,8 @@ type prefixReceiptEngine struct {
 	prefix string
 }
 
-func (e *prefixReceiptEngine) UpdatePrefix(next string) (string, error) {
+func (e *prefixReceiptEngine) UpdatePrefix(prefixes ...string) (string, error) {
+	next := strings.Join(prefixes, " ")
 	previous := e.prefix
 	e.prefix = next
 	return previous, nil

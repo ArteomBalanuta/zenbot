@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 	"zenbot/internal/common"
 	"zenbot/internal/listener/message"
@@ -61,7 +62,7 @@ func (u *UserChatListener) NotifyContext(parent context.Context, text string) {
 	finish := func(error) {}
 	if profiler != nil {
 		parent, finish = profiler.StartCommand(parent, profiling.Command{
-			Prefix:        u.engine.GetPrefix(),
+			Prefix:        common.MatchCommandPrefix(strings.TrimSpace(m.Text), common.CommandPrefixes(u.engine)),
 			Text:          m.Text,
 			Room:          u.engine.GetChannel(),
 			Nick:          m.Name,

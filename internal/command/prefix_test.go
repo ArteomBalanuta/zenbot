@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"zenbot/internal/model"
@@ -14,8 +15,10 @@ type prefixControllerStub struct {
 	err    error
 }
 
-func (s *prefixControllerStub) GetPrefix() string { return s.prefix }
-func (s *prefixControllerStub) UpdatePrefix(next string) (string, error) {
+func (s *prefixControllerStub) GetPrefix() string     { return s.prefix }
+func (s *prefixControllerStub) GetPrefixes() []string { return strings.Fields(s.prefix) }
+func (s *prefixControllerStub) UpdatePrefix(prefixes ...string) (string, error) {
+	next := strings.Join(prefixes, " ")
 	previous := s.prefix
 	s.calls = append(s.calls, next)
 	if s.err != nil {
@@ -25,13 +28,13 @@ func (s *prefixControllerStub) UpdatePrefix(next string) (string, error) {
 	return previous, nil
 }
 
-func TestPrefixCommandIsAdminConcreteAndPropagatesTrimmedFirstArgument(t *testing.T) {
+func TestPrefixCommandIsAdminConcreteAndReplacesAllPrefixes(t *testing.T) {
 	e := &prefixControllerStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}, prefix: "*"}
 	definition, ok := commandDefinitionFor("prefix")
 	if !ok {
 		t.Fatal("prefix definition missing")
 	}
-	command := definition.New(e, &model.ChatMessage{Text: "*prefix  $ ignored", Name: "admin", IsWhisper: true})
+	command := definition.New(e, &model.ChatMessage{Text: "*prefix  . * .", Name: "admin", IsWhisper: true})
 	if command.Role() != model.ADMIN || len(command.Aliases()) != 1 || command.Aliases()[0] != "prefix" {
 		t.Fatalf("role=%v aliases=%v", command.Role(), command.Aliases())
 	}
@@ -42,24 +45,24 @@ func TestPrefixCommandIsAdminConcreteAndPropagatesTrimmedFirstArgument(t *testin
 	if err != nil || status != model.SUCCESSFUL {
 		t.Fatalf("status=%v err=%v", status, err)
 	}
-	if len(e.calls) != 1 || e.calls[0] != "$" || e.prefix != "$" {
+	if len(e.calls) != 1 || e.calls[0] != ". *" || e.prefix != ". *" {
 		t.Fatalf("calls=%v prefix=%q", e.calls, e.prefix)
 	}
-	if len(e.chats) != 1 || e.chats[0] != "admin|prefix changed from * to $|true" {
+	if len(e.chats) != 1 || !strings.Contains(e.chats[0], ". *") || !strings.HasSuffix(e.chats[0], "|true") {
 		t.Fatalf("chats=%v", e.chats)
 	}
 }
 
-func TestPrefixCommandMissingOrBlankArgumentUsesCurrentPrefixExampleWithoutMutation(t *testing.T) {
+func TestPrefixCommandWithoutArgumentsShowsCurrentPrefixesWithoutMutation(t *testing.T) {
 	for _, text := range []string{"*prefix", "*prefix    "} {
 		t.Run(text, func(t *testing.T) {
 			e := &prefixControllerStub{commandEngineStub: &commandEngineStub{users: map[string]*model.User{}}, prefix: "*"}
 			definition, _ := commandDefinitionFor("prefix")
 			status, err := definition.New(e, &model.ChatMessage{Text: text, Name: "admin"}).Execute(context.Background())
-			if err != nil || status != model.FAILED || len(e.calls) != 0 || e.prefix != "*" {
+			if err != nil || status != model.SUCCESSFUL || len(e.calls) != 0 || e.prefix != "*" {
 				t.Fatalf("status=%v err=%v calls=%v prefix=%q", status, err, e.calls, e.prefix)
 			}
-			if len(e.chats) != 1 || e.chats[0] != "admin|Example: *prefix $|false" {
+			if len(e.chats) != 1 || !strings.Contains(e.chats[0], "Active prefixes: *") {
 				t.Fatalf("chats=%v", e.chats)
 			}
 		})

@@ -22,7 +22,8 @@ Empty environment strings replace string settings; empty or whitespace-only inte
 | `nick` (`name` takes precedence) | `alphaBot` | Bot nickname; no application-level default. |
 | `trip` (`password` takes precedence) | placeholder | Bot trip secret; falls back to `TOKEN` only when both file values are blank. |
 | `channel` | `programming` | Initial room. |
-| `cmdPrefix` | `*` | Prefix for regular chat commands. |
+| `cmdPrefix` | `*` | Legacy single command prefix; used when `cmdPrefixes` is omitted. |
+| `cmdPrefixes` | omitted | Accepted prefix list, e.g. `[".", "*"]`; overrides `cmdPrefix`. First entry is used for help examples and autorun. Empty lists/tokens, whitespace and control characters are rejected; duplicates are removed. |
 | `adminTrips` | placeholder | Configured administrator tripcodes. |
 | `userTrips` | empty | Configured trusted/user tripcodes used by authorization. |
 | `autoReconnect` | `true` | Enables recovery and health checks; omitted defaults to `false`. |

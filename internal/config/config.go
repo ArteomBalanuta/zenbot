@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"zenbot/internal/common"
 )
 
 type Config struct {
@@ -13,6 +14,7 @@ type Config struct {
 	WsUrl                             string          `toml:"wsUrl"`
 	Nick                              string          `toml:"nick"`
 	CmdPrefix                         string          `toml:"cmdPrefix"`
+	CmdPrefixes                       []string        `toml:"cmdPrefixes"`
 	Name                              string          `toml:"name"`
 	Password                          string          `toml:"password"`
 	BotTrip                           string          `toml:"trip"`
@@ -49,7 +51,26 @@ func (c *Config) UnmarshalTOML(value any) error {
 		return err
 	}
 	*c = Config(decoded)
+	if _, exists := root["cmdPrefixes"]; exists {
+		prefixes, err := common.NormalizePrefixes(c.CmdPrefixes)
+		if err != nil {
+			return fmt.Errorf("cmdPrefixes: %w", err)
+		}
+		c.CmdPrefixes = prefixes
+		c.CmdPrefix = prefixes[0]
+	}
 	return nil
+}
+
+// CommandPrefixes resolves the preferred list, falling back to legacy config.
+func (c *Config) CommandPrefixes() ([]string, error) {
+	if c.CmdPrefixes != nil {
+		return common.NormalizePrefixes(c.CmdPrefixes)
+	}
+	if c.CmdPrefix == "" {
+		return []string{"*"}, nil
+	}
+	return common.NormalizePrefixes([]string{c.CmdPrefix})
 }
 
 func normalizeListValue(value any) any {

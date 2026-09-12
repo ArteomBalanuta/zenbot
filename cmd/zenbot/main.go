@@ -257,7 +257,7 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 		}
 		return names
 	}
-	conversationContext.CommandPrefix = func() string { return resolveEngine().GetPrefix() }
+	conversationContext.CommandPrefixes = func() []string { return common.CommandPrefixes(resolveEngine()) }
 	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, ThinkingEnabled: resolved.ThinkingEnabled, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"zenbot/internal/agent/api"
+	"zenbot/internal/common"
 	"zenbot/internal/model"
 )
 
@@ -101,6 +102,7 @@ type Event struct {
 	Snapshot TrustedSnapshot
 	BotNick  string
 	Prefix   string
+	Prefixes []string
 	// AuthorIsBot is listener-resolved active-user metadata, not chat payload data.
 	AuthorIsBot         bool
 	AmbientEnabled      bool
@@ -146,7 +148,11 @@ func (p *Pipeline) handle(e Event, snapshotProvider func() TrustedSnapshot) Outc
 		p.Monitor(e)
 	}
 	text := strings.TrimSpace(e.Message.Text)
-	if text == "" || e.Message.Whisper || e.Message.IsWhisper || strings.EqualFold(e.Message.Name, e.BotNick) || e.AuthorIsBot || isConventionalBot(e.Message.Name) || (e.Prefix != "" && strings.HasPrefix(text, e.Prefix)) {
+	prefixes := e.Prefixes
+	if prefixes == nil {
+		prefixes = []string{e.Prefix}
+	}
+	if text == "" || e.Message.Whisper || e.Message.IsWhisper || strings.EqualFold(e.Message.Name, e.BotNick) || e.AuthorIsBot || isConventionalBot(e.Message.Name) || common.MatchCommandPrefix(text, prefixes) != "" {
 		return Outcome{Decision: Pass}
 	}
 	if snapshotProvider != nil {

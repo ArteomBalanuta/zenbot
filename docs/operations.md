@@ -36,6 +36,8 @@ before operating a nondefault deployment. See [configuration](configuration.md).
 
 Changes to an ignored configuration file take effect on process recreation.
 The `prefix` chat command is a live change, not a configuration-file editor.
+For example, `*prefix . *` enables both prefixes until restart; put
+`cmdPrefixes = [".", "*"]` in the config to retain that list across restarts.
 Host restart/shutdown chat commands submit lifecycle requests; their acknowledgments
 do not confirm a completed restart or shutdown.
 

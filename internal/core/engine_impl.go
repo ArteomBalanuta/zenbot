@@ -51,6 +51,7 @@ const (
 type EngineImpl struct {
 	Type     model.EngineType
 	Prefix   string
+	Prefixes []string
 	prefixMu sync.RWMutex
 	Channel  string
 	Name     string

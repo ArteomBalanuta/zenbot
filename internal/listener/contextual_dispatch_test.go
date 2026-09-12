@@ -48,7 +48,7 @@ func (e *contextualResultEngine) HostLifecycleController() common.HostLifecycleC
 	}
 	return e.lifecycleCommandEngine.HostLifecycleController()
 }
-func (*contextualResultEngine) UpdatePrefix(string) (string, error) { return "!", nil }
+func (*contextualResultEngine) UpdatePrefix(...string) (string, error) { return "!", nil }
 
 func newContextualResultEngine(t *testing.T) *contextualResultEngine {
 	t.Helper()
@@ -86,7 +86,7 @@ func TestContextualDispatchRegisteredAdapterReturnsFailureOnce(t *testing.T) {
 func TestContextualDispatchRegisteredAdapterRejectsFailedNilError(t *testing.T) {
 	for _, whisper := range []bool{false, true} {
 		e := newContextualResultEngine(t)
-		err := dispatchResultChain(context.Background(), e, "!prefix", whisper)
+		err := dispatchResultChain(context.Background(), e, "!prefix \x00", whisper)
 		var rejection *common.CommandRejectedError
 		if !errors.As(err, &rejection) || rejection.Status != model.FAILED || e.chats != 1 || len(e.audits) != 1 || e.audits[0].Status != "FAILED" {
 			t.Fatalf("rejection reported as success: whisper=%t err=%v sends=%d audit=%+v", whisper, err, e.chats, e.audits)

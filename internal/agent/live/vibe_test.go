@@ -64,7 +64,8 @@ func TestVibeContextFiltersBoundsAndNormalizes(t *testing.T) {
 	}}
 	p, _ := NewRepositoryConversationContextProvider(repo, 100)
 	p.BotNames = func() []string { return []string{"@BOT"} }
-	p.CommandPrefix = func() string { return "*" }
+	p.CommandPrefix = func() string { return "." }
+	p.CommandPrefixes = func() []string { return []string{".", "*"} }
 	got, err := p.Load(context.Background(), vibeInvocation())
 	if err != nil {
 		t.Fatal(err)
