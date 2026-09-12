@@ -24,7 +24,7 @@ func TestAgentCommandDefinitionsCoverCatalogWithoutRecursiveOrExcludedCommands(t
 		t.Fatal(err)
 	}
 	for _, definition := range all {
-		_, excluded := map[string]bool{"l": true, "mine": true, "whiskey": true, "ws": true, "wsa": true}[definition.Canonical]
+		_, excluded := map[string]bool{"l": true, "vibe": true, "mine": true, "whiskey": true, "ws": true, "wsa": true}[definition.Canonical]
 		if got[definition.Canonical] == excluded {
 			t.Fatalf("agent catalog inclusion for %q = %v, excluded=%v", definition.Canonical, got[definition.Canonical], excluded)
 		}

@@ -11,6 +11,7 @@ Direct `l` requests use [`DirectSubmissionAdapter`](../internal/agent/live/direc
 | Invocation | Reply policy | Admission and authority |
 | --- | --- | --- |
 | `DIRECT` | Required | Explicit command; creator-only admin/permanent-ban capabilities are possible here |
+| `VIBE` | Required | Explicit public `vibe` command; room-history analysis only, with no tools or older agent memory |
 | `MENTION` | Required | Exact public bot mention; capabilities derive from the trusted snapshot |
 | `AMBIENT` | Optional | Configured public sampling, with participation filtering and quiet policy |
 | `MODERATION` | Silent | Bot/system principal with moderation capability and a fixed reviewed target |
@@ -22,6 +23,38 @@ Whisper invocations expose no tools. Public participation ignores whispers; a pr
 [`runtime/runtime.go`](../internal/agent/runtime/runtime.go) bounds admission, applies a whole-request context, orders turns sharing a memory key, and coalesces ambient work. Locks and execution state are request resources rather than a permanent per-user worker.
 
 ## Model/tool protocol
+
+### Room vibe analysis
+
+`vibe` uses the same `DirectSubmissionAdapter`, API bridge, admission queue,
+request deadline and result sink as `l`, with an explicit `VIBE` mode. It is not
+an LLM-callable tool and cannot recursively start another agent turn. The runner
+skips the tool loop and agent-turn memory for this mode, uses the existing
+`RecentPublicRoomMessages` query, and calls the configured provider once. The
+assembler also removes tools for this mode; an unexpected provider tool call
+is rejected without execution. History-load failures are propagated instead of
+being interpreted as an empty room.
+
+The dedicated runtime prompt is `resources/agent/system/room-vibe.txt`. It asks
+the model to distinguish overall room dynamics from participant impressions,
+avoid strong conclusions from isolated messages, and acknowledge sparse/stale
+evidence. No sentiment or personality classification is implemented in code.
+Context projection keeps chronological message text, normalized display names,
+timestamps and ages, without trip/hash metadata. See [commands](commands.md)
+for sampling limits and bot/noise filtering. The existing token budget can
+further shorten the sample. Output keeps natural Markdown while retaining
+empty-response, protocol, length and required-reply guards. Vibe results are
+delivered normally but are not appended to agent-turn memory.
+
+```mermaid
+flowchart LR
+    V["Public vibe command"] --> A["Shared admission and deadline"]
+    A --> H["Bounded current-room public history"]
+    H --> P["Vibe prompt + chronological evidence"]
+    P --> M["Configured LLM; no tools"]
+    M --> F["Output guards"]
+    F --> D["Shared room delivery"]
+```
 
 ### Agent tool loop
 

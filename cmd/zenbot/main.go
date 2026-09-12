@@ -245,6 +245,19 @@ func newLiveAgent(c *config.Config, engine any, conversationRepository agentRepo
 	if err != nil {
 		return nil, fmt.Errorf("agent conversation context: %w", err)
 	}
+	conversationContext.BotNames = func() []string {
+		engine := resolveEngine()
+		names := []string{engine.GetName()}
+		if users := engine.GetActiveUsers(); users != nil {
+			for user := range *users {
+				if user != nil && user.IsBot {
+					names = append(names, user.Name)
+				}
+			}
+		}
+		return names
+	}
+	conversationContext.CommandPrefix = func() string { return resolveEngine().GetPrefix() }
 	client, err := openai.New(openai.Config{Endpoint: resolved.Endpoint, Token: resolved.APIKey, Model: resolved.Model, MaxTokens: resolved.MaxTokens, ThinkingEnabled: resolved.ThinkingEnabled, MaxRetries: resolved.MaxRetries, RetryDelay: time.Duration(resolved.RetryBackoffMillis) * time.Millisecond, Timeout: resolved.Timeout}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent provider: %w", err)

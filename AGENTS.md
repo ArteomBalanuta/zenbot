@@ -114,6 +114,9 @@ execution and feedback paths. Keep them aligned when changing these boundaries.
   authorization, budgets, receipts, and protocol checks remain required.
 - `OutputFinalizer` is a code-level output guard, not an LLM completion judge.
   The same model writes normal final answers and tool-free terminal synthesis.
+- `vibe` uses the same runtime with explicit `VIBE` mode: recent public-room
+  evidence only, a dedicated prompt, no tools and no historical agent memory.
+  Keep mood and participant interpretation model-driven.
 - Actions run synchronously and in order. Only compatible declared-safe reads
   may fan out. Preserve `ACTION_OUTCOME_UNKNOWN` and its non-retryable semantics;
   cancellation or a failed send is not proof that nothing happened.

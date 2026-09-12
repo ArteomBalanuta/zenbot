@@ -531,6 +531,8 @@ func newCommand(canonical string, aliases []string, role model.Role, e common.En
 		return &sayCommand{b}
 	case "afk":
 		return &afkCommand{b}
+	case "vibe":
+		return &vibeCommand{commandBase: b}
 	case "list":
 		return &listCommand{b}
 	case "info":

@@ -18,12 +18,13 @@ type InvocationMode = Mode
 
 const (
 	DIRECT     Mode = "DIRECT"
+	VIBE       Mode = "VIBE"
 	MENTION    Mode = "MENTION"
 	AMBIENT    Mode = "AMBIENT"
 	MODERATION Mode = "MODERATION"
 )
 
-func (m Mode) RequiresReply() bool { return m == DIRECT || m == MENTION }
+func (m Mode) RequiresReply() bool { return m == DIRECT || m == VIBE || m == MENTION }
 
 type Capability string
 
@@ -204,7 +205,7 @@ func validateInvocation(i Invocation) error {
 		return errors.New("prompt must not be blank")
 	}
 	switch i.mode {
-	case DIRECT, MENTION, AMBIENT, MODERATION:
+	case DIRECT, VIBE, MENTION, AMBIENT, MODERATION:
 	default:
 		return errors.New("invalid invocation mode")
 	}

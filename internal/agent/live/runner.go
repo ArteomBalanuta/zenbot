@@ -45,7 +45,10 @@ func (f OutputFinalizer) Finalize(inv runtime.Invocation, raw string) (string, b
 }
 
 func (f OutputFinalizer) FinalizeWithContext(inv runtime.Invocation, raw string, meta FinalizationContext) (string, bool, error) {
-	content := (responseSanitizer{}).sanitize(raw)
+	content := raw
+	if inv.Mode() != runtime.VIBE {
+		content = (responseSanitizer{}).sanitize(raw)
+	}
 	if stripJavaWhitespace(content) == "" {
 		return "", false, fmt.Errorf("agent returned an empty response")
 	}
@@ -145,6 +148,9 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 	if r.Finalizer == nil {
 		return runtime.Result{}, fmt.Errorf("agent finalizer is not initialized")
 	}
+	if inv.Mode() == runtime.VIBE && inv.Context().Whisper() {
+		return runtime.NewResult(inv.RequestID(), "Use vibe in the room so I can read its recent public conversation.", true), nil
+	}
 	memory, err := r.loadMemory(ctx, inv)
 	if err != nil {
 		observability.Error(ctx, "agent.context.load_failed", err, "context_source", "memory")
@@ -170,7 +176,7 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 	var evidence []turn.PersistableEvidence
 	suppressReply := false
 	var meta FinalizationContext
-	if r.ToolLoop != nil {
+	if r.ToolLoop != nil && inv.Mode() != runtime.VIBE {
 		var loopErr error
 		completion, loopErr = r.ToolLoop.CompleteWithEvidenceAndHistorical(ctx, inv, memory, recent, historical)
 		response, err, evidence, suppressReply = completion.Response, loopErr, completion.Evidence(), completion.SuppressReply
@@ -182,6 +188,9 @@ func (r Runner) Run(ctx context.Context, inv runtime.Invocation) (runtime.Result
 			return runtime.Result{}, fmt.Errorf("assemble agent request: %w", e)
 		}
 		response, err = r.Client.Complete(observability.WithStage(ctx, "llm.direct"), prepared.LlmRequest())
+		if err == nil && inv.Mode() == runtime.VIBE && len(response.ToolCalls()) != 0 {
+			err = fmt.Errorf("vibe analysis returned unexpected tool calls")
+		}
 	}
 	if err != nil {
 		return runtime.Result{}, r.incompleteTurn(ctx, inv, completion, fmt.Errorf("complete agent request: %w", err))
@@ -241,19 +250,19 @@ func (r Runner) incompleteTurn(ctx context.Context, inv runtime.Invocation, comp
 	return failure
 }
 func (r Runner) loadMemory(ctx context.Context, inv runtime.Invocation) ([]llm.LlmMessage, error) {
-	if r.Memory == nil {
+	if r.Memory == nil || inv.Mode() == runtime.VIBE {
 		return nil, nil
 	}
 	return r.Memory.LoadContext(ctx, apiContext(inv), inv.RequestID())
 }
 func (r Runner) loadHistoricalEvidence(ctx context.Context, inv runtime.Invocation) ([]turn.HistoricalEvidence, error) {
-	if r.Memory == nil || inv.Context().Whisper() {
+	if r.Memory == nil || inv.Context().Whisper() || inv.Mode() == runtime.VIBE {
 		return nil, nil
 	}
 	return r.Memory.LoadHistoricalEvidenceContext(ctx, apiContext(inv))
 }
 func (r Runner) AfterDelivery(ctx context.Context, inv runtime.Invocation, result runtime.Result) error {
-	if r.Memory == nil || (!result.ShouldReply() && !result.ToolDeliveryOwned()) {
+	if r.Memory == nil || inv.Mode() == runtime.VIBE || (!result.ShouldReply() && !result.ToolDeliveryOwned()) {
 		return nil
 	}
 	if err := r.Memory.AppendTurnContext(ctx, apiContext(inv), inv.Prompt(), result.Text(), result.DurableEvidence(), inv.RequestID()); err != nil {

@@ -30,6 +30,14 @@ type DirectSubmissionAdapter struct {
 }
 
 func (a DirectSubmissionAdapter) Submit(ctx context.Context, message *model.ChatMessage, prompt string) error {
+	return a.submit(ctx, message, prompt, api.DIRECT)
+}
+
+func (a DirectSubmissionAdapter) SubmitVibe(ctx context.Context, message *model.ChatMessage) error {
+	return a.submit(ctx, message, "Give a short vibe check of the recent room conversation and its active participants.", api.VIBE)
+}
+
+func (a DirectSubmissionAdapter) submit(ctx context.Context, message *model.ChatMessage, prompt string, mode api.InvocationMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -45,7 +53,7 @@ func (a DirectSubmissionAdapter) Submit(ctx context.Context, message *model.Chat
 		return fmt.Errorf("direct agent room is required")
 	}
 	snapshot.Users = append([]string(nil), snapshot.Users...)
-	invocation, err := a.Factory.Create(snapshot, *message, prompt, api.DIRECT, true)
+	invocation, err := a.Factory.Create(snapshot, *message, prompt, mode, true)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ type InvocationMode string
 
 const (
 	DIRECT     InvocationMode = "DIRECT"
+	VIBE       InvocationMode = "VIBE"
 	MENTION    InvocationMode = "MENTION"
 	AMBIENT    InvocationMode = "AMBIENT"
 	MODERATION InvocationMode = "MODERATION"
@@ -20,13 +21,13 @@ const (
 
 func (m InvocationMode) Valid() bool {
 	switch m {
-	case DIRECT, MENTION, AMBIENT, MODERATION:
+	case DIRECT, VIBE, MENTION, AMBIENT, MODERATION:
 		return true
 	default:
 		return false
 	}
 }
-func (m InvocationMode) RequiresReply() bool { return m == DIRECT || m == MENTION }
+func (m InvocationMode) RequiresReply() bool { return m == DIRECT || m == VIBE || m == MENTION }
 
 // Capability is an extensible capability name. Membership is exact set membership.
 type Capability string

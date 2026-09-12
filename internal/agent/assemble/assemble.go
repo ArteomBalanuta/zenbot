@@ -77,6 +77,9 @@ func (p *SystemPrompt) Render(inv runtime.Invocation, _ string, _ string, kind R
 	if p == nil || p.catalog == nil {
 		return "", errors.New("prompt catalog must not be nil")
 	}
+	if inv.Mode() == runtime.VIBE {
+		return p.catalog.Text("system/room-vibe.txt")
+	}
 	ctx := inv.Context()
 	caller := map[string]any{
 		"nick":              ctx.Nick(),
@@ -530,6 +533,9 @@ func cloneValue(value any) any {
 }
 func filterTools(in []any, mode runtime.Mode, prompt string) []any {
 	out := []any{}
+	if mode == runtime.VIBE {
+		return out
+	}
 	for _, v := range in {
 		name := toolName(v)
 		if mode == runtime.MODERATION && !participation.IsSemanticModerationTool(name) {

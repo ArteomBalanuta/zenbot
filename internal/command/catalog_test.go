@@ -8,14 +8,14 @@ import (
 	"zenbot/internal/model"
 )
 
-func TestSaturnCatalogHas64ConcreteFactories(t *testing.T) {
+func TestSaturnCatalogHas65ConcreteFactories(t *testing.T) {
 	r := common.NewSaturnCommandRegistry()
 	if err := RegisterAll(r); err != nil {
 		t.Fatal(err)
 	}
 	defs := r.Definitions()
-	if len(defs) != 64 {
-		t.Fatalf("catalog size=%d, want 64", len(defs))
+	if len(defs) != 65 {
+		t.Fatalf("catalog size=%d, want 65", len(defs))
 	}
 	e := &commandEngineStub{users: map[string]*model.User{}}
 	for _, d := range defs {

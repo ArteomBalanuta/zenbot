@@ -42,6 +42,7 @@ Aliases below are alternatives to the canonical name in the first column.
 | `help` | `h` | Whisper the command reference. |
 | `crashcourse` | `howto`, `moderationcrashcourse`, `hcguide` | Show the moderation guide. |
 | `l <prompt>` | — | Ask the configured room agent. Never exposed back to the agent as a tool. |
+| `vibe` | — | Give a short LLM-written room vibe and participant impressions from recent public conversation. No arguments; public-room use only. Requires the agent to be enabled. |
 | `afk [reason]` | `a` | Mark yourself away. Your next public message clears AFK and privately returns the latest mention received while away, if any. |
 | `ape` | `harambe` | Print an ape. |
 | `coin` | `toss`, `ct` | Toss a coin. |
@@ -69,6 +70,22 @@ previous one. Nickname changes retain the reminder; a new AFK session clears it.
 Private messages are not captured. Return notifications are best-effort and
 attempted once, even if sending fails, so subsequent chat does not replay them.
 No database or disk storage is used for reminders; restarting the bot loses them.
+
+`vibe` reuses the existing public-room history query and the configured LLM
+runtime. It considers up to the latest 60 records (or the smaller configured
+`agent.contextMessageLimit`), preserving chronological order and message age.
+Known bot messages (the bot itself and active users marked as bots), blank/nameless records and command-prefixed chatter are
+excluded; the model is instructed to ignore other apparent automated noise.
+History does not reliably identify every third-party bot, so this is not a
+guarantee that all automated messages can be filtered out.
+Each message is capped at 1,000 Unicode characters and marked when shortened;
+the newest sample is capped at 16,000 message characters before the existing
+context-token budget is applied. A busy room's sample can therefore be partial.
+No separate message tracker, sentiment scoring, personality categories or
+historical agent memory is used. The model decides whether the sample supports
+a meaningful summary, and should acknowledge sparse or stale discussion.
+History failures are errors, not empty-history evidence. No tools are available
+during this analysis, and `vibe` itself is not exposed as a recursive agent tool.
 
 History and registration are different from presence: `lastonline`, `nicks`, and
 `users` do not prove who is online now. In agent requests, `room_users` supplies

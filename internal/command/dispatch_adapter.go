@@ -132,6 +132,7 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgent
 		canonicals = append(canonicals, "dbzregister", "dbzstats", "dbzstr", "dfight", "dspawn")
 	}
 	registered := make(map[string]struct{}, len(canonicals))
+	canonicals = append(canonicals, "vibe")
 	for _, canonical := range canonicals {
 		if !configuredCommandAvailable(e, canonical, manualInvocation) {
 			continue
@@ -143,6 +144,12 @@ func RegisterUserUtilitiesWithDirectAgent(e common.Engine, submitter DirectAgent
 		def, ok := commandDefinitionFor(canonical)
 		if !ok {
 			return fmt.Errorf("missing Saturn utility definition %q", canonical)
+		}
+		if canonical == "vibe" {
+			vibeSubmitter, _ := submitter.(VibeSubmitter)
+			def.New = func(engine common.Engine, message *model.ChatMessage) common.SaturnCommand {
+				return &vibeCommand{commandBase: commandBase{engine: engine, message: message, role: def.Role, aliases: def.Aliases, canonical: def.Canonical}, submitter: vibeSubmitter}
+			}
 		}
 		if err := e.RegisterCommand(&legacyAdapter{engine: e, def: def}); err != nil {
 			return fmt.Errorf("register Saturn command %q: %w", canonical, err)

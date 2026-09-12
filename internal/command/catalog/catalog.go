@@ -91,6 +91,7 @@ var entries = []Entry{
 	entry("weather", []string{"weather", "w", "today"}, model.REGULAR, agentTool("Current weather", "Fetch and display current weather for a location.", "lookup", AgentPublic, positionalArguments(requiredString("location", "City or location.")), []string{"location weather"}, "Use when current weather is requested for a location.", "Do not answer live weather from memory or historical messages.", "Show weather in Chisinau", `{"location":"Chisinau"}`, runCommandCompatible)),
 	entry("wsa", []string{"wsa", "wsayanon", "anonsay"}, model.USER, hiddenAgentTool("Anonymous support relay is not exposed to the agent.")),
 	entry("ws", []string{"ws", "wsay"}, model.USER, hiddenAgentTool("Support relay is not exposed to the agent.")),
+	entry("vibe", []string{"vibe"}, model.REGULAR, hiddenAgentTool("Room vibe is a direct, tool-free LLM analysis, not a recursive agent tool.")),
 }
 
 func Entries() []Entry {

@@ -174,7 +174,7 @@ func TestAgentCatalogHasCompleteSingleSourceContracts(t *testing.T) {
 	if actionable != 59 {
 		t.Fatalf("actionable command count = %d, want 59", actionable)
 	}
-	if want := []string{"l", "mine", "whiskey", "ws", "wsa"}; !reflect.DeepEqual(hidden, want) {
+	if want := []string{"l", "mine", "vibe", "whiskey", "ws", "wsa"}; !reflect.DeepEqual(hidden, want) {
 		t.Fatalf("hidden commands = %v, want %v", hidden, want)
 	}
 }

@@ -107,6 +107,7 @@ const moderatorCommands = " activity <trip>   - shows recent activity pa
 	" flair <name> <flair> - applies a flair to an online user\n"
 
 const userCommands = " help,h       - shows this help output\n" +
+	" vibe - summarizes recent room conversation and participant vibes (public room only)\n" +
 	" afk [reason]   - marks you as AFK\n" +
 	" ape,harambe   - prints an ape\n" +
 	" howto,hcguide  - shows the moderation crash course\n" +
