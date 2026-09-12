@@ -253,6 +253,7 @@ func (c *listCommand) Execute(ctx context.Context) (model.Status, error) {
 		if err != nil {
 			return model.FAILED, err
 		}
+		completed := make(chan snapshot.OperationResult, 1)
 		if err := submitter.SubmitCredentialedRoomSnapshot(snapshot.RoomSnapshotRequest{
 			Context:       ctx,
 			WorkflowID:    workflowID,
@@ -262,10 +263,29 @@ func (c *listCommand) Execute(ctx context.Context) (model.Status, error) {
 			TargetChannel: channel,
 			ReplyMessage:  "Unable to list users in the requested room.",
 			Operation:     snapshot.NewListRoomOperation(),
+			OnComplete:    func(result snapshot.OperationResult) { completed <- result },
 		}); err != nil {
 			return model.FAILED, err
 		}
-		return model.SUCCESSFUL, nil
+		// Admission is not completion. Returning early lets the chat listener
+		// cancel ctx while the temporary session is still awaiting onlineSet.
+		// The agent gateway already owns this wait and must collect terminal
+		// delivery receipts even when its caller has been cancelled.
+		if _, agentOwned := c.engine.(*agentCaptureEngine); agentOwned {
+			return model.SUCCESSFUL, nil
+		}
+		select {
+		case result := <-completed:
+			if result.Error != nil {
+				return model.FAILED, result.Error
+			}
+			if result.Outcome != snapshot.OutcomeSuccess {
+				return model.FAILED, fmt.Errorf("remote room listing failed: %s", result.Outcome)
+			}
+			return model.SUCCESSFUL, nil
+		case <-ctx.Done():
+			return model.FAILED, ctx.Err()
+		}
 	}
 	if err := replyContext(ctx, &c.commandBase, formatSaturnUsers(*c.engine.GetActiveUsers())); err != nil {
 		return model.FAILED, err

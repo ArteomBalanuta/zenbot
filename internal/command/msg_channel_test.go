@@ -24,6 +24,9 @@ func (e *remoteMsgChannelEngine) SubmitRoomSnapshot(request snapshot.RoomSnapsho
 
 func (e *remoteMsgChannelEngine) SubmitCredentialedRoomSnapshot(request snapshot.RoomSnapshotRequest) error {
 	e.requests = append(e.requests, request)
+	if e.err == nil && request.OnComplete != nil {
+		request.OnComplete(snapshot.Success())
+	}
 	return e.err
 }
 

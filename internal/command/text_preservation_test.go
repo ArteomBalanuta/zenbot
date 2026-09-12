@@ -33,6 +33,9 @@ func (e *textDispatchEngine) IsUserAuthorized(_ *model.User, role *model.Role) b
 }
 func (e *textDispatchEngine) SubmitCredentialedRoomSnapshot(req snapshot.RoomSnapshotRequest) error {
 	e.requests = append(e.requests, req)
+	if req.OnComplete != nil {
+		req.OnComplete(snapshot.Success())
+	}
 	return nil
 }
 

@@ -95,6 +95,10 @@ from the same deduplicated snapshot as the displayed list. An empty snapshot has
 an empty user list and count zero. In manual chat, `list <current-room>` is also
 supported. Bare `list` displays the local roster and a usage example but returns
 an unsuccessful command status; supply the room for a normal invocation.
+Manual remote `list` waits for the terminal snapshot outcome before returning,
+so the incoming chat context stays alive through roster retrieval and delivery.
+Cancellation still stops the operation. Agent invocations retain their existing
+gateway-owned completion and receipt handling.
 
 Last-seen and mail timestamps use a single compact representation: `now`,
 `5m ago`, or `3h ago` for events less than a day old; otherwise a UTC date such
